@@ -1,0 +1,69 @@
+#cloud-config
+# =============================================================================
+# Ubuntu Server 24.04 LTS autoinstall — packer-ubuntu-24-04-base
+#
+# This file is fetched by subiquity on first boot of the live ISO via the
+# kernel cmdline 'ds=nocloud-net;s=http://<packer-http>/'. It drives an
+# unattended install. Hardening + software install happens in the shell
+# provisioners after autoinstall — keep this file boring.
+# =============================================================================
+autoinstall:
+  version: 1
+
+  # Don't burn 5+ minutes downloading a fresher subiquity before installing.
+  refresh-installer:
+    update: false
+
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+
+  # Use stock archive mirror; roles can override later.
+  apt:
+    geoip: true
+    preserve_sources_list: false
+    primary:
+      - arches: [amd64]
+        uri: http://archive.ubuntu.com/ubuntu
+
+  ssh:
+    install-server: true
+    allow-pw: true
+
+  # Minimal package set. The provisioners install the rest. NOTHING role-
+  # specific belongs here.
+  packages:
+    - openssh-server
+    - qemu-guest-agent
+    - cloud-init
+    - sudo
+    - curl
+    - ca-certificates
+
+  # Single disk, ext4, no LVM. Matches the design doc rationale: keeps the
+  # image simple to clone for the offline-root role and easy to grow at
+  # clone time.
+  storage:
+    layout:
+      name: direct
+
+  # Build user. Password hash MUST match var.build_password in HCL
+  # (default plaintext: 'packer-build-only'). Regenerate with:
+  #   python3 -c "import crypt; print(crypt.crypt('NEWPASS', crypt.mksalt(crypt.METHOD_SHA512)))"
+  identity:
+    realname: "Packer Build"
+    username: packer
+    hostname: ubuntu-24-04-base
+    password: "$6$7Vsze83plLs56vXc$Y54sTTR6VlyAwIBeC531n25wOQwyIUIP8EiZO9GL0LXI6c7zn79BmE4jirkAX5RyfkhkiQgNrNHd8YI14IRp.1"
+
+  user-data:
+    disable_root: true
+    timezone: Etc/UTC
+
+  # Run as the last installer steps, before reboot. /target is the chroot
+  # of the about-to-boot system.
+  late-commands:
+    # Passwordless sudo for the build user — Packer provisioners need this.
+    # Removed in 99-cleanup.sh together with the user account.
+    - echo 'packer ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/99-packer-build
+    - chmod 0440 /target/etc/sudoers.d/99-packer-build

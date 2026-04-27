@@ -1,0 +1,11 @@
+# Local credentials — never commit
+.env
+
+# Packer plugin cache + crash logs
+.packer.d/
+crash.log
+packer_cache/
+
+# Editor cruft
+*.swp
+.DS_Store
