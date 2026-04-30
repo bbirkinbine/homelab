@@ -54,13 +54,13 @@ variable "vm_cores" {
 variable "vm_memory" {
   type        = number
   description = "MB of RAM during build. Roles override at clone time."
-  default     = 8192
+  default     = 4096
 }
 
 variable "vm_disk_size" {
   type        = string
-  description = "Boot disk size, e.g. '60G'. Roles can grow this at clone time."
-  default     = "60G"
+  description = "Boot disk size, e.g. '20G'. Floor for clones — they can grow but not shrink. Roles needing more set this in their own .env."
+  default     = "20G"
 }
 
 variable "vm_storage_pool" {

@@ -81,9 +81,14 @@ source "proxmox-iso" "ubuntu-24-04-base" {
   http_directory = "http"
 
   boot_wait = "5s"
+  // console=ttyS0,115200 routes the live-server installer's kernel + subiquity
+  // output to the serial port, which `vga = serial0` above wires to Proxmox's
+  // xterm.js console. Build-only — does not propagate to the installed system
+  // (curtin writes a fresh /etc/default/grub for the target). For clone-time
+  // serial console, see provision/12-serial-console.sh.
   boot_command = [
     "c<wait>",
-    "linux /casper/vmlinuz --- autoinstall ds=\"nocloud-net;s=http://{{.HTTPIP}}:{{.HTTPPort}}/\"<enter><wait>",
+    "linux /casper/vmlinuz --- autoinstall console=ttyS0,115200 ds=\"nocloud-net;s=http://{{.HTTPIP}}:{{.HTTPPort}}/\"<enter><wait>",
     "initrd /casper/initrd<enter><wait>",
     "boot<enter>"
   ]
@@ -121,6 +126,7 @@ build {
     scripts = [
       "provision/00-wait-for-cloud-init.sh",
       "provision/10-base-packages.sh",
+      "provision/12-serial-console.sh",
       "provision/15-ubuntu-cleanup.sh",
       "provision/20-harden.sh",
       "provision/30-cloud-init-config.sh",

@@ -31,10 +31,13 @@ Proxmox template at VM ID `9100` named `ubuntu-24-04-base`.
 
 ## What you need before you start
 
-- **Proxmox VE 8.x** running on the target node (NUC12 or NUC13).
+- **Proxmox VE 8.x or 9.x** running on the target node (NUC12 or NUC13).
 - **API token** for a user with role permissions to create VMs, attach ISOs,
   and convert VMs to templates. Recommended: a dedicated `packer@pve!builder`
-  token, separate from the Terraform token. See `.env.example`.
+  token, separate from the Terraform token. The full setup runbook (user,
+  role, ACL, token) lives in
+  [../../docs/proxmox-permissions.md](../../docs/proxmox-permissions.md) —
+  run it once on every Proxmox node before pointing Packer at it.
 - **Ubuntu 24.04.x live-server ISO** uploaded to the node's ISO storage pool,
   OR a reachable URL Proxmox can download. The variable `iso_file` controls
   which (default expects an already-uploaded ISO at
@@ -60,23 +63,81 @@ Proxmox template at VM ID `9100` named `ubuntu-24-04-base`.
 In the Proxmox UI on the target node, you should see VM `9100`:
 
 - Marked as a Template
-- No CD-ROM attached
-- A `cloud-init` drive on `ide2`
+- 2 cores, 4096 MB RAM, 20 GB disk
+- No CD-ROM (live-server ISO unmounted)
+- A `cloud-init` drive on the next free IDE slot (typically `ide0` or `ide2`,
+  depending on what was free)
 - Disk on the configured storage pool, default `local-lvm`
 - Serial console + VGA serial output enabled
+- `packer-cleanup.service` enabled but not yet run — fires on first boot of a clone
 
-Verify by cloning it and booting:
+### Template-side verification (no clone needed)
+
+From your workstation:
+
+```bash
+source .env.<node>
+AUTH="Authorization: PVEAPIToken=${PROXMOX_TOKEN_ID}=${PROXMOX_TOKEN_SECRET}"
+
+# Confirm template flag + key config
+curl -sk -H "$AUTH" "${PROXMOX_URL}/nodes/${PROXMOX_NODE}/qemu/9100/config" \
+  | python3 -m json.tool | grep -E 'template|cores|memory|scsi0|ide[0-9]|vga'
+```
+
+Expect `"template": 1`, `cores: 2`, `memory: "4096"`, scsi0 with `size=20G`,
+an `ideN` line containing `vm-9100-cloudinit`, `vga: "type=serial0,memory=16"`.
+
+On the Proxmox host, confirm the disk is properly compacted:
+
+```bash
+ssh root@<node> 'lvs -a -o lv_name,size,data_percent,origin,pool_lv | grep 9100'
+```
+
+Reference output from a clean build (2026-04-30):
+
+```text
+  base-9100-disk-0    20.00g               data
+  vm-9100-cloudinit    4.00m 9.38          data
+```
+
+`data_percent` on `base-*-disk-0` displays blank — that's expected for a
+template's read-only origin volume; the percentage column doesn't track for
+thin-snapshot origins. To inspect actual allocation, look at the pool itself
+(`lvs <pool> --units g`) or the build log line `==> trim free space ...`
+which prints how many GiB were trimmed (clean build trimmed 13.4 GiB, so
+real allocation on the pool is ~3-4 GB out of the 20 GB virtual size).
+
+### Clone-side verification
+
+The build defers the `packer` user deletion to a one-shot systemd unit that
+runs on first boot of any clone (see [provision/99-cleanup.sh](provision/99-cleanup.sh)
+and the design note inline). Validate by cloning:
 
 ```bash
 # On the Proxmox host
-qm clone 9100 999 --name ubuntu-test --full
-qm set 999 --ipconfig0 ip=dhcp --sshkeys ~/.ssh/authorized_keys
-qm start 999
+qm clone 9100 9101 --name test-clone --full
+qm set 9101 --ipconfig0 ip=dhcp --sshkeys ~/.ssh/authorized_keys
+qm start 9101
 
-# Wait ~30s, find the IP, then:
-ssh brian@<vm-ip>
+# Wait ~30s for first boot to settle, then run via guest agent
+qm guest exec 9101 -- /usr/bin/getent passwd packer
+#   exitcode=2, no stdout — packer user gone
 
-# Inside the VM:
+qm guest exec 9101 -- /usr/bin/systemctl is-enabled packer-cleanup.service
+#   exitcode=1, stdout="disabled" — unit ran and self-disabled
+
+qm guest exec 9101 -- /bin/ls /etc/systemd/system/packer-cleanup.service
+#   exitcode=2 — unit file removed by self-destruct
+
+qm guest exec 9101 -- /bin/ls /usr/local/sbin/packer-cleanup.sh
+#   exitcode=2 — script removed by self-destruct
+```
+
+Once your SSH key is injected (via `--sshkeys`), the rest of the
+inside-VM checks:
+
+```bash
+ssh <youruser>@<vm-ip>
 ss -tlnp                                # only sshd listening
 ufw status                              # active, allow 22
 systemctl is-enabled apt-daily.timer    # masked
@@ -85,7 +146,8 @@ snap list 2>&1                          # 'command not found' or 'No snaps'
 pro config show apt_news                # false
 
 # Tear down the test
-qm stop 999 && qm destroy 999
+exit
+qm stop 9101 && qm destroy 9101
 ```
 
 ## Trust-anchor reminder
