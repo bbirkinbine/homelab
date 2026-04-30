@@ -1,23 +1,37 @@
 #!/usr/bin/env bash
 # build.sh — convenience wrapper around `packer validate` + `packer build`.
 #
-# Loads .env (gitignored), exports PKR_VAR_* for every PROXMOX_* / VM_* /
-# ISO_* / BUILD_* variable found, then runs the build. Fails loudly if .env
-# is missing or required values aren't set.
+# Usage: ./build.sh <node>
+#   e.g. ./build.sh pve12
+#
+# Loads .env.<node> (gitignored), exports PKR_VAR_* for every PROXMOX_* /
+# VM_* / ISO_* / BUILD_* variable found, then runs the build. Fails loudly
+# if the env file is missing or required values aren't set.
 
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# ---- load .env -------------------------------------------------------------
-if [[ ! -f .env ]]; then
-  echo "ERROR: .env not found. Copy .env.example to .env and fill it in." >&2
+if [[ $# -lt 1 ]]; then
+  echo "Usage: $0 <node>" >&2
+  echo "Example: $0 pve12" >&2
+  echo "" >&2
+  echo "Available env files:" >&2
+  ls .env.* 2>/dev/null | grep -v '\.example$' | sed 's/^/  /' >&2 || echo "  (none found)" >&2
+  exit 1
+fi
+
+NODE="$1"
+ENV_FILE=".env.${NODE}"
+
+if [[ ! -f "${ENV_FILE}" ]]; then
+  echo "ERROR: ${ENV_FILE} not found. Copy .env.example to ${ENV_FILE} and fill it in." >&2
   exit 1
 fi
 
 set -o allexport
 # shellcheck disable=SC1091
-source .env
+source "${ENV_FILE}"
 set +o allexport
 
 require() {

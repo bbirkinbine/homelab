@@ -15,15 +15,15 @@ are what they are.
 # 1. Install packer (macOS)
 brew install packer
 
-# 2. Configure local credentials (one-time)
-cp .env.example .env
-$EDITOR .env             # fill in PROXMOX_URL, PROXMOX_TOKEN_*, NODE, etc.
+# 2. Configure local credentials (one per Proxmox node)
+cp .env.example .env.pve12   # repeat for each node, e.g. .env.pve13
+$EDITOR .env.pve12           # fill in PROXMOX_URL, PROXMOX_TOKEN_*, NODE, etc.
 
 # 3. Initialize the Proxmox plugin (one-time)
 packer init .
 
-# 4. Build
-./build.sh
+# 4. Build (pass the node name)
+./build.sh pve12             # or: ./build.sh pve13
 ```
 
 The build takes ~20-30 minutes on an NUC12. When it's done you have a
@@ -52,8 +52,8 @@ Proxmox template at VM ID `9100` named `ubuntu-24-04-base`.
 - `http/user-data` — Ubuntu autoinstall (subiquity) config
 - `http/meta-data` — minimal cloud-init meta-data
 - `provision/*.sh` — shell provisioner scripts run in numbered order
-- `build.sh` — convenience wrapper (sources `.env`, runs `packer validate` + `packer build`)
-- `.env.example` — template for local credentials (do NOT commit a filled-in `.env`)
+- `build.sh` — convenience wrapper (sources `.env.<node>`, runs `packer validate` + `packer build`)
+- `.env.example` — template for local credentials (do NOT commit a filled-in `.env.<node>`)
 
 ## After a successful build
 
@@ -98,12 +98,13 @@ doc's "Trust-anchor implications" section.
 
 ## Updating the Ubuntu point release
 
-1. Bump `iso_file` (and `iso_checksum` if using `iso_url`) in `.env` to the
-   newer point release (24.04.2, .3, etc.).
+1. Bump `iso_file` (and `iso_checksum` if using `iso_url`) in each
+   `.env.<node>` to the newer point release (24.04.2, .3, etc.).
 2. Verify the SHA256 against
    <https://releases.ubuntu.com/24.04/SHA256SUMS>.
-3. Re-run `./build.sh`. Packer creates a fresh template; if the VM ID is
-   unchanged you'll need to delete the old template first.
+3. Re-run `./build.sh <node>` for each Proxmox host. Packer creates a fresh
+   template; if the VM ID is unchanged you'll need to delete the old
+   template first.
 
 ## Changing the build user / password
 
@@ -115,8 +116,8 @@ python3 -c "import crypt; print(crypt.crypt('NEWPASS', crypt.mksalt(crypt.METHOD
 ```
 
 Replace the `password:` field in `http/user-data`, then update
-`BUILD_PASSWORD` in `.env` to the matching plaintext (Packer uses the
-plaintext for SSH).
+`BUILD_PASSWORD` in each `.env.<node>` to the matching plaintext (Packer
+uses the plaintext for SSH).
 
 ## Troubleshooting
 

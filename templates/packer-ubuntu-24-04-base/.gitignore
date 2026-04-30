@@ -1,5 +1,7 @@
 # Local credentials — never commit
 .env
+.env.*
+!.env.example
 
 # Packer plugin cache + crash logs
 .packer.d/
