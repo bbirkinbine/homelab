@@ -2,8 +2,8 @@
 # 10-base-packages.sh
 #
 # Install everything that belongs in the universal base image.
-# NOTHING role-specific here. SoftHSM, OpenBao, YubiHSM SDK, k3s, docker —
-# those layer on per-role.
+# NOTHING role-specific here. k3s, container runtimes, databases,
+# application stacks — those layer on per-role.
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive

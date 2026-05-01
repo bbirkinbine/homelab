@@ -2,10 +2,10 @@
 # 15-ubuntu-cleanup.sh
 #
 # Ubuntu-specific noise removal. Subiquity ships an image with snap, Ubuntu
-# Pro nag in apt, and a few cron-y things we don't want phoning home. The
-# offline Root CA VM clones from this image — every "checks for updates"
-# timer is a potential exfil channel during the brief windows the offline
-# VM is powered on.
+# Pro nag in apt, and a few cron-y things we don't want phoning home. Some
+# VMs cloned from this image run in network-restricted environments — every
+# "checks for updates" timer is a potential exfil channel during the brief
+# windows those VMs are powered on.
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive

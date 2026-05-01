@@ -2,7 +2,7 @@
 
 This document records how to provision the `packer@pve` user, the `Packer`
 role, and the API token that [the Ubuntu base template
-build](../templates/packer-ubuntu-24-04-base/) uses to talk to a Proxmox
+build](../packer/ubuntu-24-04-base/) uses to talk to a Proxmox
 host.
 
 The hosts are independent (not clustered), so **run this on every Proxmox
@@ -40,7 +40,7 @@ will not show it again.
 From your workstation:
 
 ```bash
-cd templates/packer-ubuntu-24-04-base
+cd packer/ubuntu-24-04-base
 source .env.<node>
 curl -k -H "Authorization: PVEAPIToken=${PROXMOX_TOKEN_ID}=${PROXMOX_TOKEN_SECRET}" \
   "${PROXMOX_URL}/version"
