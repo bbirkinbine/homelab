@@ -1,0 +1,54 @@
+#cloud-config
+#
+# AMP game-server VM — first-boot configuration.
+# Placeholders (%%VAR%%) are substituted by ../deploy.sh before upload.
+
+hostname: "%%HOSTNAME%%"
+
+users:
+  - name: "%%ADMIN_USERNAME%%"
+    groups: [sudo]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - "%%SSH_PUBLIC_KEY%%"
+
+# Re-enable unattended-upgrades (base template ships with the timer masked
+# so locked-down roles can stay frozen). Default config patches security
+# updates only and does NOT auto-reboot, so it stays unobtrusive between
+# game sessions.
+write_files:
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+
+runcmd:
+  # SSH (22/tcp) is already open from the base template's ufw config.
+  - ufw allow 8080/tcp comment "AMP web UI"
+  - ufw allow 25565/tcp comment "Minecraft Java"
+  - ufw allow 25565/udp comment "Minecraft Bedrock / query"
+  - ufw reload
+  - systemctl unmask apt-daily.timer apt-daily-upgrade.timer
+  - systemctl enable --now apt-daily.timer apt-daily-upgrade.timer
+
+final_message: |
+  ============================================================
+  Base layer ready. AMP not yet installed — finish manually:
+
+    1. ssh %%ADMIN_USERNAME%%@<this VM's IP>
+    2. sudo su -
+    3. bash <(curl -fsSL https://getamp.sh)
+    4. Installer prompts:
+         - AMP dashboard username + password: choose your own
+         - "Run Docker?": n   (vanilla MC; flip to y only if you add
+                               Steam-based games like ARK/Rust later)
+         - "Configure HTTPS?": n   (LAN-only; not exposed to internet)
+    5. Open http://<this VM's IP>:<port shown by installer>
+       (default web UI is 8080; installer prints the actual port)
+    6. Log in, paste your AMP license key, choose Standalone mode
+
+  Reference: https://github.com/hardwarehaven/Video-Notes/blob/main/AMP%20Server%20Guide%20Snippets.md
+  ============================================================
