@@ -2,7 +2,7 @@
 
 Packer template that builds a hardened Ubuntu Server 24.04 LTS (Noble) VM
 template on a Proxmox VE node. The output is the universal parent template
-for every homelab VM role (offline Root CA, OpenBao node, k3s nodes,
+for every homelab VM role (k3s nodes, application servers, databases,
 services).
 
 Companion design doc: `../../Packer Ubuntu-24.04 Base Image for Proxmox NUCs.md`
@@ -46,6 +46,19 @@ Proxmox template at VM ID `9100` named `ubuntu-24-04-base`.
   AND the SSH IP the VM gets during the build (from autoinstall, the VM uses
   DHCP on `vmbr0`). If the build VM ends up on a VLAN you can't route to,
   change the `vlan_tag` variable or use a build network.
+
+> **Note on TLS verification.** `proxmox_skip_tls_verify` defaults to `true`
+> and `.env.example` sets it accordingly. This is intentional for a homelab
+> running self-signed Proxmox certs. If you fork this for a deployment with
+> a real CA-signed certificate, set `PROXMOX_SKIP_TLS_VERIFY="false"` (or
+> remove the line) so the API connection is actually verified.
+>
+> Likewise, the build-time `packer` user password (`packer-build-only`) is
+> intentionally documented in this repo — Packer needs to SSH to its own
+> build VM. The user is wiped on the first boot of any clone via
+> `packer-cleanup.service`. Run the build on a network where the in-flight
+> build VM (briefly reachable on `vmbr0` with a known password and
+> passwordless sudo) is not exposed to untrusted clients.
 
 ## Files
 
@@ -150,13 +163,14 @@ exit
 qm stop 9101 && qm destroy 9101
 ```
 
-## Trust-anchor reminder
+## Network-quiet by design
 
-This image is the parent for the offline Root CA VM. **Do not** add anything
-that reaches out to the network on its own (auto-update timers, telemetry,
-package fetchers, snap refresh, motd-news, Ubuntu Pro apt_news). If you're
-tempted to add such a thing, layer it on per-role instead. See the design
-doc's "Trust-anchor implications" section.
+This image is intended as a base for VMs that may run in network-restricted
+or strictly controlled environments. **Do not** add anything to the base
+image that reaches out to the network on its own (auto-update timers,
+telemetry, package fetchers, snap refresh, motd-news, Ubuntu Pro apt_news).
+If you're tempted to add such a thing, layer it on per-role instead so that
+roles which need to stay quiet can.
 
 ## Updating the Ubuntu point release
 

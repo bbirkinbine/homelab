@@ -2,8 +2,8 @@
 # 30-cloud-init-config.sh
 #
 # Lock cloud-init's datasource search to what Proxmox actually provides.
-# Without this the offline Root CA VM clone will spend ~2 minutes on first
-# boot probing EC2 / OpenStack metadata endpoints that don't exist.
+# Without this the VM clone will spend ~2 minutes on first boot probing
+# EC2 / OpenStack metadata endpoints that don't exist.
 set -euo pipefail
 
 echo "==> restricting cloud-init datasources to NoCloud + ConfigDrive"

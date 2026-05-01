@@ -87,8 +87,9 @@ EOF
 # ----------------------------------------------------------------------------
 # unattended-upgrades — INSTALLED but DISABLED in the base image.
 #
-# The offline Root CA VM clones from this image and must NEVER auto-update.
-# Roles that should auto-update re-enable the timer.
+# Some VMs cloned from this image must never auto-update (locked-down or
+# network-restricted workloads). Roles that should auto-update re-enable
+# the timer.
 # ----------------------------------------------------------------------------
 echo "==> disabling unattended-upgrades timer (roles re-enable as appropriate)"
 systemctl disable --now apt-daily.timer apt-daily.service \
