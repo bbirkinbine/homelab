@@ -1,0 +1,126 @@
+#cloud-config
+#
+# llm VM — first-boot configuration.
+# Placeholders (%%VAR%%) are substituted by ../deploy.sh before upload.
+#
+# Sequence:
+#   1. Create admin user with injected SSH key.
+#   2. Open ufw ports for Ollama (11434) and Open WebUI (8080).
+#   3. Re-enable unattended-upgrades (template ships with timer masked).
+#   4. Install NVIDIA driver, Docker, NVIDIA container toolkit, Ollama.
+#   5. Configure Ollama to listen on the LAN.
+#   6. Reboot once everything is installed so the NVIDIA kernel module loads.
+
+hostname: "%%HOSTNAME%%"
+
+users:
+  - name: "%%ADMIN_USERNAME%%"
+    groups: [sudo, docker]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - "%%SSH_PUBLIC_KEY%%"
+
+write_files:
+  # Re-enable unattended-upgrades. Base template ships with the timer masked
+  # so locked-down roles can stay frozen; this role gets normal security patches.
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+
+  # Make Ollama listen on all interfaces (default is 127.0.0.1:11434, which
+  # blocks Open WebUI containers and any other LAN client).
+  - path: /etc/systemd/system/ollama.service.d/override.conf
+    content: |
+      [Service]
+      Environment="OLLAMA_HOST=0.0.0.0:11434"
+
+  # Idempotent provisioning script. Cloud-init's runcmd invokes this; you can
+  # also re-run it by hand (`sudo bash /usr/local/sbin/llm-provision.sh`) if
+  # something fails partway through — every step checks for prior state.
+  - path: /usr/local/sbin/llm-provision.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      exec > >(tee -a /var/log/llm-provision.log) 2>&1
+      echo "==> $(date -Is) llm-provision starting"
+
+      export DEBIAN_FRONTEND=noninteractive
+
+      # The base template's apt-daily timers are masked, but a clone may still
+      # hold the dpkg lock briefly during initial cloud-init. Wait it out.
+      for _ in $(seq 1 60); do
+        if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+          && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
+          break
+        fi
+        sleep 5
+      done
+
+      apt-get update -y
+      apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg pciutils build-essential dkms \
+        ubuntu-drivers-common "linux-headers-$(uname -r)" \
+        nvtop
+
+      echo "==> installing NVIDIA driver (auto-picked server branch)"
+      # ubuntu-drivers --gpgpu picks the current recommended server-branch
+      # driver (e.g. nvidia-driver-570-server). Server branches are LTS-
+      # cycle and recommended for compute workloads. Auto-pick avoids the
+      # "pinned driver rots as kernels update" failure mode.
+      ubuntu-drivers install --gpgpu
+
+      echo "==> installing Docker"
+      apt-get install -y --no-install-recommends \
+        docker.io docker-compose-v2
+
+      echo "==> installing NVIDIA Container Toolkit"
+      install -d -m 0755 /usr/share/keyrings
+      curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+        | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+      curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+        | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+        > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+      apt-get update -y
+      apt-get install -y --no-install-recommends nvidia-container-toolkit
+      nvidia-ctk runtime configure --runtime=docker
+      systemctl restart docker
+
+      echo "==> installing Ollama"
+      if ! command -v ollama >/dev/null 2>&1; then
+        curl -fsSL https://ollama.com/install.sh | sh
+      fi
+      # Enable but DON'T start Ollama yet — the NVIDIA kernel module isn't
+      # loaded until the post-cloud-init reboot. Ollama detects the GPU at
+      # startup, so we want its first start to happen with the driver live.
+      systemctl daemon-reload
+      systemctl enable ollama
+
+      echo "==> $(date -Is) llm-provision complete"
+
+runcmd:
+  - ufw allow 11434/tcp comment "Ollama API"
+  - ufw allow 8080/tcp comment "Open WebUI"
+  - ufw reload
+  - systemctl unmask apt-daily.timer apt-daily-upgrade.timer
+  - systemctl enable --now apt-daily.timer apt-daily-upgrade.timer
+  - /usr/local/sbin/llm-provision.sh
+
+# Reboot once cloud-init finishes so the freshly-installed NVIDIA kernel
+# module loads cleanly. Without this, `nvidia-smi` fails until first reboot.
+power_state:
+  mode: reboot
+  delay: now
+  message: "Rebooting after llm provisioning to load NVIDIA driver"
+  timeout: 60
+  condition: True
+
+# Intentionally no `final_message:` block. cloud-init's final_message
+# module runs on every boot, so anything set here gets re-printed to
+# the console on every reboot — useful exactly once, then noise.
+# Post-deploy steps + Open WebUI run command live in
+# vms/llm/README.md and deploy.sh's success output instead.

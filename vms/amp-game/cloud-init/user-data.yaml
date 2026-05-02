@@ -34,21 +34,8 @@ runcmd:
   - systemctl unmask apt-daily.timer apt-daily-upgrade.timer
   - systemctl enable --now apt-daily.timer apt-daily-upgrade.timer
 
-final_message: |
-  ============================================================
-  Base layer ready. AMP not yet installed — finish manually:
-
-    1. ssh %%ADMIN_USERNAME%%@<this VM's IP>
-    2. sudo su -
-    3. bash <(curl -fsSL https://getamp.sh)
-    4. Installer prompts:
-         - AMP dashboard username + password: choose your own
-         - "Run Docker?": n   (vanilla MC; flip to y only if you add
-                               Steam-based games like ARK/Rust later)
-         - "Configure HTTPS?": n   (LAN-only; not exposed to internet)
-    5. Open http://<this VM's IP>:<port shown by installer>
-       (default web UI is 8080; installer prints the actual port)
-    6. Log in, paste your AMP license key, choose Standalone mode
-
-  Reference: https://github.com/hardwarehaven/Video-Notes/blob/main/AMP%20Server%20Guide%20Snippets.md
-  ============================================================
+# Intentionally no `final_message:` block. cloud-init's final_message
+# module runs on every boot, so anything set here gets re-printed to
+# the console on every reboot — useful exactly once, then noise.
+# Post-deploy AMP installer steps live in vms/amp-game/README.md and
+# deploy.sh's success output instead.

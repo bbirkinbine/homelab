@@ -4,15 +4,32 @@ Infrastructure-as-code for a small Proxmox VE homelab. Builds reproducible,
 hardened Ubuntu Server 24.04 LTS VM templates that serve as the universal
 parent image for downstream VMs running across one or more Proxmox nodes.
 
+## Hardware
+
+| Node | Model | CPU | RAM | Notable peripherals |
+| --- | --- | --- | --- | --- |
+| `pve12` | Intel NUC | i7-1260P (12th gen, 4P+8E / 16T) | 64 GiB | Thunderbolt eGPU enclosure with NVIDIA RTX 3090 (24 GB VRAM) — see [docs/proxmox-gpu-passthrough.md](docs/proxmox-gpu-passthrough.md) |
+| `pve13` | Intel NUC 13 Pro | i7-1360P (13th gen, 4P+8E / 16T) | 64 GiB | — |
+
+Each node is independent (not clustered): per-node Proxmox user/token
+setup, per-node template builds. Tooling in this repo treats nodes as
+interchangeable apart from peripherals — the GPU-bearing roles obviously
+only deploy to nodes that have a GPU.
+
 ## Repository layout
 
 - `packer/ubuntu-24-04-base/` — Packer template that builds the
   Ubuntu 24.04 base image on a Proxmox node. See
   [its README](packer/ubuntu-24-04-base/README.md) for the full
   build runbook.
+- `vms/` — Per-role VM definitions cloned from the base template
+  (cloud-init + a `deploy.sh` per role).
 - `docs/proxmox-permissions.md` — Runbook for provisioning the dedicated
   Proxmox API user, role, and token used by Packer (least-privilege, per
   node).
+- `docs/proxmox-gpu-passthrough.md` — Host-side runbook for binding an
+  NVIDIA GPU (including Thunderbolt eGPUs) to `vfio-pci` so a VM can
+  take it over. Prerequisite for [`vms/llm/`](vms/llm/).
 
 ## What's in the base image
 
