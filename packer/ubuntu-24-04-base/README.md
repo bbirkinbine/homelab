@@ -5,10 +5,6 @@ template on a Proxmox VE node. The output is the universal parent template
 for every homelab VM role (k3s nodes, application servers, databases,
 services).
 
-Companion design doc: `../../Packer Ubuntu-24.04 Base Image for Proxmox NUCs.md`
-in the Obsidian vault. Read that first — it explains *why* the choices below
-are what they are.
-
 ## Quick start
 
 ```bash
