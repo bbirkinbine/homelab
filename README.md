@@ -1,20 +1,30 @@
 # homelab
 
 Infrastructure-as-code for a small Proxmox VE homelab. Builds reproducible,
-hardened Ubuntu Server 24.04 LTS VM templates that serve as the universal
-parent image for downstream VMs running across one or more Proxmox nodes.
+hardened VM templates (Ubuntu Server 24.04 LTS, Windows 11 Pro x64) that
+serve as the universal parent images for downstream VMs running across one
+or more Proxmox nodes.
 
 ## Hardware
 
+### Proxmox nodes
+
 | Node | Model | CPU | RAM | Notable peripherals |
 | --- | --- | --- | --- | --- |
-| `pve12` | Intel NUC | i7-1260P (12th gen, 4P+8E / 16T) | 64 GiB | Thunderbolt eGPU enclosure with NVIDIA RTX 3090 (24 GB VRAM) — see [docs/proxmox-gpu-passthrough.md](docs/proxmox-gpu-passthrough.md) |
-| `pve13` | Intel NUC 13 Pro | i7-1360P (13th gen, 4P+8E / 16T) | 64 GiB | — |
+| `pve12t` | Intel NUC 12 Tall | i7-1260P (12th gen, 4P+8E / 16T) | 64 GiB | Thunderbolt eGPU enclosure with NVIDIA RTX 3090 (24 GB VRAM) — see [docs/proxmox-gpu-passthrough.md](docs/proxmox-gpu-passthrough.md) |
+| `pve13m` | Intel NUC 13 Pro Mini | i7-1360P (13th gen, 4P+8E / 16T) | 64 GiB | — |
+| `pve13t` | ASUS NUC 13 Pro Tall | i7-13620H (13th gen, 6P+4E / 16T) | 64 GiB | — |
 
 Each node is independent (not clustered): per-node Proxmox user/token
 setup, per-node template builds. Tooling in this repo treats nodes as
 interchangeable apart from peripherals — the GPU-bearing roles obviously
 only deploy to nodes that have a GPU.
+
+### Build hosts (non-Proxmox)
+
+| Host | Role |
+| --- | --- |
+| `t480` | ThinkPad T480 running Ubuntu — local KVM/libvirt build host for the Windows 11 `qemu` Packer target (see [packer/windows-11-base/README.md](packer/windows-11-base/README.md)). Produces a standalone QCOW2 for libvirt or for scp'ing to UTM on macOS. Not a Proxmox node. |
 
 ## Repository layout
 
@@ -22,6 +32,10 @@ only deploy to nodes that have a GPU.
   Ubuntu 24.04 base image on a Proxmox node. See
   [its README](packer/ubuntu-24-04-base/README.md) for the full
   build runbook.
+- `packer/windows-11-base/` — Packer template that builds a hardened
+  Windows 11 Pro x64 image. Two targets: `proxmox-iso` (template VM
+  9101 on a Proxmox node) and `qemu` (standalone QCOW2 on the T480).
+  See [its README](packer/windows-11-base/README.md).
 - `vms/` — Per-role VM definitions cloned from the base template
   (cloud-init + a `deploy.sh` per role).
 - `docs/proxmox-permissions.md` — Runbook for provisioning the dedicated
@@ -31,7 +45,7 @@ only deploy to nodes that have a GPU.
   NVIDIA GPU (including Thunderbolt eGPUs) to `vfio-pci` so a VM can
   take it over. Prerequisite for [`vms/llm/`](vms/llm/).
 
-## What's in the base image
+## What's in the Ubuntu base image
 
 The Packer build produces a Proxmox template (default VM ID `9100`, name
 `ubuntu-24-04-base`) with:
@@ -51,12 +65,32 @@ Per-VM software (k3s, container runtimes, databases, application stacks,
 etc.) is layered on top per role — the base image stays generic and
 minimal so any downstream VM can clone from it.
 
+## What's in the Windows base image
+
+The Packer build produces either a Proxmox template (default VM ID `9101`,
+name `windows-11-base`) or a standalone QCOW2 (`output-qemu/windows-11-base.qcow2`),
+depending on the selected target. Both share the same provisioner pipeline
+and end at the same sysprep'd state:
+
+- Windows 11 Pro x64 install via Autounattend.xml (UEFI + TPM 2.0).
+- VirtIO drivers + QEMU guest agent installed during build.
+- Hardening: Windows Firewall on (default-deny inbound, RDP/SSH/WinRM/ICMP
+  allowed), telemetry minimum, Cortana off, OneDrive removed, LLMNR off,
+  SMBv1 disabled, basic audit policy enabled.
+- cloudbase-init pre-installed for clone-time configuration (hostname,
+  network, admin password, SSH keys), reading Proxmox's cloud-init drive
+  or a libvirt NoCloud seed ISO.
+- Sysprep'd and shut down — boots into OOBE-mini → cloudbase-init on the
+  first boot of every clone.
+
 ## Getting started
 
 1. Set up the Proxmox API user/token on each node — see
    [docs/proxmox-permissions.md](docs/proxmox-permissions.md).
-2. Build the template — see
+2. Build the Ubuntu base template — see
    [packer/ubuntu-24-04-base/README.md](packer/ubuntu-24-04-base/README.md).
+3. (Optional) Build the Windows base template — see
+   [packer/windows-11-base/README.md](packer/windows-11-base/README.md).
 
 ## Acknowledgements
 

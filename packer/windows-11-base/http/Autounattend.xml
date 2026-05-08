@@ -1,0 +1,335 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Autounattend.xml — Windows 11 Pro x64 unattended install for Packer.
+
+  Used by both the proxmox-iso and qemu sources. Served by Packer's HTTP
+  server out of http/ during the build. The Windows installer auto-detects
+  this file when it's present on attached media or via the unattend= boot
+  argument.
+
+  IMPORTANT: the AdministratorPassword <Value> must match var.build_password
+  in variables.pkr.hcl. If you change one, change the other.
+
+  References:
+    Microsoft answer file reference: https://learn.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/
+    Packer Windows examples:        https://github.com/StefanScherer/packer-windows
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+
+  <!-- =========================================================================
+       windowsPE pass: storage / partitioning, image selection
+       ========================================================================= -->
+  <settings pass="windowsPE">
+
+    <!-- Inject virtio drivers into WinPE before Setup queries storage. Win11
+         24H2's WinPE bundle ships storahci/e1000 but NOT vioscsi/viostor/
+         netkvm/vioserial. The qemu source uses virtio-scsi for the boot disk
+         and virtio-net for the NIC, neither visible until these drivers
+         load. This component runs at the WinPE PnP customization phase —
+         strictly earlier than Microsoft-Windows-Setup\DriverPaths, which
+         24H2 silently ignores (verified 2026-05-07). The path uses the
+         drive letter Setup assigns to virtio-win.iso when that's the
+         second cdrom attached: A: = floppy with this Autounattend, D: =
+         Win11 install ISO, E: = virtio-win.iso. The proxmox-iso source
+         attaches virtio-win.iso the same way, so the same E:\ paths
+         apply there as well; on the proxmox-iso path these drivers are
+         pre-staged in the WinPE store but not actually used by the
+         install (proxmox-iso boots off SATA), and clones can switch to
+         virtio-scsi later because the suite is registered.
+         Pattern from public eb4x/packer-qemu-win11. -->
+    <component name="Microsoft-Windows-PnpCustomizationsWinPE" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <DriverPaths>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="vioscsi">
+          <Path>E:\vioscsi\w11\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="viostor">
+          <Path>E:\viostor\w11\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="NetKVM">
+          <Path>E:\NetKVM\w11\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="vioserial">
+          <Path>E:\vioserial\w11\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="vioinput">
+          <Path>E:\vioinput\w11\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="Balloon">
+          <Path>E:\Balloon\w11\amd64</Path>
+        </PathAndCredentials>
+        <PathAndCredentials wcm:action="add" wcm:keyValue="qemupciserial">
+          <Path>E:\qemupciserial\w11\amd64</Path>
+        </PathAndCredentials>
+      </DriverPaths>
+    </component>
+
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <SetupUILanguage>
+        <UILanguage>en-US</UILanguage>
+      </SetupUILanguage>
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+
+    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+
+      <!-- Driver paths live on Microsoft-Windows-PnpCustomizationsWinPE
+           (above), not here. Win11 24H2's setup host silently ignores
+           Microsoft-Windows-Setup\DriverPaths even when the INFs are at
+           the listed paths (verified 2026-05-07: drvload from cmd worked
+           but Setup's own injection never fired). PnpCustomizationsWinPE
+           runs strictly earlier and is honoured. -->
+
+
+
+      <DiskConfiguration>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <!-- EFI System Partition -->
+            <CreatePartition wcm:action="add">
+              <Order>1</Order>
+              <Type>EFI</Type>
+              <Size>260</Size>
+            </CreatePartition>
+            <!-- Microsoft Reserved Partition -->
+            <CreatePartition wcm:action="add">
+              <Order>2</Order>
+              <Type>MSR</Type>
+              <Size>16</Size>
+            </CreatePartition>
+            <!-- Primary partition uses remaining space -->
+            <CreatePartition wcm:action="add">
+              <Order>3</Order>
+              <Type>Primary</Type>
+              <Extend>true</Extend>
+            </CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add">
+              <Order>1</Order>
+              <PartitionID>1</PartitionID>
+              <Format>FAT32</Format>
+              <Label>System</Label>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>2</Order>
+              <PartitionID>2</PartitionID>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>3</Order>
+              <PartitionID>3</PartitionID>
+              <Format>NTFS</Format>
+              <Label>Windows</Label>
+              <Letter>C</Letter>
+            </ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+        <WillShowUI>OnError</WillShowUI>
+      </DiskConfiguration>
+
+      <ImageInstall>
+        <OSImage>
+          <InstallTo>
+            <DiskID>0</DiskID>
+            <PartitionID>3</PartitionID>
+          </InstallTo>
+          <InstallToAvailablePartition>false</InstallToAvailablePartition>
+          <!-- Pick Windows 11 Pro from the multi-edition install.wim -->
+          <InstallFrom>
+            <MetaData wcm:action="add">
+              <Key>/IMAGE/NAME</Key>
+              <Value>Windows 11 Pro</Value>
+            </MetaData>
+          </InstallFrom>
+        </OSImage>
+      </ImageInstall>
+
+      <UserData>
+        <ProductKey>
+          <!-- Generic Windows 11 Pro KMS install key — does NOT activate Windows;
+               just satisfies the installer. Real activation happens later (or not, for lab). -->
+          <Key>W269N-WFGWX-YVC9B-4J6C9-T83GX</Key>
+          <WillShowUI>OnError</WillShowUI>
+        </ProductKey>
+        <AcceptEula>true</AcceptEula>
+        <FullName>Packer Build</FullName>
+        <Organization>Homelab</Organization>
+      </UserData>
+
+      <!-- Bypass Win11 hardware checks for headless homelab use.
+           Comment these out if your build host meets all official Win11 requirements. -->
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>reg add HKLM\System\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Path>reg add HKLM\System\Setup\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Path>reg add HKLM\System\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Path>reg add HKLM\System\Setup\LabConfig /v BypassCPUCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+
+    </component>
+  </settings>
+
+  <!-- =========================================================================
+       specialize pass: machine identity, computer name, etc.
+       ========================================================================= -->
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <ComputerName>WIN11-PACKER</ComputerName>
+      <TimeZone>UTC</TimeZone>
+      <RegisteredOrganization>Homelab</RegisteredOrganization>
+      <RegisteredOwner>Packer Build</RegisteredOwner>
+    </component>
+
+    <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+  </settings>
+
+  <!-- =========================================================================
+       oobeSystem pass: account creation, OOBE skip, WinRM enable
+       ========================================================================= -->
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <NetworkLocation>Work</NetworkLocation>
+        <ProtectYourPC>3</ProtectYourPC>
+        <SkipUserOOBE>true</SkipUserOOBE>
+        <SkipMachineOOBE>true</SkipMachineOOBE>
+      </OOBE>
+
+      <UserAccounts>
+        <AdministratorPassword>
+          <!-- MUST match var.build_password in variables.pkr.hcl -->
+          <Value>packer-build-only-Win11!</Value>
+          <PlainText>true</PlainText>
+        </AdministratorPassword>
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>Administrator</Name>
+            <Group>Administrators</Group>
+            <Password>
+              <Value>packer-build-only-Win11!</Value>
+              <PlainText>true</PlainText>
+            </Password>
+            <Description>Local admin used by Packer build pipeline. Wiped by sysprep.</Description>
+            <DisplayName>Administrator</DisplayName>
+          </LocalAccount>
+        </LocalAccounts>
+      </UserAccounts>
+
+      <AutoLogon>
+        <Username>Administrator</Username>
+        <Password>
+          <Value>packer-build-only-Win11!</Value>
+          <PlainText>true</PlainText>
+        </Password>
+        <Enabled>true</Enabled>
+        <LogonCount>5</LogonCount>
+      </AutoLogon>
+
+      <!-- Enable WinRM and the QEMU guest agent so Packer can (a) discover
+           the VM's IP via the agent and (b) connect via WinRM. This is the
+           most fragile single command set in the file — if any step fails
+           silently, Packer never connects and the build times out. The
+           order is load-bearing:
+
+             1. Wait for the NIC to attach and complete DHCP. We have
+                e1000e (Win11 has the built-in Intel driver), so the NIC
+                comes up within a few seconds of first logon, but
+                Get-NetConnectionProfile may briefly return nothing.
+             2. Force the network category to Private. AllowUnencrypted
+                refuses to apply on Public profile (verified 2026-05-07,
+                error 0x80338169) regardless of any firewall rule, even
+                with <NetworkLocation>Work</NetworkLocation> set in OOBE.
+             3. Install virtio-win-guest-tools.exe — the full virtio
+                driver suite + qemu-ga. This is *not* "just" the qemu-ga
+                MSI from /guest-agent/: that MSI installs the agent
+                service, but the agent talks to the host via a
+                virtio-serial port that requires vioser.sys (the virtio
+                serial driver), which Win11 24H2 doesn't ship. Without
+                vioser, qemu-ga is "running" inside the guest but the
+                host sees "agent not responding" and Packer can never
+                discover the VM's IP. The full installer adds vioser
+                (and viostor, vioscsi, NetKVM, Balloon, viorng) too —
+                useful regardless because clones can later switch to
+                virtio-scsi/virtio-net hardware and boot fine. The loop
+                scans drive letters because WinPE letter assignment is
+                non-deterministic.
+             4. Enable WinRM and configure listener (Basic + AllowUnencrypted,
+                now permitted because we are Private).
+             5. Open firewall port 5985 on all profiles.
+             6. Disable wuauserv so Windows Update doesn't try to download
+                during the build window. -->
+      <FirstLogonCommands>
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Description>Wait for network and force profile to Private</Description>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "for ($i=0; $i -lt 60; $i++) { $p = Get-NetConnectionProfile -ErrorAction SilentlyContinue; if ($p) { break }; Start-Sleep 2 }; Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private"</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Description>Install virtio-win driver suite (incl. vioser + qemu-ga) from virtio-win CD</Description>
+          <CommandLine>cmd.exe /c "for %d in (D E F G H I) do @if exist %d:\virtio-win-guest-tools.exe %d:\virtio-win-guest-tools.exe /install /passive /norestart"</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Description>Enable WinRM service</Description>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Service -Name WinRM -StartupType Automatic; Start-Service WinRM"</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Description>Configure WinRM listener and auth</Description>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "winrm quickconfig -quiet; winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'; winrm set winrm/config/service/auth '@{Basic=\"true\"}'"</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>5</Order>
+          <Description>Open firewall for WinRM</Description>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "New-NetFirewallRule -Name 'WinRM HTTP-In' -DisplayName 'WinRM HTTP-In' -Profile Any -LocalPort 5985 -Protocol TCP -Action Allow"</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>6</Order>
+          <Description>Disable Windows Update during build window</Description>
+          <CommandLine>powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Set-Service -Name wuauserv -StartupType Disabled; Stop-Service wuauserv -Force"</CommandLine>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+    </component>
+  </settings>
+
+</unattend>

@@ -20,7 +20,7 @@ pveum user add packer@pve --comment "Packer build user"
 # 2. Create the least-privilege role for VM-template builds.
 #    SDN.Use and VM.GuestAgent.Audit are required on PVE 9+
 #    (NIC attach + guest-agent IP discovery).
-pveum role add Packer -privs "VM.Allocate VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.Audit VM.PowerMgmt VM.GuestAgent.Audit Datastore.AllocateSpace Datastore.Audit Sys.Audit SDN.Use"
+pveum role add Packer -privs "VM.Allocate VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.Console VM.Audit VM.PowerMgmt VM.GuestAgent.Audit Datastore.Allocate Datastore.AllocateSpace Datastore.AllocateTemplate Datastore.Audit Sys.Audit SDN.Use"
 
 # 3. Grant the role at the datacenter root.
 #    Tighten later by scoping to /vms, /storage/<pool>, /sdn/zones/localnetwork.
@@ -68,7 +68,9 @@ secret is wrong; a `403` means the role is missing a privilege (see the
 | `VM.Audit` | Read VM state to wait for it to come up. |
 | `VM.PowerMgmt` | Start, stop, reset the build VM. |
 | `VM.GuestAgent.Audit` | **PVE 9+ only.** Read guest-agent network info — Packer uses this to discover the VM's IP for SSH (`qemu_agent = true` in the build). |
+| `Datastore.Allocate` | Delete templates/ISOs from a datastore. The Windows base build (`packer/windows-11-base/`) needs this because the proxmox-iso plugin's post-build cleanup deletes the auto-built unattend ISO it uploaded earlier. Without this, the build itself succeeds (template is created) but errors on cleanup with `403 Permission check failed (/storage/<pool>, Datastore.Allocate)`, leaving an orphan ISO behind. |
 | `Datastore.AllocateSpace` | Write the disk and (if used) the downloaded ISO. |
+| `Datastore.AllocateTemplate` | Upload templates and ISOs via the API. The Windows base build (`packer/windows-11-base/`) needs this because the proxmox-iso plugin auto-builds a small Autounattend.xml CD and uploads it via `POST /storage/<pool>/upload` — the only API path gated by this privilege. The Ubuntu base did not need it (it consumes only pre-uploaded ISOs). |
 | `Datastore.Audit` | Read storage capacity / list ISOs. |
 | `Sys.Audit` | Read node info (`/nodes/<node>/status`). |
 | `SDN.Use` | **PVE 9+ only.** Required to attach to any bridge — even plain Linux bridges live under the implicit `localnetwork` SDN zone now. |

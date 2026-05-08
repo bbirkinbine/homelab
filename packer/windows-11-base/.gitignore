@@ -1,0 +1,20 @@
+# Local credentials — never commit
+.env
+.env.*
+!.env.*.example
+
+# Packer plugin cache + crash logs
+.packer.d/
+crash.log
+packer_cache/
+
+# virtualbox builder output (.vmdk/.ovf/.nvram artifacts + post-build qcow2)
+output-vbox/
+
+# Stray VirtualBox VM logs that the GUI sometimes drops in the working dir
+2026-*-VirtualBoxVM-*.log
+[0-9]*-VirtualBoxVM-*.log
+
+# Editor cruft
+*.swp
+.DS_Store
