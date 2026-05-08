@@ -24,7 +24,7 @@ only deploy to nodes that have a GPU.
 
 | Host | Role |
 | --- | --- |
-| `t480` | ThinkPad T480 running Ubuntu — local KVM/libvirt build host for the Windows 11 `qemu` Packer target (see [packer/windows-11-base/README.md](packer/windows-11-base/README.md)). Produces a standalone QCOW2 for libvirt or for scp'ing to UTM on macOS. Not a Proxmox node. |
+| `t480` | ThinkPad T480 running Ubuntu — local VirtualBox build host for the Windows 11 `virtualbox-iso` Packer target (see [packer/windows-11-base/README.md](packer/windows-11-base/README.md)). Produces a VMDK that converts to qcow2 for libvirt / virt-manager. Not a Proxmox node. |
 
 ## Repository layout
 
@@ -34,7 +34,8 @@ only deploy to nodes that have a GPU.
   build runbook.
 - `packer/windows-11-base/` — Packer template that builds a hardened
   Windows 11 Pro x64 image. Two targets: `proxmox-iso` (template VM
-  9101 on a Proxmox node) and `qemu` (standalone QCOW2 on the T480).
+  9101 on a Proxmox node) and `virtualbox-iso` (local VBox build on the
+  T480; outputs VMDK that converts to qcow2 for virt-manager / libvirt).
   See [its README](packer/windows-11-base/README.md).
 - `vms/` — Per-role VM definitions cloned from the base template
   (cloud-init + a `deploy.sh` per role).
@@ -68,9 +69,10 @@ minimal so any downstream VM can clone from it.
 ## What's in the Windows base image
 
 The Packer build produces either a Proxmox template (default VM ID `9101`,
-name `windows-11-base`) or a standalone QCOW2 (`output-qemu/windows-11-base.qcow2`),
-depending on the selected target. Both share the same provisioner pipeline
-and end at the same sysprep'd state:
+name `windows-11-base`) or a VirtualBox VMDK + OVF + NVRAM under
+`output-vbox/` that converts to qcow2 via `qemu-img convert`, depending on
+the selected target. Both share the same provisioner pipeline and end at
+the same sysprep'd state:
 
 - Windows 11 Pro x64 install via Autounattend.xml (UEFI + TPM 2.0).
 - VirtIO drivers + QEMU guest agent installed during build.

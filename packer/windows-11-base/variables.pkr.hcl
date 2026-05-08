@@ -98,7 +98,7 @@ EOT
 
 variable "iso_url" {
   type        = string
-  description = "URL to the Windows 11 multi-edition x64 ISO. Used by the qemu source. Get from microsoft.com/software-download/windows11."
+  description = "URL (file:// or https://) to the Windows 11 multi-edition x64 ISO. Used by the virtualbox-iso source. Get from microsoft.com/software-download/windows11."
   default     = ""
 }
 
@@ -116,7 +116,7 @@ variable "virtio_iso_file" {
 
 variable "virtio_iso_path" {
   type        = string
-  description = "Local filesystem path to virtio-win.iso. Used by the qemu source."
+  description = "Local filesystem path to virtio-win.iso on the build host. Used by the virtualbox-iso source (mounted as a second CDROM so the post-install provisioner can run virtio-win-guest-tools.exe)."
   default     = "~/iso/virtio-win.iso"
 }
 

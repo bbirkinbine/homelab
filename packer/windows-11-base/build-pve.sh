@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build-pve.sh — wrapper around `packer init/validate/build` for the
-# windows-11-base proxmox-iso source. Sister script to build-qemu.sh
-# (qemu/T480 builds); they share the .pkr.hcl + Autounattend.xml +
+# windows-11-base proxmox-iso source. Sister script to build-vbox.sh
+# (VirtualBox-on-Linux builds); they share the .pkr.hcl + Autounattend.xml +
 # provisioner pipeline but have separate operational paths.
 #
 # Usage:
@@ -27,7 +27,7 @@ if [[ $# -lt 1 ]]; then
   echo "Usage: $0 <node>" >&2
   echo "" >&2
   echo "Available .env.<node> files:" >&2
-  ls .env.* 2>/dev/null | grep -vE '\.example$|\.qemu\.example$' | sed 's/^/  /' >&2 || \
+  ls .env.* 2>/dev/null | grep -vE '\.example$' | sed 's/^/  /' >&2 || \
     echo "  (none found — copy .env.pve.example to .env.<node>)" >&2
   echo "" >&2
   echo "Examples:" >&2
@@ -53,7 +53,7 @@ require() {
   local name="$1"
   if [[ -z "${!name:-}" ]]; then
     echo "ERROR: required env var ${name} is not set in ${ENV_FILE}" >&2
-    echo "       (did you point this script at a qemu env? use ./build-qemu.sh instead.)" >&2
+    echo "       (did you point this script at a vbox env? use ./build-vbox.sh instead.)" >&2
     exit 1
   fi
 }

@@ -30,16 +30,16 @@ A few states that won't be obvious from the code alone:
 
 This is the most surprising operational detail in the repo and worth internalizing.
 
-`packer/windows-11-base/` defines two source blocks (`proxmox-iso` and `qemu`) sharing one provisioner pipeline. They run from **different machines**:
+`packer/windows-11-base/` defines two source blocks (`proxmox-iso` and `virtualbox-iso`) sharing one provisioner pipeline. They run from **different machines**:
 
-- **`proxmox-iso` runs from the Mac (M2 Max MacBook Pro).** The build host only orchestrates the Proxmox API; the Windows install runs on the NUC itself. No KVM, swtpm, or QEMU needed locally. macOS is fine.
-- **`qemu` runs from the T480 Ubuntu boot.** The qemu source executes the install on the build host and produces a local QCOW2. This needs KVM acceleration. Apple Silicon HVF only accelerates ARM64 guests, so x86-64 Windows on the M2 falls back to pure software emulation (hours, not minutes) — not a viable build path.
+- **`proxmox-iso` runs from the Mac (M2 Max MacBook Pro).** The build host only orchestrates the Proxmox API; the Windows install runs on the NUC itself. No local hypervisor needed. macOS is fine.
+- **`virtualbox-iso` runs from the T480 Ubuntu boot.** VirtualBox 7.0+ executes the install on the build host and produces a VMDK + OVF + NVRAM under `output-vbox/`, which converts to qcow2 via `qemu-img convert -f vmdk -O qcow2`. This builder needs Linux + VirtualBox kernel modules; macOS is rejected up front by `build-vbox.sh`. (The earlier qemu second-target was abandoned 2026-05-08: qemu+OVMF on this T480 couldn't reliably hit Microsoft bootmgr's "Press any key to boot from CD or DVD…" prompt via VNC keystroke delivery; switching to VBox sidesteps that boot path entirely.)
 
 What this means for suggestions:
 
-- A single invocation runs ONE source (proxmox-iso OR qemu). `build.sh` only accepts those two values for `BUILDER`; there's deliberately no "build both at once" mode. The two targets have different host requirements (qemu needs Linux + KVM + swtpm; proxmox-iso just needs network reach to a Proxmox node) and produce different artifacts. If a future world wants `both`, reintroduce it deliberately rather than preserving a vestigial escape hatch.
-- Don't recommend running the qemu target from the Mac, even with `tcg` fallback. Many-hour emulated builds aren't useful — `build.sh` rejects `BUILDER="qemu"` on a non-Linux host with a clear error rather than letting it fall through to TCG.
-- The `.env.<target>` files live on the host that builds that target. `.env.pve12` / `.env.pve13` go on the Mac; `.env.t480` goes on the T480. All are gitignored (`.env.*` glob, with `!.env.example` exception).
+- A single invocation runs ONE source. There are two separate wrapper scripts: `build-pve.sh` for proxmox-iso and `build-vbox.sh` for virtualbox-iso. They are sibling scripts, not a single dispatcher with branching — the host-environment requirements diverge sharply (Proxmox API access vs. local VBox >= 7.0).
+- Don't recommend merging the two wrappers into one `build.sh` with a BUILDER variable. The earlier prototype that did this was ~50% branching code; splitting the wrappers eliminated the branching and let each script validate its own preconditions cleanly up front.
+- The `.env.<target>` files live on the host that builds that target. `.env.pve12` / `.env.pve13` go on the Mac (copied from `.env.pve.example`); `.env.t480-vbox` goes on the T480 (copied from `.env.vbox.example`). All `.env.*` are gitignored except the two `.example` files (`!.env.*.example` whitelist in `.gitignore`).
 
 The Ubuntu base has only a `proxmox-iso` source, so it builds from the Mac with no exception.
 

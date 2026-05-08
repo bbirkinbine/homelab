@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build-vbox.sh — wrapper around `packer init/validate/build` for the
 # windows-11-base virtualbox-iso source. Sister script to build-pve.sh
-# (proxmox-iso) and build-qemu.sh (qemu/T480 builds); they share the
+# (proxmox-iso); they share the
 # .pkr.hcl + Autounattend.xml + provisioner pipeline but have separate
 # operational paths.
 #
@@ -93,7 +93,7 @@ require() {
   local name="$1"
   if [[ -z "${!name:-}" ]]; then
     echo "ERROR: required env var ${name} is not set in ${ENV_FILE}" >&2
-    echo "       (did you point this script at a proxmox or qemu env? use the matching build-*.sh.)" >&2
+    echo "       (did you point this script at a proxmox env? use ./build-pve.sh instead.)" >&2
     exit 1
   fi
 }

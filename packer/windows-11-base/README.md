@@ -225,10 +225,9 @@ windows-11-base/
 │   ├── 30-install-cloudbase-init.ps1   # cloud-init for Windows
 │   └── 99-sysprep.ps1             # generalize, shutdown
 ├── build-pve.sh                   # proxmox-iso builder wrapper (Mac or any host with Proxmox API access)
-├── build-qemu.sh                  # qemu builder wrapper (Linux + KVM only)
-├── qemu-tpm-wrapper.sh            # invoked by build-qemu.sh; injects TPM/virtio CD/USB-kbd into qemu CLI
+├── build-vbox.sh                  # virtualbox-iso builder wrapper (Linux + VirtualBox 7.0+ only)
 ├── .env.pve.example               # template for .env.<node> (proxmox builds)
-└── .env.qemu.example              # template for .env.<host> (qemu builds)
+└── .env.vbox.example              # template for .env.<host> (VirtualBox builds)
 ```
 
 ---
@@ -248,12 +247,13 @@ After `./build-pve.sh pve12`:
    ```
 5. Destroy the test clone.
 
-After `./build-qemu.sh t480`:
+After `./build-vbox.sh t480-vbox`:
 
-1. Open virt-manager → New VM → Import existing disk image → browse to `output-qemu/windows-11-base.qcow2`
-2. Configure: UEFI firmware, emulated TPM 2.0, virtio-scsi disk, virtio NIC, 8 GB RAM, 4 vCPUs
-3. Boot — should land at OOBE-mini, then cloudbase-init reads any attached cloud-init seed and configures the clone
-4. For lab use without cloud-init seed, you can also boot directly to OOBE and complete it manually once
+1. Convert the VMDK to qcow2 (see *Build* above) — `qemu-img convert -f vmdk -O qcow2 …`.
+2. Open virt-manager → New VM → Import existing disk image → browse to `output-vbox/windows-11-base.qcow2`.
+3. Configure: UEFI firmware, emulated TPM 2.0, sata or virtio-scsi disk, virtio NIC, 8 GB RAM, 4 vCPUs.
+4. Boot — should land at OOBE-mini, then cloudbase-init reads any attached cloud-init seed and configures the clone.
+5. For lab use without a cloud-init seed, you can also boot directly to OOBE and complete it manually once. See [docs/win11-qcow2-image.md](../../docs/win11-qcow2-image.md) for the first-boot Administrator credential state and NoCloud seed instructions.
 
 ---
 
@@ -263,7 +263,7 @@ After `./build-qemu.sh t480`:
 - **VirtIO driver path** must match the Windows version (`amd64\w11\` for Win11). Wrong path = "no disk found" at install.
 - **WinRM bootstrap** is the most fragile single command. The Autounattend.xml runs synchronous PowerShell at end-of-install to enable WinRM and open the firewall. If that fails, Packer never connects.
 - **Microsoft account skip.** The `OOBE/HideOnlineAccountScreens` setting in Autounattend.xml is what bypasses the cloud-account requirement on Win11 24H2. If a future Windows version blocks this too, you may need to splice in `OOBE\BYPASSNRO` reg writes from the answer file.
-- **swtpm for the qemu builder.** `build-qemu.sh` starts swtpm in the background before `packer build`. If a previous build crashed, an orphan swtpm may still be running — check with `pgrep swtpm`.
+- **VirtualBox kernel modules.** `build-vbox.sh` requires `vboxdrv` / `vboxnetadp` / `vboxnetflt` loaded. After a kernel upgrade these can be missing until DKMS rebuilds — `sudo modprobe vboxdrv` or `sudo /sbin/vboxconfig`.
 - **Sysprep terminates the WinRM session.** The `99-sysprep.ps1` script generalizes and shuts down; Packer expects the WinRM disconnect. The build block sets `valid_exit_codes = [0]` to allow it.
 - **License activation watermark.** The KMS install key in Autounattend gets you through setup but doesn't activate Windows. Clones will show an activation watermark unless you supply a real key or use the eval ISO. Acceptable for lab.
 - **VM ID collision.** Default is 9101 (next to Ubuntu's 9100). If 9101 is taken on the target node, set `VM_ID=` in the env file.
