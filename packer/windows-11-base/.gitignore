@@ -8,8 +8,13 @@
 crash.log
 packer_cache/
 
-# virtualbox builder output (.vmdk/.ovf/.nvram artifacts + post-build qcow2)
+# virtualbox builder output (.vmdk/.ovf/.nvram artifacts + post-build qcow2,
+# plus any cidata.iso companion produced by seed/build-cidata.sh)
 output-vbox/
+
+# Personal cidata seed files — never commit (only the .example template ships)
+seed/*.yaml
+!seed/*.example.yaml
 
 # Stray VirtualBox VM logs that the GUI sometimes drops in the working dir
 2026-*-VirtualBoxVM-*.log

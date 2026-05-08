@@ -254,6 +254,14 @@
         </LocalAccounts>
       </UserAccounts>
 
+      <!-- LogonCount=1: the build needs exactly one auto-login (the first
+           OOBE boot, where FirstLogonCommands sets up WinRM). Provisioner
+           passes after that connect via WinRM password, not AutoLogon.
+           After the answer file's auto-login fires once, Windows decrements
+           the count to 0 and disables AutoAdminLogon itself, so the
+           registry values that survive sysprep are already in their
+           cleared state on the build VM. The cleanup scheduled task
+           still wipes them on each clone for defense in depth. -->
       <AutoLogon>
         <Username>Administrator</Username>
         <Password>
@@ -261,7 +269,7 @@
           <PlainText>true</PlainText>
         </Password>
         <Enabled>true</Enabled>
-        <LogonCount>5</LogonCount>
+        <LogonCount>1</LogonCount>
       </AutoLogon>
 
       <!-- Enable WinRM and the QEMU guest agent so Packer can (a) discover

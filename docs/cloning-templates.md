@@ -32,11 +32,21 @@ are gone before the clone's network even comes up.
 account with a known password (`packer-build-only-Win11!` from
 [variables.pkr.hcl](../packer/windows-11-base/variables.pkr.hcl)) so
 Packer can connect via WinRM during provisioning. Before the template is
-sealed, sysprep `/generalize /oobe` runs as the last provisioner step,
-which (among many other things) **disables the local Administrator
-account**. After sysprep, no enabled local user exists — by design.
-Sysprep also strips machine-specific identifiers, so each clone gets a
-fresh SID, computer name, and machine GUID on first boot.
+sealed, [provision/99-sysprep.ps1](../packer/windows-11-base/provision/99-sysprep.ps1)
+registers a `PackerBuildCleanup` scheduled task that fires AtStartup as
+SYSTEM on the first boot of every clone. The task waits for
+`cloudbase-init` to finish, rotates the Administrator password to a
+32-byte random value, disables the Administrator account, clears the
+AutoAdminLogon registry values written by the answer file, then
+unregisters itself and removes its own script. Sysprep `/generalize`
+preserves scheduled-task definitions and strips machine-specific
+identifiers, so each clone gets a fresh SID, computer name, and machine
+GUID — and the cleanup task rides into every clone unchanged.
+
+The net effect is that **on the first boot of any clone, before any
+human can log in, the build credentials are gone.** Templates never
+power on, so the cleanup task only ever fires on clones, never on the
+template itself.
 
 In both cases, **a freshly cloned VM has no enabled local user with a
 known password.** If you skip the cloud-init step, the only way to log
@@ -172,8 +182,9 @@ Three traps that look reasonable and aren't:
 
 3. **Don't rely on the Packer build-time credentials.** The Ubuntu
    `packer` user is gone by the time a clone's network is up; the
-   Windows `Administrator` account is sysprep-disabled. They are not
-   stable login paths.
+   Windows `Administrator` account is rotated and disabled by the
+   `PackerBuildCleanup` scheduled task on every clone's first boot.
+   Neither is a stable login path.
 
 ## User management options
 

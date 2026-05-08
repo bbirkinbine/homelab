@@ -365,7 +365,7 @@ build {
   // WINDOWS UPDATES: DISABLED BY DEFAULT.
   //
   // The two provisioner blocks below are commented out so a default
-  // `./build.sh pve12` finishes in ~15 minutes instead of 60-90. The cost
+  // `./build-pve.sh pve12` finishes in ~15 minutes instead of 60-90. The cost
   // is that every template you build is unpatched as of the install ISO's
   // release date — clones inherit that patch level until something else
   // patches them.

@@ -1,0 +1,26 @@
+#cloud-config
+# Lab seed for VirtualBox / virt-manager standalone use of windows-11-base.qcow2.
+#
+# Copy this file to seed/lab-seed.yaml (gitignored), fill in your credentials,
+# then run ./seed/build-cidata.sh to produce output-vbox/cidata.iso. Attach
+# that ISO as a second CDROM in VBox / virt-manager and boot — cloudbase-init
+# reads it on first boot, creates the user defined here, and you log in as
+# that user. The built-in Administrator account is disabled by the
+# packer-cleanup scheduled task on first boot, so this seed is the only
+# supported login path for the standalone qcow2.
+#
+# Field semantics differ from Linux cloud-init in two important ways:
+#   - Windows uses primary_group: Administrators (not groups: [sudo]).
+#   - passwd: is plaintext on Windows; cloudbase-init hands it to the
+#     Win32 user-creation API. Putting a $6$... hash here will set the
+#     literal hash as the password (and lock you out).
+# See docs/cloning-templates.md "Gotchas" for the full list.
+
+hostname: lab
+
+users:
+  - name: lab
+    primary_group: Administrators
+    passwd: change-me-before-using
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAA...replace-with-your-pubkey... user@host

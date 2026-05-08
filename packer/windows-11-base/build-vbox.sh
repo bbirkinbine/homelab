@@ -137,4 +137,14 @@ echo "==> packer validate"
 packer validate ${PACKER_ONLY} .
 
 echo "==> packer build"
-exec packer build -on-error=ask ${PACKER_ONLY} .
+packer build -on-error=ask ${PACKER_ONLY} .
+
+# Optional companion artifact: if a personal lab seed is in place, build
+# a cidata.iso alongside the VBox output so the qcow2 can be booted with
+# a known account in VBox / virt-manager without crafting the seed by
+# hand each time. Personal seed files are gitignored; only the .example
+# template ships in the repo.
+if [[ -f seed/lab-seed.yaml ]]; then
+  echo "==> seed/lab-seed.yaml present — building cidata.iso"
+  ./seed/build-cidata.sh
+fi
