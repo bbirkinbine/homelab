@@ -12,13 +12,11 @@ The repo is **public** on GitHub. Treat every change as something a stranger wil
 
 ---
 
-## Active context (as of 2026-05-07)
+## Active context (as of 2026-05-08)
 
 A few states that won't be obvious from the code alone:
 
-**Windows-11 base is work-in-progress and uncommitted.** The directory `packer/windows-11-base/` exists locally but is not in any git tree yet. Brian doesn't want commits to Windows files until the full build works end-to-end on both targets. Do **not** run `git commit`, `git add`, or `gh pr create` against Windows files. Edits in place are fine; staging is not. When in doubt, `git status` first and ask.
-
-**Ubuntu-24.04 base is stable and committed.** Treat `packer/ubuntu-24-04-base/` as load-bearing — it's already shipping templates to the homelab. When you're working on a Windows-related task, do not modify Ubuntu files even for "while I'm here" cleanups. If a fix genuinely belongs to the Ubuntu side, surface it and ask before touching.
+**Both base templates are committed and shipping.** Treat `packer/ubuntu-24-04-base/` and `packer/windows-11-base/` as load-bearing — both build reproducibly and have been validated end-to-end. The Windows pipeline shipped in commit 5135652 (proxmox-iso + virtualbox-iso). When working on one base, don't modify the other for "while I'm here" cleanups; if a fix genuinely belongs across both, surface it and ask first.
 
 **Cluster transition in progress.** `README.md` currently describes the three NUCs as independent (per-node tokens, per-node template builds). Brian is moving to a 3-node Proxmox cluster with NFS-shared storage on an Asustor NAS. Until that transition lands in a commit: assume per-node tokens, per-node template builds, no shared cluster filesystem. When the cost is small, parameterize node names rather than hard-coding one — that way nothing breaks when the cluster lands.
 
@@ -62,7 +60,7 @@ This is a public GitHub repo. Anything that lands in a commit can be scraped wit
 - Default to "read from `.env.<target>` at invocation time" or "fetch from KeePassXC at run time", not "embed in the `.tf` / `.pkr.hcl`".
 - Don't suggest 1Password CLI, Vault, or SOPS as the default — Brian is aware of those; they're options, not the current shape.
 
-If a secret has to flow through HCL, it goes through `variable {}` with `sensitive = true` and is set via `PKR_VAR_*` env vars at build time. The existing `build.sh` files are canonical examples.
+If a secret has to flow through HCL, it goes through `variable {}` with `sensitive = true` and is set via `PKR_VAR_*` env vars at build time. The existing `build-pve.sh` / `build-vbox.sh` wrappers are canonical examples.
 
 ---
 
