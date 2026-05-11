@@ -12,14 +12,14 @@ services).
 brew install packer
 
 # 2. Configure local credentials (one per Proxmox node)
-cp .env.example .env.pve12   # repeat for each node, e.g. .env.pve13
-$EDITOR .env.pve12           # fill in PROXMOX_URL, PROXMOX_TOKEN_*, NODE, etc.
+cp .env.example .env.pve12t   # repeat for each node, e.g. .env.pve13
+$EDITOR .env.pve12t           # fill in PROXMOX_URL, PROXMOX_TOKEN_*, NODE, etc.
 
 # 3. Initialize the Proxmox plugin (one-time)
 packer init .
 
 # 4. Build (pass the node name)
-./build.sh pve12             # or: ./build.sh pve13
+./build.sh pve12t             # or: ./build.sh pve13t
 ```
 
 The build takes ~20-30 minutes on an NUC12. When it's done you have a

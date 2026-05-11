@@ -58,8 +58,8 @@ The repo is cloned to both build hosts. Each one only has the env file(s) for th
 
 ```bash
 cd packer/windows-11-base
-cp .env.pve.example .env.pve12     # proxmox build on pve12 — edit and fill in
-cp .env.pve.example .env.pve13     # proxmox build on pve13 — edit and fill in
+cp .env.pve.example .env.pve12t     # proxmox build on pve12t — edit and fill in
+cp .env.pve.example .env.pve13m     # proxmox build on pve13m — edit and fill in
 ```
 
 **On the T480 (virtualbox-iso target):**
@@ -94,8 +94,8 @@ harmless either way.)
 **On the Mac (proxmox-iso target):**
 
 ```bash
-./build-pve.sh pve12       # → Proxmox template VM 9101 on pve12
-./build-pve.sh pve13       # → Proxmox template VM 9101 on pve13
+./build-pve.sh pve12t       # → Proxmox template VM 9101 on pve12t
+./build-pve.sh pve13m       # → Proxmox template VM 9101 on pve13m
 ```
 
 **On the T480 (virtualbox-iso target):**
@@ -168,7 +168,7 @@ The disk is built with VBox's AHCI controller and the Intel PRO/1000 NIC, both o
 **By default, this template is unpatched as of the install ISO's release
 date.** The `windows-update` and `windows-restart` provisioner blocks in
 [windows-11-base.pkr.hcl](windows-11-base.pkr.hcl) are commented out so
-the default `./build-pve.sh pve12` run is fast (~15 min) instead of the
+the default `./build-pve.sh pve12t` run is fast (~15 min) instead of the
 60–90 min required to apply cumulative updates at build time.
 
 This is intentional, but it only works because patches are applied
@@ -234,7 +234,7 @@ windows-11-base/
 
 ## Validation after build
 
-After `./build-pve.sh pve12`:
+After `./build-pve.sh pve12t`:
 
 1. Proxmox UI → confirm VM 9101 exists, marked as template, BIOS=ovmf, EFI disk + TPM present, no CD-ROM attached.
 2. Clone via Terraform/OpenTofu (or `qm clone 9101 999 --name wintest`).
