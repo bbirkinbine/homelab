@@ -1,21 +1,26 @@
 #!/usr/bin/env bash
-# vms/llm/deploy.sh
+# vms/openbao/deploy.sh
 #
-# Clone ubuntu-24-04-base into a configured LLM VM with PCIe GPU passthrough.
+# Clone ubuntu-24-04-base into a configured OpenBao VM with USB
+# passthrough of the labeled HSM-A jack (CardLogix SmartCard-HSM 4K).
 #
 # Workflow:
 #   1. Source ./.env (gitignored)
-#   2. Verify the template exists and the target VM ID is free (FAIL-FAST: this
-#      script will not modify or destroy an existing VM).
-#   3. Render cloud-init/user-data.yaml with values from .env
-#   4. Upload the rendered snippet to the Proxmox snippets storage
-#   5. qm clone -> qm set (sizing, machine type, cpu host, hostpci0)
+#   2. Verify the template exists and the target VM ID is free (FAIL-FAST:
+#      this script will not modify or destroy an existing VM — protects
+#      OpenBao state from accidental clobber).
+#   3. Verify a CCID smart-card device is present at HSM_USB_HOST_PORT on
+#      the Proxmox host (override with HSM_SKIP_USB_CHECK=1).
+#   4. Soft-warn if pcscd is active on the Proxmox host (it would hold
+#      the device open and starve the guest).
+#   5. Render cloud-init/user-data.yaml with values from .env
+#   6. Upload the rendered snippet to the Proxmox snippets storage
+#   7. qm clone -> qm set (sizing, machine type) -> qm set --usb0
 #                -> qm resize -> qm set --cicustom -> qm start
 #
-# Prerequisite (host-side, NOT done by this script): the Proxmox host must
-# already have IOMMU enabled, vfio-pci bound to the GPU, and the GPU's
-# nouveau/nvidia/snd_hda_intel drivers blacklisted on the host. The user has
-# stated this is already in place for the eGPU on pve12.
+# Prerequisite (host-side, NOT done by this script): the HSM is plugged
+# into the labeled HSM-A USB jack on the Proxmox host. Discover its
+# bus-port with `ssh root@<host> 'lsusb -t'`.
 #
 # To resize an existing deployment, ssh into the Proxmox node and use:
 #   qm set <id> --memory <MB> --cores <N>
@@ -55,17 +60,9 @@ require VM_DISK_SIZE
 require VM_STORAGE_POOL
 require SNIPPETS_STORAGE
 require VM_MACHINE
-require GPU_PCI_ADDRESS
-require GPU_HOSTPCI_OPTS
+require HSM_USB_HOST_PORT
 require ADMIN_USERNAME
 require SSH_PUBLIC_KEY
-
-# Ballooning MUST be off for PCIe passthrough — refuse to proceed if .env
-# was customized in a way that would break the GPU at boot.
-if [[ "${VM_BALLOON:-0}" != "0" ]]; then
-  echo "ERROR: VM_BALLOON must be 0 for a passthrough GPU VM (RAM is pinned)." >&2
-  exit 1
-fi
 
 SSH_USER="${SSH_USER:-root}"
 SSH_TARGET="${SSH_USER}@${PROXMOX_HOST}"
@@ -85,23 +82,70 @@ fi
 echo "==> checking VM ${VM_ID} doesn't already exist"
 if run_remote "qm status ${VM_ID} >/dev/null 2>&1"; then
   echo "ERROR: VM ${VM_ID} already exists on ${PROXMOX_NODE}." >&2
-  echo "       This script will not modify or replace existing VMs." >&2
+  echo "       This script will not modify or replace existing VMs" >&2
+  echo "       (protects OpenBao state and any HSM-wrapped seal keys)." >&2
   echo "       To resize live, ssh ${PROXMOX_HOST} and run:" >&2
   echo "         qm set ${VM_ID} --memory <MB> --cores <N>" >&2
   echo "         qm resize ${VM_ID} scsi0 +<N>G" >&2
   exit 1
 fi
 
-echo "==> verifying GPU PCI address ${GPU_PCI_ADDRESS} is bound to vfio-pci"
-# Strip an optional "0000:" domain prefix for the lspci grep so either form works.
-GPU_BUS_DEV="${GPU_PCI_ADDRESS#0000:}"
-if ! run_remote "lspci -nnk -s '${GPU_BUS_DEV}' | grep -q 'Kernel driver in use: vfio-pci'"; then
-  echo "ERROR: PCI device ${GPU_PCI_ADDRESS} is not bound to vfio-pci on ${PROXMOX_NODE}." >&2
-  echo "       Check on the host:" >&2
-  echo "         lspci -nnk -s ${GPU_BUS_DEV}" >&2
-  echo "       Expected 'Kernel driver in use: vfio-pci'. Fix host IOMMU /" >&2
-  echo "       vfio-pci binding before retrying." >&2
-  exit 1
+# ---- HSM passthrough preflight ----
+#
+# Two checks before we waste a clone:
+#   (a) a CCID smart-card device is actually present somewhere on the
+#       Proxmox host (we can't perfectly verify it's at HSM_USB_HOST_PORT
+#       from `lsusb` flat output alone, but we can confirm "no smart card
+#       device anywhere" — which is the most common misconfiguration);
+#   (b) the host's pcscd daemon is NOT running. USB passthrough does not
+#       unbind the host driver the way vfio-pci does, so if the host's
+#       pcscd has the device open, the guest sees USB IO errors.
+#
+# Override (a) with HSM_SKIP_USB_CHECK=1 if you're testing with a
+# non-CardLogix CCID reader or your lsusb output doesn't match the
+# heuristic. (b) is a soft warning, not fatal.
+
+if [[ "${HSM_SKIP_USB_CHECK:-}" != "1" ]]; then
+  echo "==> verifying a CCID smart-card device is present on ${PROXMOX_NODE}"
+  HSM_LSUSB_FLAT=$(run_remote "lsusb") || {
+    echo "ERROR: 'lsusb' failed on ${PROXMOX_HOST}." >&2
+    exit 1
+  }
+  HSM_LSUSB_TREE=$(run_remote "lsusb -t") || {
+    echo "ERROR: 'lsusb -t' failed on ${PROXMOX_HOST}." >&2
+    exit 1
+  }
+
+  # Match either: vendor strings commonly used by SmartCard-HSM resellers,
+  # OR USB device class 0x0B (Smart Card) anywhere in the bus tree. Either
+  # is sufficient evidence that *some* CCID smart-card device is plugged
+  # into the host. Whether it's at the right bus-port is verified by the
+  # post-deploy `lsusb` inside the VM (documented in README.md).
+  if ! grep -qE '(CardContact|SCM Microsystems|Identiv|CardLogix|SmartCard-HSM)' <<< "$HSM_LSUSB_FLAT" \
+     && ! grep -qE 'Class=0[0b]b' <<< "$HSM_LSUSB_TREE"; then
+    echo "ERROR: no CCID smart-card device detected on ${PROXMOX_HOST}." >&2
+    echo "       Plug the CardLogix HSM into the labeled HSM-A jack and retry." >&2
+    echo "       To override (e.g. testing with a non-CardLogix CCID reader)," >&2
+    echo "       set HSM_SKIP_USB_CHECK=1 in .env." >&2
+    echo "       Diagnostics:" >&2
+    echo "         ssh ${SSH_TARGET} 'lsusb'" >&2
+    echo "         ssh ${SSH_TARGET} 'lsusb -t'" >&2
+    echo "         ssh ${SSH_TARGET} 'dmesg | grep -i \"smartcard\\|cardcontact\\|scm\" | tail'" >&2
+    exit 1
+  fi
+fi
+
+echo "==> checking host-side pcscd is not holding the device"
+# `systemctl is-active` returns 'active' / 'inactive' / 'unknown' / etc.
+# We only warn on 'active' — anything else means pcscd isn't running on
+# the host (or isn't installed), which is the desired state for USB
+# passthrough.
+HOST_PCSCD_STATE=$(run_remote "systemctl is-active pcscd 2>/dev/null || true")
+if [[ "$HOST_PCSCD_STATE" == "active" ]]; then
+  echo "WARN: pcscd is active on ${PROXMOX_HOST} and will hold the HSM open," >&2
+  echo "      starving the guest. Disable it before validating inside the VM:" >&2
+  echo "        ssh ${SSH_TARGET} 'systemctl disable --now pcscd'" >&2
+  echo "      (deploy continues; fix this before running pcsc_scan inside the VM.)" >&2
 fi
 
 echo "==> verifying snippets storage '${SNIPPETS_STORAGE}'"
@@ -144,6 +188,7 @@ sed \
   -e "s|%%HOSTNAME%%|${VM_NAME}|g" \
   -e "s|%%ADMIN_USERNAME%%|${ADMIN_USERNAME}|g" \
   -e "s|%%SSH_PUBLIC_KEY%%|${SSH_KEY_ESCAPED}|g" \
+  -e "s|%%BUILD_SC_HSM_EMBEDDED%%|${BUILD_SC_HSM_EMBEDDED:-1}|g" \
   cloud-init/user-data.yaml > "$USER_RENDERED"
 
 SNIPPET_NAME="vm-${VM_ID}-${VM_NAME}-user.yaml"
@@ -192,21 +237,27 @@ else
   echo "    no cloud-init drive inherited (template may have cloud_init=false)"
 fi
 
-echo "==> setting sizing (cores=${VM_CORES}, memory=${VM_MEMORY} MB, balloon=0, machine=${VM_MACHINE}, cpu=host, vga=std)"
-# vga=std overrides the base template's `vga: serial0` so this VM has a real
-# VGA framebuffer for the Proxmox web-UI noVNC console — useful when debugging
-# GPU passthrough or boot issues. The serial0 socket stays attached (kernel
-# cmdline still mirrors to it), so `qm terminal ${VM_ID}` continues to work.
+echo "==> setting sizing (cores=${VM_CORES}, memory=${VM_MEMORY} MB, balloon=${VM_BALLOON:-0}, machine=${VM_MACHINE})"
+# No --cpu host (no AVX-path requirement) and no --vga std (no GPU
+# debugging). The base template's serial console + Proxmox noVNC stays.
 run_remote "qm set ${VM_ID} \
   --cores ${VM_CORES} \
   --memory ${VM_MEMORY} \
-  --balloon 0 \
-  --machine ${VM_MACHINE} \
-  --cpu host \
-  --vga std"
+  --balloon ${VM_BALLOON:-0} \
+  --machine ${VM_MACHINE}"
 
-echo "==> attaching GPU (hostpci0 = ${GPU_PCI_ADDRESS},${GPU_HOSTPCI_OPTS})"
-run_remote "qm set ${VM_ID} --hostpci0 '${GPU_PCI_ADDRESS},${GPU_HOSTPCI_OPTS}'"
+# Build the USB passthrough spec. host=<bus>-<port> pins by physical jack
+# rather than vendor:product — that is the contract here: whichever token
+# sits in the labeled HSM-A jack is the token the VM gets. Swapping
+# tokens (A <-> B) does not require updating .env or rebooting Proxmox.
+#
+# usb3=1 forces the slot's controller to xHCI (USB 3); without it, the
+# default EHCI (USB 2) controller can silently fail to enumerate devices
+# plugged into a USB 3 host port. Toggle is in .env (HSM_USB_USB3).
+USB_SPEC="host=${HSM_USB_HOST_PORT}"
+[[ "${HSM_USB_USB3:-0}" == "1" ]] && USB_SPEC="${USB_SPEC},usb3=1"
+echo "==> attaching HSM (usb0 = ${USB_SPEC})"
+run_remote "qm set ${VM_ID} --usb0 '${USB_SPEC}'"
 
 echo "==> resizing scsi0 to ${VM_DISK_SIZE}"
 run_remote "qm resize ${VM_ID} scsi0 ${VM_DISK_SIZE}" || {
@@ -232,22 +283,42 @@ cat <<EOF
 
 ==> deploy complete.
 
-Cloud-init will install the NVIDIA server-branch driver (auto-picked by
-ubuntu-drivers --gpgpu), Docker, NVIDIA container toolkit, and Ollama,
-then reboot. The full cycle takes ~5-10 minutes depending on apt mirror
-speed. Watch progress:
+Cloud-init will install the smartcard stack (pcscd, opensc, libccid),
+optionally build sc-hsm-embedded from source, install OpenBao from
+apt.openbao.org, then reboot. The full cycle takes ~3-5 minutes
+(longer if BUILD_SC_HSM_EMBEDDED=1 and the autotools build is slow on
+this host's CPU). Watch progress:
 
   ssh ${SSH_TARGET} "qm terminal ${VM_ID}"     # serial console
   # or, after the VM has an IP:
-  ssh ${ADMIN_USERNAME}@<vm-ip> 'tail -f /var/log/llm-provision.log'
+  ssh ${ADMIN_USERNAME}@<vm-ip> 'tail -f /var/log/openbao-provision.log'
 
 Find the VM's IP (qemu-guest-agent runs in the template):
   ssh ${SSH_TARGET} "qm guest cmd ${VM_ID} network-get-interfaces" \\
     | grep -E '"ip-address"' | head -3
 
-Once the VM has rebooted and you can ssh in:
+==> POST-DEPLOY VALIDATION (the whole point of this VM):
+
+Once the VM has rebooted and you can ssh in, walk through the three
+checks. ALL THREE must pass before proceeding to Phase 4.
+
   ssh ${ADMIN_USERNAME}@<vm-ip>
-  nvidia-smi                    # confirm the 3090 is visible
-  ollama pull llama3.1:8b       # or any model
-  ollama run  llama3.1:8b
+
+  # 1. lsusb — must show a CardContact / SCM / SmartCard-HSM line
+  lsusb
+
+  # 2. pcscd + pcsc_scan — pcscd should be active; pcsc_scan should
+  #    show an ATR ending in '... 48 53 4D' (ASCII "HSM")
+  sudo systemctl status pcscd
+  pcsc_scan -n
+
+  # 3. PKCS#11 sees a slot with a "SmartCard-HSM (UserPIN)" token label
+  PKCS11_MOD=/usr/local/lib/libsc-hsm-pkcs11.so
+  [ -f "\$PKCS11_MOD" ] || PKCS11_MOD=/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so
+  pkcs11-tool --module=\$PKCS11_MOD --list-slots
+
+If any step fails, see vms/openbao/README.md for failure-mode diagnostics.
+
+If all three pass, proceed to Phase 4 of the auto-unseal procedure
+("Vault Auto-Unseal with CardLogix Pair") against token A on this VM.
 EOF

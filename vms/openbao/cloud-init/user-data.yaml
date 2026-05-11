@@ -1,0 +1,271 @@
+#cloud-config
+#
+# openbao VM — first-boot configuration.
+# Placeholders (%%VAR%%) are substituted by ../deploy.sh before upload.
+#
+# What this DOES:
+#   1. Create admin user with injected SSH key (groups: sudo, plugdev).
+#   2. Install the smart-card stack (pcscd, opensc, libccid) and OpenBao
+#      from the official apt repo (>= 2.1.0 for PKCS#11 seal support).
+#   3. Optionally build CardContact's sc-hsm-embedded PKCS#11 module from
+#      source for richer SmartCard-HSM integration; falls back to OpenSC's
+#      generic opensc-pkcs11.so if the build fails.
+#   4. Open ufw 8200/tcp (OpenBao API) and re-enable unattended-upgrades.
+#   5. Install a udev uaccess rule + commented-out systemd drop-in for
+#      OpenBao so the unit's hardening can be loosened later if needed.
+#
+# What this deliberately does NOT do (operator-driven, per the
+# "CardLogix DKEK Ceremony — Homelab Single-Share" + "Vault Auto-Unseal
+# with CardLogix Pair" runbooks):
+#   - Generate any keys on the HSM (Phase 4).
+#   - Write /etc/openbao/openbao.hcl or any seal stanza (Phase 5).
+#   - Run `bao operator init` or unseal anything (Phase 5).
+#
+# The openbao service is enabled but starts in 'failed' state at first
+# boot because no config file is present. That is intentional — Brian
+# writes the seal stanza by hand at Phase 5 against a verified VM.
+
+hostname: "%%HOSTNAME%%"
+
+users:
+  - name: "%%ADMIN_USERNAME%%"
+    # plugdev is required for SSH-session access to pcscd. Ubuntu 24.04
+    # ships pcscd with a polkit policy that gates connections on the
+    # action `org.debian.pcsc-lite.access_pcsc`, which is granted only
+    # to "active local console seat" sessions by default. SSH sessions
+    # do NOT qualify, so an unmodified install rejects pkcs11-tool
+    # with CKR_DEVICE_ERROR (sc-hsm-embedded) or returns "No slots"
+    # (opensc-pkcs11). The polkit rule at
+    # /etc/polkit-1/rules.d/49-pcscd-plugdev.rules (see write_files
+    # below) restores access for the plugdev group; group membership
+    # without the rule, or the rule without group membership, both
+    # leave the user locked out.
+    groups: [sudo, plugdev]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - "%%SSH_PUBLIC_KEY%%"
+
+write_files:
+  # Re-enable unattended-upgrades. Base template ships with the timer masked
+  # so locked-down roles can stay frozen; OpenBao is a trust anchor and
+  # security patches must keep flowing.
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+
+  # systemd drop-in for the OpenBao unit. Shipped commented out — leave
+  # it that way during initial smartcard validation. Uncomment and
+  # `systemctl daemon-reload && systemctl restart openbao` only if Phase 4
+  # testing reveals OpenBao can't reach the PKCS#11 module.
+  #
+  # Most likely this override is unnecessary: OpenBao talks to pcscd via
+  # the IPC socket at /run/pcscd/pcscd.comm (NOT a /dev path), so
+  # PrivateDevices=true should not block anything. The override exists as
+  # a documented escape hatch for the case where the upstream unit grows
+  # /dev/bus/usb-relevant hardening or where a sandboxed sc-hsm-embedded
+  # build path needs raw USB.
+  - path: /etc/systemd/system/openbao.service.d/override.conf
+    content: |
+      # [Service]
+      # PrivateDevices=false
+      # DeviceAllow=/dev/bus/usb rw
+
+  # Tag CCID smart-card devices with uaccess so the logged-in admin user
+  # gets a stable ACL on /dev/bus/usb/<bus>/<dev> for low-level
+  # diagnostics with pkcs11-tool. systemd-logind manages the uaccess
+  # tag — it grants ACL access to whichever user has an active session.
+  # This is independent of the plugdev group above; either path lets the
+  # admin reach the device.
+  - path: /etc/udev/rules.d/60-cardlogix-hsm.rules
+    permissions: "0644"
+    content: |
+      # USB CCID class (bInterfaceClass = 0x0B). Matches every CCID
+      # smart-card reader, including the CardLogix SmartCard-HSM 4K.
+      SUBSYSTEM=="usb", ATTRS{bInterfaceClass}=="0b", TAG+="uaccess"
+
+  # polkit rule granting pcscd access to the plugdev group. Without
+  # this, Ubuntu 24.04's stock pcscd polkit policy rejects SSH-session
+  # clients with CKR_DEVICE_ERROR (sc-hsm-embedded) or "No slots"
+  # (opensc-pkcs11), because polkit treats SSH sessions as non-local
+  # and refuses the access_pcsc / access_card actions by default.
+  # The pairing of this rule + plugdev membership (set in users:
+  # above) is what makes pkcs11-tool work for the admin user. polkit
+  # picks rules.d files up automatically; the post-cloud-init reboot
+  # below ensures pcscd starts after the rule is in place.
+  - path: /etc/polkit-1/rules.d/49-pcscd-plugdev.rules
+    permissions: "0644"
+    content: |
+      // Allow members of plugdev to talk to pcscd over its IPC socket
+      // and read cards via PC/SC. Required for any non-root user that
+      // wants to use pkcs11-tool, openssl pkcs11, opensc-explorer, etc.
+      // from an SSH session on this VM.
+      polkit.addRule(function(action, subject) {
+          if ((action.id == "org.debian.pcsc-lite.access_pcsc" ||
+               action.id == "org.debian.pcsc-lite.access_card") &&
+              subject.isInGroup("plugdev")) {
+              return polkit.Result.YES;
+          }
+      });
+
+  # Idempotent provisioning script. Cloud-init's runcmd invokes this; you
+  # can also re-run it by hand (`sudo bash /usr/local/sbin/openbao-provision.sh`)
+  # if something fails partway through — every step checks for prior state.
+  - path: /usr/local/sbin/openbao-provision.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      exec > >(tee -a /var/log/openbao-provision.log) 2>&1
+      echo "==> $(date -Is) openbao-provision starting"
+
+      export DEBIAN_FRONTEND=noninteractive
+
+      # The base template's apt-daily timers are masked, but a clone may still
+      # hold the dpkg lock briefly during initial cloud-init. Wait it out.
+      for _ in $(seq 1 60); do
+        if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+          && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
+          break
+        fi
+        sleep 5
+      done
+
+      apt-get update -y
+
+      echo "==> installing smartcard stack"
+      # pcscd       — the smartcard daemon; mediates between PCSC-lite
+      #               clients and the USB CCID driver in libccid
+      # opensc      — provides pkcs11-tool, the reference PKCS#11 CLI
+      # opensc-pkcs11 — /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so,
+      #               fallback PKCS#11 module if sc-hsm-embedded fails
+      # pcsc-tools  — ships pcsc_scan, the validation command
+      # libccid     — userspace USB CCID driver pcscd dispatches into
+      # ca-certificates curl gnupg — needed for the OpenBao apt repo setup
+      # jq          — useful for hand-debugging OpenBao API responses later
+      apt-get install -y --no-install-recommends \
+        pcscd opensc opensc-pkcs11 pcsc-tools libccid \
+        ca-certificates curl gnupg jq
+
+      # Optionally build CardContact's sc-hsm-embedded PKCS#11 module.
+      # Toggle from .env via deploy.sh placeholder substitution. The
+      # device-specific module exposes more SmartCard-HSM features
+      # (DKEK ceremony helpers, key wrap/unwrap) than the generic
+      # OpenSC module. Build runs in `set +e` so a transient failure
+      # does NOT brick first-boot — the fallback path is opensc-pkcs11.so
+      # which is already installed above.
+      if [[ "%%BUILD_SC_HSM_EMBEDDED%%" == "1" ]]; then
+        echo "==> building sc-hsm-embedded from source"
+        # build-essential — gcc, make
+        # autoconf automake libtool pkg-config — the project uses
+        #   autoreconf for its configure step
+        # libpcsclite-dev — sc-hsm-embedded links against pcsclite at
+        #   build time so it can talk to the same daemon at runtime
+        # libssl-dev — for the OpenSSL helpers the build links against
+        # git — to clone the source
+        apt-get install -y --no-install-recommends \
+          build-essential autoconf automake libtool pkg-config \
+          libpcsclite-dev libssl-dev git
+        set +e
+        rm -rf /tmp/sc-hsm-embedded
+        if git clone --depth 1 https://github.com/CardContact/sc-hsm-embedded.git /tmp/sc-hsm-embedded; then
+          ( cd /tmp/sc-hsm-embedded \
+            && SC_HSM_SHA=$(git rev-parse HEAD) \
+            && echo "==> sc-hsm-embedded git SHA: ${SC_HSM_SHA}" \
+            && autoreconf -fi \
+            && ./configure --prefix=/usr/local \
+            && make \
+            && make install \
+            && ldconfig )
+          if [[ -f /usr/local/lib/libsc-hsm-pkcs11.so ]]; then
+            echo "==> sc-hsm-embedded installed at /usr/local/lib/libsc-hsm-pkcs11.so"
+          else
+            echo "WARN: sc-hsm-embedded build did not produce libsc-hsm-pkcs11.so" >&2
+            echo "WARN: validation will fall back to /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so" >&2
+          fi
+        else
+          echo "WARN: sc-hsm-embedded git clone failed" >&2
+          echo "WARN: validation will fall back to /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so" >&2
+        fi
+        set -e
+      else
+        echo "==> sc-hsm-embedded build skipped (BUILD_SC_HSM_EMBEDDED=0)"
+      fi
+
+      echo "==> installing OpenBao from apt.openbao.org"
+      install -d -m 0755 /usr/share/keyrings
+      if [[ ! -s /usr/share/keyrings/openbao-archive-keyring.gpg ]]; then
+        curl -fsSL https://apt.openbao.org/pubkey.asc \
+          | gpg --dearmor -o /usr/share/keyrings/openbao-archive-keyring.gpg
+      fi
+      cat > /etc/apt/sources.list.d/openbao.list <<'EOF'
+      deb [signed-by=/usr/share/keyrings/openbao-archive-keyring.gpg] https://apt.openbao.org stable main
+      EOF
+      apt-get update -y
+      apt-get install -y --no-install-recommends openbao
+
+      # PKCS#11 seal support landed in OpenBao 2.1.0 (early 2025). Older
+      # binaries silently parse the seal stanza but don't actually use it,
+      # which would leave the VM unsealable. Hard-fail provisioning if the
+      # apt repo somehow served us an old version.
+      BAO_VERSION=$(bao version 2>/dev/null | head -1 || true)
+      echo "==> installed: ${BAO_VERSION}"
+      if ! bao version 2>/dev/null \
+          | head -1 \
+          | grep -qE 'v?(2\.[1-9][0-9]*|[3-9]\.[0-9]+|[1-9][0-9]+\.[0-9]+)'; then
+        echo "ERROR: OpenBao version is older than 2.1.0; PKCS#11 seal unavailable." >&2
+        echo "       Check the apt source pinned to apt.openbao.org/stable." >&2
+        exit 1
+      fi
+
+      echo "==> $(date -Is) openbao-provision complete"
+      cat <<'NEXT'
+      ==> NEXT STEPS (manual, per "Vault Auto-Unseal with CardLogix Pair"):
+      ==>   1. Confirm HSM enumerates inside this VM:
+      ==>        lsusb
+      ==>        sudo systemctl status pcscd
+      ==>        pcsc_scan -n
+      ==>        pkcs11-tool --module=/usr/local/lib/libsc-hsm-pkcs11.so --list-slots
+      ==>          (fall back to /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so
+      ==>           if sc-hsm-embedded was not built or did not install)
+      ==>   2. Run Phase 4 of the ceremony doc against token A.
+      ==> Service 'openbao' is enabled but NOT running — no /etc/openbao/openbao.hcl
+      ==> exists yet. Brian writes that at Phase 5 against a verified VM.
+      NEXT
+
+runcmd:
+  # Order matters: ufw and apt-daily before the provisioner so that, if the
+  # OpenBao apt repo fetch hangs, we still have ssh open (22 is already
+  # allowed by the base template) and security patches still flow.
+  - systemctl unmask apt-daily.timer apt-daily-upgrade.timer
+  - systemctl enable --now apt-daily.timer apt-daily-upgrade.timer
+  - ufw allow 8200/tcp comment "OpenBao API"
+  - ufw reload
+  - /usr/local/sbin/openbao-provision.sh
+  # pcscd is installed by the provisioner; enable+start it now so the
+  # post-reboot session has a live daemon for pcsc_scan / pkcs11-tool.
+  - systemctl enable --now pcscd
+  # Enable openbao for next boot. Do NOT start — there is no config file
+  # at /etc/openbao/openbao.hcl yet, and starting now would just produce
+  # noise in the journal. Phase 5 of the ceremony writes the config.
+  - systemctl enable openbao
+
+# Reboot once cloud-init finishes so the udev rule applied during provision
+# takes effect via a clean USB re-enumeration. Without this, the uaccess
+# tag on /dev/bus/usb/<bus>/<dev> is not applied to the device that
+# enumerated before the rule was installed.
+power_state:
+  mode: reboot
+  delay: now
+  message: "Rebooting after openbao provisioning to apply udev rules"
+  timeout: 60
+  condition: True
+
+# Intentionally no `final_message:` block. cloud-init's final_message
+# module runs on every boot, so anything set here gets re-printed to
+# the console on every reboot — useful exactly once, then noise.
+# Post-deploy validation steps + Phase 4 pointer live in
+# vms/openbao/README.md and deploy.sh's success output instead.

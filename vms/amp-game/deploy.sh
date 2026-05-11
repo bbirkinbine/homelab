@@ -76,15 +76,34 @@ if run_remote "qm status ${VM_ID} >/dev/null 2>&1"; then
   exit 1
 fi
 
-echo "==> resolving snippets path for storage '${SNIPPETS_STORAGE}'"
-STORAGE_PATH=$(run_remote "pvesh get /storage/${SNIPPETS_STORAGE} --output-format json" \
+echo "==> verifying snippets storage '${SNIPPETS_STORAGE}'"
+STORAGE_JSON=$(run_remote "pvesh get /storage/${SNIPPETS_STORAGE} --output-format json")
+
+STORAGE_PATH=$(echo "$STORAGE_JSON" \
   | grep -oE '"path"[[:space:]]*:[[:space:]]*"[^"]+"' \
   | sed 's/.*"path"[[:space:]]*:[[:space:]]*"//;s/"$//')
 if [[ -z "$STORAGE_PATH" ]]; then
   echo "ERROR: could not resolve path for storage '${SNIPPETS_STORAGE}'." >&2
-  echo "       Make sure it has 'snippets' content type enabled in Datacenter -> Storage." >&2
   exit 1
 fi
+
+# Verify the storage actually allows 'snippets' content. Without it,
+# Proxmox silently refuses to serve cicustom user-data even though the
+# file lands on disk at <path>/snippets/. Failure mode: `qm cloudinit
+# dump` returns null, cloud-init falls back to defaults, the VM boots
+# with no user-data applied and no DHCP lease. Caught us 2026-05-10.
+STORAGE_CONTENT=$(echo "$STORAGE_JSON" \
+  | grep -oE '"content"[[:space:]]*:[[:space:]]*"[^"]+"' \
+  | sed 's/.*"content"[[:space:]]*:[[:space:]]*"//;s/"$//')
+if [[ ",${STORAGE_CONTENT}," != *",snippets,"* ]]; then
+  echo "ERROR: storage '${SNIPPETS_STORAGE}' on ${PROXMOX_NODE} does not allow 'snippets' content." >&2
+  echo "       Current content list: ${STORAGE_CONTENT}" >&2
+  echo "       Fix on the Proxmox host:" >&2
+  echo "         ssh ${SSH_TARGET} 'pvesm set ${SNIPPETS_STORAGE} --content snippets,${STORAGE_CONTENT}'" >&2
+  echo "       Or via GUI: Datacenter -> Storage -> ${SNIPPETS_STORAGE} -> Edit -> tick Snippets." >&2
+  exit 1
+fi
+
 SNIPPETS_DIR="${STORAGE_PATH}/snippets"
 
 echo "==> rendering cloud-init/user-data.yaml"
@@ -113,6 +132,38 @@ run_remote "qm clone ${TEMPLATE_VM_ID} ${VM_ID} \
   --full \
   --storage ${VM_STORAGE_POOL}"
 
+# Detach the cloud-init drive that the Packer template's clone inherited.
+# Packer's `cloud_init = true` seals a cloud-init drive into the template
+# at build time with content based on whatever cloud-init config existed
+# then (none — templates have no cicustom). Clones inherit this drive at
+# the first available IDE slot (ide0 for the Ubuntu base). Proxmox 9.1.8's
+# `qm set --cicustom` updates the VM config but does NOT regenerate the
+# inherited drive's content, and `qm start` doesn't either. Result if left
+# in place: the VM boots from the stale drive, cloud-init reads no user-
+# data, falls back to defaults — no user, no DHCP, no provisioner.
+#
+# Burned a day diagnosing this on 2026-05-10 — `qm cloudinit dump` is
+# documented to NEVER reflect cicustom content (see Proxmox forum thread
+# 164297), which made it look like cicustom itself was broken host-wide.
+# It wasn't — the inherited drive from clone was just stale.
+#
+# Fix is split in two: detach the inherited drive + free the LV NOW, then
+# create the fresh drive at ide2 LATER in this script — AFTER `qm set
+# --cicustom` has set cicustom on the VM config. Proxmox generates the
+# new drive's content from the current config at the moment `qm set --ide2`
+# runs, so cicustom must already be in the config by then. (--delete only
+# unlinks from config; the LV would cause "volume already exists" on the
+# later recreate, hence the explicit pvesm free.)
+echo "==> detaching inherited cloud-init drive (will recreate fresh after cicustom)"
+CI_SLOT=$(run_remote "qm config ${VM_ID} | grep -oE '^ide[0-9]+: .*media=cdrom' | head -1 | cut -d: -f1")
+if [[ -n "$CI_SLOT" ]]; then
+  echo "    detaching ${CI_SLOT} (was inherited from template clone)"
+  run_remote "qm set ${VM_ID} --delete ${CI_SLOT}"
+  run_remote "pvesm free ${VM_STORAGE_POOL}:vm-${VM_ID}-cloudinit 2>/dev/null || true"
+else
+  echo "    no cloud-init drive inherited (template may have cloud_init=false)"
+fi
+
 echo "==> setting sizing (cores=${VM_CORES}, memory=${VM_MEMORY} MB, balloon=${VM_BALLOON:-0})"
 run_remote "qm set ${VM_ID} \
   --cores ${VM_CORES} \
@@ -128,6 +179,13 @@ echo "==> attaching cloud-init snippet and DHCP ipconfig"
 run_remote "qm set ${VM_ID} \
   --cicustom 'user=${SNIPPETS_STORAGE}:snippets/${SNIPPET_NAME}' \
   --ipconfig0 ip=dhcp"
+
+# Create the fresh cloud-init drive at ide2 NOW that cicustom is set on the
+# VM config. Proxmox generates the drive's content at this moment from the
+# current config, so the user-data is correct from the first boot. (See the
+# detach-block comment above for the full bug context.)
+echo "==> creating fresh cloud-init drive at ide2 (with cicustom in effect)"
+run_remote "qm set ${VM_ID} --ide2 ${VM_STORAGE_POOL}:cloudinit"
 
 echo "==> starting VM ${VM_ID}"
 run_remote "qm start ${VM_ID}"
