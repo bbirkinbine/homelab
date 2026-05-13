@@ -206,9 +206,12 @@ totem {
   ip_version: ipv4-6
   link_mode: passive
   secauth: on
+  token_coefficient: 125
   version: 2
 }
 ```
+
+(`token_coefficient: 125` is a PVE 9 default. Leave it alone — it adjusts corosync's heartbeat timing based on node count and matters more in 5+ node clusters, but the value is fine for 3.)
 
 Edit to add `ring1_addr` per node (each node's TB loopback /32 from `inventory.yml`'s `tb_loopback`), add a `linknumber: 1` interface, and bump `config_version`:
 
@@ -249,11 +252,81 @@ totem {
   ip_version: ipv4-6
   link_mode: passive
   secauth: on
+  token_coefficient: 125
   version: 2
 }
 ```
 
-Use `vim /etc/pve/corosync.conf` — pmxcfs handles atomic-write semantics. Save and exit.
+**Recommended edit method: heredoc to `/tmp`, diff, then `cp` into pmxcfs.** Safer than editing in place — you see the diff before it commits, and pmxcfs's atomic-write semantics handle the final write cleanly:
+
+```bash
+# Write the target content to a tempfile (paste the entire desired
+# corosync.conf, including the parts you're NOT changing, into the
+# heredoc):
+ssh root@192.168.1.227 "cat > /tmp/corosync.conf.new <<'CONFEOF'
+logging {
+  debug: off
+  to_syslog: yes
+}
+
+nodelist {
+  node {
+    name: pve12t
+    nodeid: 1
+    quorum_votes: 1
+    ring0_addr: 192.168.1.227
+    ring1_addr: 10.10.10.12
+  }
+  node {
+    name: pve13m
+    nodeid: 2
+    quorum_votes: 1
+    ring0_addr: 192.168.1.163
+    ring1_addr: 10.10.10.13
+  }
+  node {
+    name: pve13t
+    nodeid: 3
+    quorum_votes: 1
+    ring0_addr: 192.168.1.240
+    ring1_addr: 10.10.10.14
+  }
+}
+
+quorum {
+  provider: corosync_votequorum
+}
+
+totem {
+  cluster_name: homelab
+  config_version: 4
+  interface {
+    linknumber: 0
+  }
+  interface {
+    linknumber: 1
+  }
+  ip_version: ipv4-6
+  link_mode: passive
+  secauth: on
+  token_coefficient: 125
+  version: 2
+}
+CONFEOF
+"
+
+# Diff against current — should show exactly:
+#   3 added `+ ring1_addr` lines (one per node)
+#   1 `config_version` line change (3 → 4)
+#   1 added `+ interface { linknumber: 1 ... }` block
+# If you see anything else, stop and inspect before proceeding.
+ssh root@192.168.1.227 'diff /etc/pve/corosync.conf /tmp/corosync.conf.new'
+
+# If the diff is right, push into pmxcfs:
+ssh root@192.168.1.227 'cp /tmp/corosync.conf.new /etc/pve/corosync.conf'
+```
+
+**Alternative: `vim /etc/pve/corosync.conf` directly.** pmxcfs handles atomic-write semantics so vim's `:w` is safe; the risk is purely typos. Use only if you're comfortable making the edits in place without the diff safety net above.
 
 corosync detects the `config_version` bump and re-applies within seconds. Verify both rings are up:
 
