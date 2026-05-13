@@ -1,0 +1,12 @@
+---
+# Role-internal constants — not meant to be overridden from inventory.
+# Defaults that ARE overridable live in defaults/main.yml. Keep this
+# file minimal; anything in here is effectively a magic number, and
+# the right way to manage those is to surface them as named constants
+# in one place so they're greppable.
+
+# Loopback alias index used for the TB migration network. The
+# `lo:10` device name is referenced from the interfaces template +
+# the bring-up runbook in [[Thunderbolt Mesh Networking — 3-Node
+# Cluster Option]]. Don't change without updating the vault doc.
+pve_host_tb_loopback_alias: "lo:10"

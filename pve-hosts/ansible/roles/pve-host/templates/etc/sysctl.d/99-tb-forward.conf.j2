@@ -1,0 +1,8 @@
+# /etc/sysctl.d/99-tb-forward.conf — managed by Ansible (pve-host role).
+# IPv4 forwarding for the TB transit role. Only landed on the node
+# whose inventory sets `ip_forwarding_enabled: true` (pve13m in the
+# line topology). pve12t ↔ pve13t traffic crosses this node at L3, so
+# forwarding must be on. See vault doc [[Thunderbolt Mesh Networking —
+# 3-Node Cluster Option]] §"pve13m — IP forwarding (transit node only)".
+
+net.ipv4.ip_forward = 1

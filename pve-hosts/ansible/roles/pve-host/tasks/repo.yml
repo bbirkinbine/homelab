@@ -1,0 +1,71 @@
+---
+# Replace the enterprise APT sources with the no-subscription set, in
+# deb822 format. Proxmox 9.x ships a single-line `pve-enterprise.list`
+# pointing at the subscription-required repo; we remove it (so apt
+# stops 401-ing on every update) and write our own deb822 sources file
+# covering Debian base + Proxmox no-subscription.
+#
+# Reference: https://pve.proxmox.com/wiki/Package_Repositories
+#
+# Idempotency: file module reports `changed` only when the .sources
+# template renders different bytes. `apt update` fires via handler ONLY
+# when the source list changes, so re-runs on a healthy host are silent.
+
+- name: Remove legacy enterprise repo (single-line format)
+  ansible.builtin.file:
+    path: "{{ pve_host_enterprise_list }}"
+    state: absent
+  notify: Apt update
+
+# Some installers also drop /etc/apt/sources.list.d/ceph.list pointing
+# at the enterprise ceph repo. We don't run Ceph (see vault doc
+# [[Thunderbolt Mesh Networking — 3-Node Cluster Option]] — Ceph
+# deferred indefinitely), so remove that too if present.
+- name: Remove legacy enterprise ceph repo if present
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/ceph.list
+    state: absent
+  notify: Apt update
+
+# PVE 9.x's newer installer also drops deb822-format enterprise sources
+# files alongside (or instead of) the legacy single-line variants. Same
+# URLs, same 401 problem unless you have a subscription. Discovered on
+# pve13t during the 2026-05-12 first-apply: its `Apt update` handler
+# failed on the enterprise.proxmox.com auth wall even though the
+# .list-format removals above had already run cleanly (pve12t and
+# pve13m happened to not have these deb822 sources from their older
+# installer versions; pve13t's fresh install on the same day did).
+- name: Remove enterprise PVE repo (deb822 format)
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/pve-enterprise.sources
+    state: absent
+  notify: Apt update
+
+- name: Remove enterprise Ceph repo (deb822 format)
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/ceph.sources
+    state: absent
+  notify: Apt update
+
+# Proxmox's archive key ships with the proxmox-archive-keyring package
+# on a stock install. Ensure it's present before the no-subscription
+# repo file references it via Signed-By.
+- name: Ensure proxmox-archive-keyring is installed
+  ansible.builtin.apt:
+    name: proxmox-archive-keyring
+    state: present
+    update_cache: false
+
+- name: Write Proxmox + Debian no-subscription sources (deb822)
+  ansible.builtin.template:
+    src: etc/apt/sources.list.d/pve-no-subscription.sources.j2
+    dest: "{{ pve_host_sources_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Apt update
+
+# Force the update before downstream tasks (packages.yml) try to install
+# anything. The handler-flush guarantees the cache is fresh.
+- name: Flush handlers (refresh apt cache before package installs)
+  ansible.builtin.meta: flush_handlers

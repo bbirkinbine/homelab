@@ -1,0 +1,33 @@
+---
+# Render /etc/hosts from inventory. The Proxmox docs require every
+# cluster member's hostname → LAN IP mapping present on every node so
+# pmxcfs can resolve peers without leaning on DNS. We additionally drop
+# a `<hostname>-tb` entry per node, mapped to the TB loopback, so
+# scripts and ssh shorthand can route over the TB fabric explicitly.
+
+- name: Template /etc/hosts
+  ansible.builtin.template:
+    src: etc/hosts.j2
+    dest: /etc/hosts
+    owner: root
+    group: root
+    mode: "0644"
+
+# /etc/machine-info is missing on stock PVE 9.x installs. The thunderbolt
+# kernel module reads PRETTY_HOSTNAME from this file when handshaking with
+# a TB peer; without it, peers see each other's device_name as "(none)"
+# and thunderbolt.yml step (c) can't match `tb_links[].peer` to a netdev.
+# Writing this file (and flushing handlers immediately so the module
+# reload runs BEFORE thunderbolt.yml's snapshot task) is what makes the
+# first apply converge in one pass rather than needing a re-run.
+- name: Ensure /etc/machine-info carries PRETTY_HOSTNAME
+  ansible.builtin.copy:
+    dest: /etc/machine-info
+    content: "PRETTY_HOSTNAME={{ inventory_hostname }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload thunderbolt-net to re-publish PRETTY_HOSTNAME
+
+- name: Flush handlers (re-publish TB hostname before thunderbolt.yml runs)
+  ansible.builtin.meta: flush_handlers

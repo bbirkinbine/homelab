@@ -1,0 +1,43 @@
+# vms/rootca/terraform/terraform.tfvars.example
+#
+# Copy to terraform.tfvars (gitignored) and fill in real values, OR
+# copy to terraform.tfvars.tpl with kp:// placeholders and use
+# `just hydrate rootca` to resolve them against KeePassXC.
+
+# Proxmox API endpoint URL.
+proxmox_endpoint = "https://pve12t:8006/"
+
+# Same `tofu@pve!apply` token as openbao — see docs/proxmox-tofu-permissions.md.
+proxmox_api_token = "tofu@pve!apply=00000000-0000-0000-0000-000000000000"
+
+# pve12t hosts HSM-A on the labeled jack at bus-port 1-2.
+proxmox_node = "pve12t"
+
+# Bootstrap admin (only reachable while enable_network=true).
+admin_username = "rootca-admin"
+ssh_public_key = "ssh-ed25519 AAAA...your-pubkey... brianbirkinbine@workstation"
+
+# AIR-GAP TOGGLE.
+#   true  — bootstrap mode: NIC attached, SSH reachable for `just ansible rootca`.
+#   false — operational mode: NIC removed, noVNC console only.
+# After bootstrap completes and you've verified the HSM tooling works,
+# flip this to false and `tofu apply` again to enforce the air gap.
+enable_network = true
+
+# LUKS-backed Proxmox Directory storage pool, set up host-side per
+# docs/proxmox-luks-storage.md. Must be Enabled=true in Proxmox at
+# the moment `tofu apply` runs; otherwise the storage isn't visible
+# to the API and the disk allocation fails.
+encrypted_storage_pool = "rootca-encrypted"
+
+# Cloud-init snippet stays on `local` — identity-only, not sensitive.
+snippets_storage = "local"
+
+# Physical bus-port of the labeled HSM-A jack on pve12t. Discovered
+# 2026-05-10 during legacy openbao deploy.sh testing. If you've
+# physically moved the HSM since, re-run `ssh root@pve12t 'lsusb -t'`
+# and update this value.
+hsm_usb_host_port = "1-2"
+
+# Leave false unless the jack is on USB 3 and EHCI passthrough fails.
+hsm_usb3 = false

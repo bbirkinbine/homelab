@@ -6,3 +6,25 @@
 .env.*
 !.env.*.example
 !.env.example
+
+# OpenTofu / Terraform — local state, provider cache, hydrated tfvars.
+# The .tpl (committed template with kp:// placeholders) and the
+# .example (committed manual-fill alternative) are explicitly NOT
+# ignored; only the resolved .tfvars and the state files are.
+vms/*/terraform/.terraform/
+vms/*/terraform/terraform.tfstate
+vms/*/terraform/terraform.tfstate.backup
+vms/*/terraform/terraform.tfvars
+vms/*/terraform/*.auto.tfvars
+vms/*/terraform/crash.log
+vms/*/terraform/crash.*.log
+
+# Ansible — local inventory with real IPs; retry files from failed runs.
+vms/*/ansible/inventory.yml
+vms/*/ansible/*.retry
+vms/*/ansible/.ansible_galaxy
+
+# Same patterns for the layer-0 pve-host role under pve-hosts/.
+pve-hosts/ansible/inventory.yml
+pve-hosts/ansible/*.retry
+pve-hosts/ansible/.ansible_galaxy

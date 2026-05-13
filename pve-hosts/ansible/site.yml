@@ -1,0 +1,33 @@
+---
+# pve-hosts/ansible/site.yml
+#
+# Top-level play for the pve-host role. Runs the role against all hosts
+# in the `pve_hosts` inventory group — three Intel NUCs running Proxmox
+# VE 9.x. The role is layer 0: it brings a freshly-installed PVE host
+# to a known-good baseline (repos, packages, time sync, network with TB
+# overlay, NFS mount, firewall, SSH keys). It deliberately does NOT
+# perform the cluster join (`pvecm create` / `pvecm add`) — that's a
+# manual step with quorum risk, owned by the operator. See CLAUDE.md
+# in this folder for the full rationale.
+#
+# Usage from repo root:
+#   just pve-hosts                         # full apply across the group
+#   just pve-hosts-check                   # --check --diff (dry run)
+# Or directly:
+#   cd pve-hosts/ansible
+#   ansible-playbook -i inventory.yml site.yml
+#
+# Single-node bring-up (e.g. when pve13t first arrives):
+#   ansible-playbook -i inventory.yml site.yml --limit pve13t
+
+- name: Bootstrap Proxmox VE hosts (layer 0)
+  hosts: pve_hosts
+  become: true
+  gather_facts: true
+  # serial: 1 forces one host at a time. Important because network
+  # changes can briefly knock a host off the air, and we'd rather lose
+  # one node mid-play than all three. Override with --forks if you
+  # really want parallel.
+  serial: 1
+  roles:
+    - role: pve-host

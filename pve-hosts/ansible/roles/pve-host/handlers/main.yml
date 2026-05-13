@@ -1,0 +1,59 @@
+---
+# Handlers run once per play after all notifying tasks complete. Keep
+# them minimal and side-effect-explicit — handlers that surprise an
+# operator are the worst kind.
+#
+# Safety note: there is NO handler that reloads networking. The
+# tasks/network.yml flow deliberately stages /etc/network/interfaces
+# without applying it; a separate handler (`Surface networking change`)
+# prints a one-line notice so the operator runs `ifreload -a` from
+# console. See pve-hosts/CLAUDE.md "What the role MUST do" point 5.
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Apt update
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 0
+
+- name: Restart chrony
+  ansible.builtin.systemd:
+    name: chrony
+    state: restarted
+
+# Re-applies every sysctl drop-in. Used by both the host tuning task
+# and the transit-only ip_forward task; one consolidated reload is
+# enough.
+- name: Apply sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: false
+
+# Triggered by `hosts_file.yml` when /etc/machine-info is written or
+# changes. The thunderbolt-net driver reads PRETTY_HOSTNAME at module
+# load; reloading forces a fresh handshake so the peer reads our name
+# correctly. The unload step is best-effort (silently no-ops if the
+# module isn't currently loaded — which is the common case on first
+# apply, since thunderbolt.yml hasn't run yet). On a re-run where the
+# TB fabric is already up, modprobe -r will fail if the module is in
+# use; that's acceptable here because /etc/machine-info would already
+# be correct and this handler would not have been notified.
+- name: Reload thunderbolt-net to re-publish PRETTY_HOSTNAME
+  ansible.builtin.shell: |
+    modprobe -r thunderbolt_net 2>/dev/null || true
+    sleep 1
+    modprobe thunderbolt_net
+  changed_when: false
+
+# Networking change marker. Prints rather than acts — see header.
+- name: Surface networking change
+  ansible.builtin.debug:
+    msg: >-
+      /etc/network/interfaces was modified. The role does NOT auto-reload
+      networking. From the host console (not SSH), run `ifreload -a` to
+      apply, then verify with `ip addr show` and `ip route show`. If any
+      `tb_links` entry shows "unresolved" in the play output, its .link
+      file is missing and the TB interface won't come up under its
+      pinned name — re-run the role after the peer node has applied
+      its own pve-host baseline.

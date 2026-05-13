@@ -1,0 +1,15 @@
+---
+# Install the operator's SSH pubkey for root@<host>. Proxmox uses root
+# + PAM for the web UI and root over SSH for cluster operations; there
+# is no benefit to creating an additional local admin user (the cluster
+# tooling expects root). Empty pubkey is permitted so the initial
+# scaffold doesn't fail before the operator has filled it in — the
+# warning prints from tasks/main.yml.
+
+- name: Install operator SSH key for root
+  ansible.posix.authorized_key:
+    user: root
+    state: present
+    key: "{{ admin_ssh_pubkey }}"
+    exclusive: false
+  when: (admin_ssh_pubkey | default('')) | length > 0

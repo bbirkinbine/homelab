@@ -1,0 +1,28 @@
+---
+# Mount the Asustor NFS export at /mnt/nas-vms with NFSv4.2. The task
+# manages /etc/fstab and the live mount; it does NOT register the
+# mount with Proxmox's storage layer (pvesm add) — that's a one-time
+# operator step documented in the cluster bring-up runbook, scoped to
+# a single node because /etc/pve/storage.cfg is pmxcfs-replicated.
+#
+# nfs-common is pulled in by the proxmox-ve metapackage on a stock
+# install; we do not re-install it here.
+#
+# Idempotency: ansible.posix.mount reports `changed` only when the
+# fstab line differs OR the current mount state differs from `state`.
+
+- name: Ensure NFS mount point exists
+  ansible.builtin.file:
+    path: "{{ nas_mount_point }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Mount the Asustor NFS export and persist in fstab
+  ansible.posix.mount:
+    path: "{{ nas_mount_point }}"
+    src: "{{ nas_ip }}:{{ nas_nfs_export }}"
+    fstype: nfs4
+    opts: "{{ pve_host_nfs_options }}"
+    state: mounted

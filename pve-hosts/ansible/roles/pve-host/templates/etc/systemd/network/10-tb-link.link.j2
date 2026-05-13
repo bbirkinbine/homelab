@@ -1,0 +1,30 @@
+# /etc/systemd/network/10-tb-{{ link.name }}.link — managed by Ansible
+# (pve-host role).
+#
+# Pins the TB-net interface for this link to a stable name. Without
+# this file, TB-net interface names (thunderbolt0, thunderbolt1, etc.)
+# depend on PCI enumeration order at boot and can flap across reboots,
+# silently breaking the static names in /etc/network/interfaces.
+#
+# Path= is auto-discovered by tasks/thunderbolt.yml step (c) — the role
+# matches each inventory tb_links[] entry's `peer` against the live
+# sysfs `device_name` of every TB-net netdev, then derives the parent
+# TB controller's PCIe BDF. Not declared in inventory. If discovery
+# fails (cable unplugged, peer's bolt not yet running), this file is
+# NOT rendered and the role surfaces an "unresolved" debug line; a
+# re-run after the peer enrolls fills it in.
+
+[Match]
+# Exact-match the PCI BDF, no trailing glob. The kernel's ID_PATH for
+# a thunderbolt-net netdev is just `pci-<bdf>` (no suffix). Earlier
+# versions used `Path=pci-<bdf>-*` which silently failed to match —
+# 99-default.link won the priority race and the interface stayed as
+# kernel-assigned `thunderbolt0`. The Driver= filter below ensures
+# we don't accidentally rename a non-TB netdev that happens to live
+# behind the same PCI controller.
+Path=pci-{{ link.pci_path }}
+Driver=thunderbolt-net
+
+[Link]
+Name={{ link.name }}
+MTUBytes=65520

@@ -1,0 +1,70 @@
+---
+# Entry point for the pve-host role. The order below matters:
+#
+#   repo        → pull packages from the right place before installing
+#   packages    → ifupdown2, chrony, etc. land before tasks that need them
+#   time        → cluster heartbeat depends on time agreement; do it early
+#   hosts_file  → other tasks may rely on hostname resolution
+#   network     → STAGES /etc/network/interfaces; never auto-reloads
+#   thunderbolt → modules, .link pinning, transit-node ip_forward
+#   tuning      → sysctl drop-in for high-MTU TB-net flows
+#   nfs         → mount the Asustor share at /mnt/nas-vms
+#   firewall    → /etc/pve/firewall/cluster.fw via delegate_to (pmxcfs race)
+#   users       → operator SSH key for root@<host>
+#
+# import_tasks (not include_tasks) — static composition so syntax
+# errors in any sub-file surface during `--syntax-check`.
+
+- name: Assert required per-host vars are set
+  ansible.builtin.assert:
+    that:
+      - pve_lan_ip | default('') | length > 0
+      - pve_lan_iface | default('') | length > 0
+      - tb_role | default('') in ['leaf', 'transit']
+      - tb_loopback | default('') | length > 0
+    fail_msg: >-
+      Inventory is missing one or more of pve_lan_ip, pve_lan_iface,
+      tb_role (leaf|transit), tb_loopback for host
+      {{ inventory_hostname }}. See pve-hosts/ansible/inventory.yml.example.
+    quiet: true
+
+# Empty pubkey is permitted so the initial scaffold runs cleanly.
+# Warn loudly though — root@<host> will not pick up a key.
+- name: Warn if admin_ssh_pubkey is empty
+  ansible.builtin.debug:
+    msg: >-
+      admin_ssh_pubkey is empty. tasks/users.yml will skip installing a
+      root authorized_keys entry. Set it in inventory before the first
+      production apply.
+  when: (admin_ssh_pubkey | default('')) | length == 0
+
+- name: APT repositories
+  ansible.builtin.import_tasks: repo.yml
+
+- name: Base packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Time sync (chrony)
+  ansible.builtin.import_tasks: time.yml
+
+- name: /etc/hosts
+  ansible.builtin.import_tasks: hosts_file.yml
+
+- name: Network (stage only — no auto-reload)
+  ansible.builtin.import_tasks: network.yml
+
+- name: Thunderbolt enablement
+  ansible.builtin.import_tasks: thunderbolt.yml
+
+- name: Sysctl tuning
+  ansible.builtin.import_tasks: tuning.yml
+
+- name: NFS mount
+  ansible.builtin.import_tasks: nfs.yml
+
+- name: Cluster firewall baseline (pve-firewall)
+  ansible.builtin.import_tasks: firewall.yml
+  when: pve_host_manage_cluster_firewall | bool
+
+- name: Operator SSH keys
+  ansible.builtin.import_tasks: users.yml

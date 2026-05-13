@@ -1,0 +1,53 @@
+# /etc/pve/firewall/cluster.fw — managed by Ansible (pve-host role).
+#
+# This file lives under /etc/pve, which Proxmox replicates across all
+# cluster nodes via pmxcfs. The role writes it from exactly ONE host
+# per play via `run_once: true` + `delegate_to:` (see
+# tasks/firewall.yml). Writing from multiple nodes simultaneously is
+# a race condition that can corrupt the cluster config.
+#
+# enable: 0 by default — the role stages the rules but does NOT turn
+# the firewall on automatically. Operator enables it post-cluster-join
+# via Datacenter → Firewall → Options → Enable, OR by editing this
+# file's `enable:` to 1 (replicates cluster-wide via pmxcfs). Reason:
+# pre-cluster, pmxcfs is single-node and cluster.fw only exists on the
+# node it was written to (pve12t). Turning the firewall on at that
+# point gives an asymmetric state where pve12t filters but pve13m and
+# pve13t don't, which breaks the TB fabric (caught 2026-05-13). After
+# `pvecm create` + `pvecm add`, pmxcfs replicates this file to all
+# nodes and enabling becomes safe.
+#
+# Default posture: DROP inbound, ACCEPT outbound, ACCEPT forward.
+# Forward must be accept so pve13m can transit TB traffic between
+# pve12t and pve13t (see vault doc [[Thunderbolt Mesh Networking —
+# 3-Node Cluster Option]] §"Proxmox firewall consideration").
+
+[OPTIONS]
+enable: 0
+policy_in: DROP
+policy_out: ACCEPT
+policy_forward: ACCEPT
+log_ratelimit: enable=1,rate=1/second,burst=5
+
+[RULES]
+# LAN admin access — SSH, Proxmox web UI, ICMP echo
+IN ACCEPT -source {{ pve_lan_subnet }} -p tcp -dport 22 -log nolog # SSH
+IN ACCEPT -source {{ pve_lan_subnet }} -p tcp -dport 8006 -log nolog # PVE web UI
+IN ACCEPT -source {{ pve_lan_subnet }} -p icmp -log nolog # ping
+
+# Corosync heartbeat — ring0 on LAN, ring1 on the TB migration subnet
+IN ACCEPT -source {{ pve_lan_subnet }} -p udp -dport 5404:5405 -log nolog
+IN ACCEPT -source {{ pve_tb_migration_subnet }} -p udp -dport 5404:5405 -log nolog
+
+# NFS to NAS is initiated from this host outbound; inbound on 2049 is
+# only needed for loopback (e.g. a guest VM mounting via this host).
+IN ACCEPT -source 127.0.0.1 -p tcp -dport 2049 -log nolog
+
+# TB fabric — accept BOTH the /31 link subnet (10.10.0.0/24) and the
+# /32 loopback subnet (10.10.10.0/24). Migration / pvesr / corosync
+# ring1 use the loopback addresses; diagnostic pings and any traffic
+# the kernel happens to source from the /31 endpoint use the link
+# subnet. Source-selection asymmetry between these two is normal and
+# both should pass without operator intervention.
+IN ACCEPT -source 10.10.0.0/24 -log nolog
+IN ACCEPT -source {{ pve_tb_migration_subnet }} -log nolog

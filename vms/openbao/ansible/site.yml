@@ -1,0 +1,19 @@
+---
+# vms/openbao/ansible/site.yml
+#
+# Top-level play for the openbao role. Runs the `openbao` role against
+# the inventory's `openbao` host group. Single-host today; the same
+# play scales out trivially to an HA pair (just add another host to
+# the group + tweak the role's `openbao_node_id` per host).
+#
+# Usage from repo root:
+#   just ansible openbao
+# Or directly:
+#   cd vms/openbao/ansible && ansible-playbook -i inventory.yml site.yml
+
+- name: Bootstrap OpenBao (Shamir seal)
+  hosts: openbao_servers
+  become: true
+  gather_facts: true
+  roles:
+    - role: openbao

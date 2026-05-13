@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# scripts/hydrate.sh — render terraform.tfvars from terraform.tfvars.tpl.
+#
+# Usage:
+#   scripts/hydrate.sh <role> [--force]
+#
+# Replaces kp:// placeholders in vms/<role>/terraform/terraform.tfvars.tpl
+# with values pulled from KeePassXC via `keepassxc-cli show`. Writes
+# the result to terraform.tfvars (gitignored, chmod 600).
+#
+# Placeholder grammar:
+#   kp://<group-path>/<entry-name>[#<field>]
+#
+#   group-path   : '/'-separated KeePassXC group names; first component
+#                  must NOT have a leading slash. e.g. Homelab/Tofu.
+#   entry-name   : title of the entry within that group.
+#   field        : optional; defaults to Password. Common alternatives:
+#                  UserName, URL, Notes.
+#
+# Environment:
+#   KEEPASSXC_DB — REQUIRED. Path to the .kdbx file. Brian's homelab DB
+#                  is typically ~/Documents/KeePassXC/homelab.kdbx; set
+#                  KEEPASSXC_DB in your shell profile to avoid pasting
+#                  the path every run.
+#   KEEPASSXC_KEYFILE — OPTIONAL. Path to a key file (if the DB uses
+#                       a key file in addition to or instead of a master
+#                       password).
+#
+# Idempotency: if terraform.tfvars already exists and is newer than the
+# .tpl, hydrate is a no-op. Pass --force to rehydrate anyway.
+#
+# This script prompts for the DB master password ONCE (or the YubiKey
+# touch, if the DB is challenge-response unlocked), then reuses the
+# unlocked DB for all subsequent lookups via keepassxc-cli's stdin
+# pattern.
+
+set -euo pipefail
+
+ROLE="${1:-}"
+FORCE=0
+shift || true
+for arg in "$@"; do
+  case "$arg" in
+    --force|-f) FORCE=1 ;;
+    *) echo "ERROR: unknown arg '$arg'" >&2; exit 64 ;;
+  esac
+done
+
+if [[ -z "$ROLE" ]]; then
+  echo "Usage: $0 <role> [--force]" >&2
+  exit 64
+fi
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROLE_TF_DIR="$REPO_ROOT/vms/$ROLE/terraform"
+TPL="$ROLE_TF_DIR/terraform.tfvars.tpl"
+OUT="$ROLE_TF_DIR/terraform.tfvars"
+
+if [[ ! -f "$TPL" ]]; then
+  echo "ERROR: $TPL not found." >&2
+  echo "       Either create one with kp:// placeholders, or skip hydrate" >&2
+  echo "       and create $OUT manually from terraform.tfvars.example." >&2
+  exit 65
+fi
+
+# Skip if already up-to-date.
+if [[ -f "$OUT" && $FORCE -eq 0 && "$OUT" -nt "$TPL" ]]; then
+  echo "==> $OUT is newer than $TPL; skipping (use --force to rehydrate)."
+  exit 0
+fi
+
+# Verify tooling + DB env.
+if ! command -v keepassxc-cli >/dev/null 2>&1; then
+  echo "ERROR: keepassxc-cli not on PATH." >&2
+  echo "       brew install keepassxc   (or your distro's equivalent)" >&2
+  exit 66
+fi
+
+if [[ -z "${KEEPASSXC_DB:-}" ]]; then
+  echo "ERROR: KEEPASSXC_DB environment variable not set." >&2
+  echo "       export KEEPASSXC_DB=~/path/to/homelab.kdbx" >&2
+  echo "       (Add to your shell profile so it's persistent.)" >&2
+  exit 67
+fi
+
+if [[ ! -f "$KEEPASSXC_DB" ]]; then
+  echo "ERROR: KEEPASSXC_DB=$KEEPASSXC_DB does not exist." >&2
+  exit 68
+fi
+
+KP_ARGS=(-q)
+if [[ -n "${KEEPASSXC_KEYFILE:-}" ]]; then
+  KP_ARGS+=(--key-file "$KEEPASSXC_KEYFILE")
+fi
+
+# Prompt for the master password once. We read it here and pipe to
+# keepassxc-cli on stdin for each lookup; KeePassXC has no
+# session/socket mode in the CLI, so we cache the password in this
+# process's memory rather than re-prompting per entry.
+echo -n "KeePassXC master password for $KEEPASSXC_DB: " >&2
+read -rs KP_PASSWORD
+echo >&2
+
+if [[ -z "$KP_PASSWORD" ]]; then
+  echo "ERROR: empty password." >&2
+  exit 69
+fi
+
+# kp_lookup <group-path>/<entry-name>[#<field>]  →  prints the value.
+# Uses `keepassxc-cli show -a <field>` to fetch a single attribute.
+# Falls back to Password if no #field is specified.
+kp_lookup() {
+  local spec="$1"
+  local path field
+
+  if [[ "$spec" == *"#"* ]]; then
+    path="${spec%%#*}"
+    field="${spec#*#}"
+  else
+    path="$spec"
+    field="Password"
+  fi
+
+  # keepassxc-cli expects the path with a leading slash.
+  echo -n "$KP_PASSWORD" | keepassxc-cli show "${KP_ARGS[@]}" \
+    -s -a "$field" "$KEEPASSXC_DB" "/$path"
+}
+
+echo "==> rendering $OUT from $TPL"
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
+
+# Pull every kp:// reference, look it up, and stream-substitute.
+# We process line-by-line so a single failed lookup gives a clear
+# error pointing at the offending line.
+LINE_NO=0
+while IFS= read -r line || [[ -n "$line" ]]; do
+  LINE_NO=$((LINE_NO + 1))
+  while [[ "$line" =~ kp://([^[:space:]\"\'\)]+) ]]; do
+    SPEC="${BASH_REMATCH[1]}"
+    if ! VALUE="$(kp_lookup "$SPEC" 2>/dev/null)"; then
+      echo "ERROR: line $LINE_NO: could not resolve kp://$SPEC" >&2
+      echo "       Check the entry exists in $KEEPASSXC_DB and the field name is correct." >&2
+      exit 70
+    fi
+    # Escape sed metacharacters in the value so the replacement is literal.
+    ESCAPED="$(printf '%s' "$VALUE" | sed -e 's/[\/&|]/\\&/g')"
+    line="$(printf '%s' "$line" | sed -E "s|kp://${SPEC//|/\\|}|$ESCAPED|")"
+  done
+  printf '%s\n' "$line" >> "$TMP"
+done < "$TPL"
+
+install -m 600 "$TMP" "$OUT"
+echo "==> wrote $OUT (mode 0600)"

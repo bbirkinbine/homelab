@@ -1,0 +1,215 @@
+---
+# Five-step TB enablement (matches pve-hosts/CLAUDE.md `thunderbolt.yml` spec):
+#
+#   (a) Persist + load thunderbolt / thunderbolt_net kernel modules.
+#   (b) Enroll Intel-Corp TB peer hosts via boltctl so their `authorized`
+#       state survives cable unplug + reboot (security=user is the
+#       firmware default on PVE 9.x ASUS NUC hardware; no BIOS option
+#       to disable it).
+#   (c) Snapshot the live TB topology from sysfs and resolve each
+#       inventory tb_links[] entry to a concrete PCI controller path.
+#       PCI paths are NOT declared in inventory — they're discovered.
+#   (d) Render /etc/systemd/network/10-tb-<name>.link to pin the
+#       TB-net interface name across reboots.
+#   (e) Transit-node-only: net.ipv4.ip_forward=1 so pve12t<->pve13t
+#       packets can hop through pve13m at L3.
+#
+# See vault doc [[Thunderbolt Mesh Networking — 3-Node Cluster Option]]
+# for the authoritative fabric design (addresses, MTU, transit role).
+
+# --- (a) module load -------------------------------------------------
+
+- name: Ensure thunderbolt + thunderbolt_net load at every boot
+  ansible.builtin.template:
+    src: etc/modules-load.d/thunderbolt.conf.j2
+    dest: /etc/modules-load.d/thunderbolt.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+# Also load them right now so this play can enroll peers + discover
+# netdevs in a single pass. modprobe is idempotent — already-loaded
+# modules are a no-op.
+- name: Load thunderbolt modules in current boot
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - thunderbolt
+    - thunderbolt_net
+
+# --- (b) enroll TB peer hosts ---------------------------------------
+
+# Collect peer + netdev data via the role's tb_topology.py helper.
+# JSON output -> from_json filter -> typed fact. See the script for
+# its output schema. We re-run this after enrollment in case new
+# peers became visible.
+- name: Snapshot TB topology from sysfs
+  ansible.builtin.script: tb_topology.py
+  args:
+    executable: /usr/bin/python3
+  register: tb_topology_raw
+  changed_when: false
+  check_mode: false
+
+- name: Parse TB topology fact
+  ansible.builtin.set_fact:
+    tb_topology: "{{ tb_topology_raw.stdout | from_json }}"
+
+# TB peer hosts (other PVE nodes) get their unique_id synthesized by
+# the kernel with a `-ffff-ffffffffffff` suffix because there's no real
+# persistent UUID for a host-to-host TB connection (unlike a peripheral
+# such as the Razer Core X which has a factory-burned UUID). boltd's
+# `enroll` workflow is built for peripherals and refuses these
+# synthesized IDs with "device with id X could not be found". So for
+# peer hosts we use udev to auto-authorize on `add` events, matching
+# by vendor_name. This is the canonical pattern for host-to-host TB
+# networking on Linux. Razer Core X (vendor "Razer") is unaffected and
+# stays managed by boltd via its existing policy=auto enrollment.
+#
+# Discovered on the 2026-05-12 first-apply when `boltctl enroll`
+# failed on pve13m's synthesized UUID despite a clean sysfs snapshot.
+- name: Write udev rule auto-authorizing Intel-Corp TB peer hosts
+  ansible.builtin.copy:
+    dest: /etc/udev/rules.d/99-thunderbolt-peer-auto-authorize.rules
+    content: |
+      # Managed by Ansible (pve-host role). Auto-authorizes any TB
+      # peer host whose vendor_name is "Intel Corp." (the other PVE
+      # nodes in the cluster). This lab's TB fabric is dedicated to
+      # inter-node migration traffic — anything plugged in is a peer
+      # node by design.
+      #
+      # Peripherals (e.g. Razer Core X eGPU on pve12t) have a
+      # different vendor_name and are unaffected; they remain managed
+      # by boltd via boltctl enroll --policy=auto.
+      SUBSYSTEM=="thunderbolt", ACTION=="add", ATTR{vendor_name}=="Intel Corp.", ATTR{authorized}=="0", ATTR{authorized}="1"
+    owner: root
+    group: root
+    mode: "0644"
+  register: tb_authorize_rule
+
+# Reload udev's compiled ruleset so the new rule takes effect for
+# subsequent events.
+#
+# noqa: not a handler — the trigger task below depends on this having
+# already run synchronously; handlers fire end-of-play.
+- name: Reload udev rules  # noqa: no-handler
+  ansible.builtin.command:
+    cmd: udevadm control --reload-rules
+  changed_when: false
+  when: tb_authorize_rule.changed
+
+# Re-fire `add` events on existing thunderbolt devices so the rule
+# applies to peers that were already enumerated before it landed.
+# Authorization happens inline; thunderbolt-net netdevs come up as
+# soon as the kernel marks authorized=1.
+#
+# noqa: not a handler — has to run synchronously between the rule
+# install and the re-snapshot below. End-of-play handlers fire too
+# late for that ordering.
+- name: Trigger udev for existing thunderbolt devices  # noqa: no-handler
+  ansible.builtin.command:
+    cmd: udevadm trigger --action=add --subsystem-match=thunderbolt
+  changed_when: true
+  when: tb_authorize_rule.changed
+
+# Short buffer for the kernel to process authorizations and bring up
+# the TB-net netdevs before the next snapshot reads them. PCI tunnels
+# come up within ~1s of authorization; 3s is generous insurance.
+#
+# noqa: handlers fire end-of-play, which is the wrong sequence point —
+# the re-snapshot below depends on netdevs being up RIGHT NOW.
+- name: Wait for TB-net netdevs to settle after authorization  # noqa: no-handler
+  ansible.builtin.pause:
+    seconds: 3
+  when: tb_authorize_rule.changed
+
+- name: Re-snapshot TB topology post-authorization  # noqa: no-handler
+  ansible.builtin.script: tb_topology.py
+  args:
+    executable: /usr/bin/python3
+  register: tb_topology_raw2
+  changed_when: false
+  check_mode: false
+  when: tb_authorize_rule.changed
+
+- name: Refresh TB topology fact after authorization
+  ansible.builtin.set_fact:
+    tb_topology: "{{ tb_topology_raw2.stdout | from_json }}"
+  when: tb_authorize_rule.changed and tb_topology_raw2.stdout is defined
+
+# --- (c) resolve inventory tb_links[] -> live pci_path ---------------
+
+# For each inventory tb_links entry, find the live TB-net netdev whose
+# parent device_name matches link.peer. The netdev's PCI BDF becomes
+# the link's pci_path. If no match (cable unplugged, peer's bolt not
+# yet running so device_name is blank), pci_path stays empty and the
+# .link rendering step warns + skips — re-run after the peer's role
+# completes and device_name propagates.
+# Seed the fact empty so re-runs don't accumulate stale entries from a
+# previous play (set_fact persists for the play but not across).
+- name: Initialize tb_links_resolved
+  ansible.builtin.set_fact:
+    tb_links_resolved: []
+
+- name: Resolve each inventory tb_link to its discovered PCI path
+  ansible.builtin.set_fact:
+    tb_links_resolved: "{{ tb_links_resolved + [resolved] }}"
+  loop: "{{ tb_links | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  vars:
+    matched_pci: >-
+      {{ tb_topology.netdevs
+         | selectattr('device_name', 'equalto', item.peer)
+         | map(attribute='pci_bdf')
+         | first | default('') }}
+    resolved: "{{ item | combine({'pci_path': matched_pci}) }}"
+
+# Friendly visibility into what got resolved vs. skipped.
+- name: Report tb_links resolution
+  ansible.builtin.debug:
+    msg: >-
+      {{ link.name }} -> peer={{ link.peer }}
+      pci_path={{ link.pci_path if link.pci_path else '<unresolved — re-run after peer enrolls>' }}
+  loop: "{{ tb_links_resolved }}"
+  loop_control:
+    loop_var: link
+    label: "{{ link.name }}"
+
+# --- (d) pin TB-net interface names via systemd .link ----------------
+
+- name: Pin TB-net interface names via systemd .link
+  ansible.builtin.template:
+    src: etc/systemd/network/10-tb-link.link.j2
+    dest: "/etc/systemd/network/10-tb-{{ link.name }}.link"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ tb_links_resolved }}"
+  loop_control:
+    loop_var: link
+    label: "{{ link.name }}"
+  when: link.pci_path | length > 0
+
+# --- (e) transit-node forwarding ------------------------------------
+
+- name: Enable IPv4 forwarding on the transit node
+  ansible.builtin.template:
+    src: etc/sysctl.d/99-tb-forward.conf.j2
+    dest: /etc/sysctl.d/99-tb-forward.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: ip_forwarding_enabled | default(false)
+  notify: Apply sysctl
+
+# Symmetric cleanup: if a node was previously transit and is being
+# demoted to leaf, drop the forwarding override so sysctl --system
+# returns to the kernel default at next reload.
+- name: Remove IPv4 forwarding drop-in on non-transit nodes
+  ansible.builtin.file:
+    path: /etc/sysctl.d/99-tb-forward.conf
+    state: absent
+  when: not (ip_forwarding_enabled | default(false))
+  notify: Apply sysctl

@@ -1,0 +1,85 @@
+{# /etc/network/interfaces template — managed by Ansible (pve-host role).
+   Branches on `tb_role` (leaf | transit) to emit the correct route plan.
+
+   Address plan, IPs, MTU, and route shape all come from the vault doc
+   [[Thunderbolt Mesh Networking — 3-Node Cluster Option]] §"Configuration
+   reference". Do not edit that plan without updating the vault doc first;
+   the vault is authoritative and downstream operator runbooks reference it.
+
+   ifupdown2 (Debian / Proxmox default) is the active backend, so
+   `mtu`, `post-up`, and `bridge-*` directives apply via that parser.
+#}
+# /etc/network/interfaces — managed by Ansible (pve-host role).
+# Do not edit by hand. Source:
+#   pve-hosts/ansible/roles/pve-host/templates/etc/network/interfaces.j2
+#
+# Reload from console (NOT over SSH) with: ifreload -a
+
+source /etc/network/interfaces.d/*
+
+auto lo
+iface lo inet loopback
+
+# Physical 2.5GbE NIC — held by vmbr0
+auto {{ pve_lan_iface }}
+iface {{ pve_lan_iface }} inet manual
+
+# Management bridge (LAN). Proxmox web UI + SSH + NFS to NAS + Corosync
+# ring0 all ride this bridge. MTU stays at 1500 to match the upstream
+# switch + NAS NICs.
+auto vmbr0
+iface vmbr0 inet static
+    address {{ pve_lan_ip }}/{{ pve_lan_subnet.split('/')[1] }}
+    gateway {{ pve_lan_gateway }}
+    bridge-ports {{ pve_lan_iface }}
+    bridge-stp off
+    bridge-fd 0
+    mtu 1500
+
+{% for link in tb_links | default([]) %}
+# Thunderbolt link to {{ link.peer }} ({{ tb_role }} side, MTU 65520)
+auto {{ link.name }}
+iface {{ link.name }} inet static
+    address {{ link.local_addr }}
+    mtu 65520
+
+{% endfor %}
+# Loopback alias for the migration network ({{ pve_tb_migration_subnet }}).
+# Every TB-fabric peer reaches this host by this /32 address regardless
+# of which TB hop carries the packet. post-up routes below are scoped
+# to this iface — they fire when lo:10 comes up.
+auto {{ pve_host_tb_loopback_alias }}
+iface {{ pve_host_tb_loopback_alias }} inet static
+    address {{ tb_loopback }}/32
+    #
+    # The `src {{ tb_loopback }}` hint on every post-up route below is
+    # CRITICAL for transit to work. Without it, kernel default source
+    # selection picks the outgoing /31 endpoint (e.g. 10.10.0.0), and
+    # the far node's reply has no route back: a leaf's /31 only covers
+    # its own 2-address subnet, so replies to the *other* leaf's /31
+    # endpoint fall through to the default gateway (vmbr0 / LAN) and
+    # never make it back. With the src hint, all loopback traffic
+    # sources from the /32 loopback (which every node has explicit
+    # /32 routes for), and return paths flow back through the TB
+    # fabric naturally. Discovered 2026-05-13 — `pve12t → pve13t` and
+    # `pve13t → pve12t` transit pings failed silently until the src
+    # hint was added.
+{% if tb_role == 'leaf' and (tb_links | default([]) | length) > 0 %}
+    # Leaf node — every other peer reachable via the single TB neighbor
+    # ({{ tb_links[0].peer }}). pve13m forwards toward the far leaf.
+{% for peer in groups['pve_hosts'] | sort if peer != inventory_hostname %}
+    post-up ip route add {{ hostvars[peer].tb_loopback }}/32 via {{ tb_links[0].peer_addr }} dev {{ tb_links[0].name }} src {{ tb_loopback }}
+    post-down ip route del {{ hostvars[peer].tb_loopback }}/32 via {{ tb_links[0].peer_addr }} dev {{ tb_links[0].name }} || true
+{% endfor %}
+{% elif tb_role == 'transit' %}
+    # Transit node — each peer's loopback is one TB hop away. We
+    # explicitly route via the peer's /31 address (not just `dev <link>
+    # scope link`) because Linux's ARP defaults turned out to be
+    # asymmetric in practice (loopback-ARP question on one cable but
+    # not the other). Routing via the /31 peer keeps the kernel ARPing
+    # for an address that definitely responds.
+{% for link in tb_links %}
+    post-up ip route add {{ hostvars[link.peer].tb_loopback }}/32 via {{ link.peer_addr }} dev {{ link.name }} src {{ tb_loopback }}
+    post-down ip route del {{ hostvars[link.peer].tb_loopback }}/32 via {{ link.peer_addr }} dev {{ link.name }} || true
+{% endfor %}
+{% endif %}

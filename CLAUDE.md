@@ -12,15 +12,23 @@ The repo is **public** on GitHub. Treat every change as something a stranger wil
 
 ---
 
-## Active context (as of 2026-05-08)
+## Active context (as of 2026-05-11)
 
 A few states that won't be obvious from the code alone:
 
 **Both base templates are committed and shipping.** Treat `packer/ubuntu-24-04-base/` and `packer/windows-11-base/` as load-bearing — both build reproducibly and have been validated end-to-end. The Windows pipeline shipped in commit 5135652 (proxmox-iso + virtualbox-iso). When working on one base, don't modify the other for "while I'm here" cleanups; if a fix genuinely belongs across both, surface it and ask first.
 
-**Cluster transition in progress.** `README.md` currently describes the three NUCs as independent (per-node tokens, per-node template builds). Brian is moving to a 3-node Proxmox cluster with NFS-shared storage on an Asustor NAS. Until that transition lands in a commit: assume per-node tokens, per-node template builds, no shared cluster filesystem. When the cost is small, parameterize node names rather than hard-coding one — that way nothing breaks when the cluster lands.
+**Cluster transition in progress.** `README.md` currently describes the three NUCs as independent (per-node tokens, per-node template builds). Brian is moving to a 3-node Proxmox cluster (corosync) with NFS-shared storage from the Asustor AS6706T. Authoritative design in the vault's `VM Mobility — 3-Node Cluster on 2.5GbE.md`; hardware inventory in `Homelab Inventory.md`. Until that transition lands in a commit:
 
-**Repo is migrating from `deploy.sh` shell scripts to OpenTofu** (`bpg/proxmox` provider). New VM definitions should prefer `.tf` over `.sh` where the topic is provisioning shape (clone, size, network). Existing shell scripts in `vms/*/` may stay for now — don't rewrite them speculatively without asking.
+- **Proxmox hostnames stay `pveXX` (`pve12t`, `pve13m`, `pve13t`).** The vault Inventory doc's `nuc12 / nuc13-mini / nuc13-tall` are physical-chassis labels, NOT Proxmox node names — don't rename one to the other.
+- **`cpu_type = "x86-64-v3"`** is the right module default (set in `modules/proxmox-vm/variables.tf`) for cluster-mobile VMs; it's the common baseline across Alder/Raptor Lake-P/H. Use `host` only on hardware-pinned VMs (eGPU on `pve12t` for the LLM role, USB-HSM passthrough for the Root CA role).
+- **NFS shared storage (`nas-vms`) does not exist yet.** Cluster-mobile roles (openbao, future amp-game) will eventually default to that pool instead of `local-lvm`; don't pre-flip the defaults until the NAS export is mounted and the cluster is up.
+- **Storage exceptions that stay node-pinned** even after the cluster lands: `nuc12-fast` (LVM-thin on a dedicated 1 TB SATA SSD in `pve12t`'s 2.5" bay, VG `nuc12fast_vg`, for the LLM models cache — physically separate from the NVMe-backed `pve` VG so the NVMe stays full-size as `local-lvm`) and the per-node ISO library. The Root CA VM is still pve12t-pinned but for the HSM USB-passthrough reason, not for a host-side encrypted Directory pool — Root CA encryption was moved inside the guest (2026-05-11). See `vms/rootca/README.md`. If `pve12t` is ever rebuilt with a single-NVMe layout (no SATA), `nuc12-fast` would have to come out of the `pve` VG via `lvreduce` — see `docs/proxmox-install.md` § 2 for the fallback procedure.
+- **ZFS is off the table** for this lab — ext4-on-LVM on the hosts, btrfs on the NAS, LUKS-on-ext4 for the Root CA partition.
+
+**OpenTofu + Ansible migration underway.** The first port landed at `vms/openbao/` (OpenTofu provisioning + Ansible config + identity-only cloud-init, with the legacy shell + HSM-passthrough preserved at `vms/openbao/legacy/`). The shared module is `modules/proxmox-vm/`; cross-cutting tooling lives at `scripts/` + `Justfile`; the workstation flow is in `docs/opentofu-setup.md`. New roles should copy that shape rather than authoring fresh `deploy.sh` scripts. Existing shell scripts in other `vms/*/` may stay for now — don't rewrite them speculatively without asking.
+
+**OpenBao seal model changed (2026-05-10).** OpenBao now uses Shamir (5-of-3 manual unseal). The CardLogix SmartCard-HSM 4K pair was re-roled to the offline Root CA position — see the vault's `OpenBao Homelab Setup.md` and `CardLogix as Offline Root CA.md` (paths under `Projects/Homelab/` in the Obsidian vault). Don't restore the HSM-via-PKCS#11 seal path on this VM; the mechanism intersection between OpenBao's seal and SC-HSM 4K is empty.
 
 ---
 
@@ -111,11 +119,19 @@ Avoid emojis in repo files. Avoid the words *genuinely*, *straightforward*, *act
 
 When a task touches one of these areas, read the local doc first before suggesting structural changes — they're authoritative for their component.
 
-- **Proxmox API user/token setup:** `docs/proxmox-permissions.md`
+- **Scratch build order (master index):** `docs/0-scratch-build-order.md` — phased walkthrough for standing up the cluster from bare metal; points at every other doc in correct order. Read first if rebuilding the whole lab.
+- **Deploying VMs (start here for a VM, not a rebuild):** `docs/deploying-vms.md` — role-class chooser, repeatable 7-step flow, from-scratch checklist for new roles
+- **Asustor NAS setup (NFS prereqs):** `docs/asustor-nas-setup.md` — NFS server enablement, shared folder creation, export ACLs (squash/sync/subnet); must land before the `pve-host` role's `nfs.yml` task runs
+- **Proxmox bare-metal install (layer 0a):** `docs/proxmox-install.md` — USB media, BIOS prereqs, installer click-through, post-install carve-outs (`nuc12-fast` LVM-thin), TB cabling; precedes the `pve-host` Ansible role
+- **PVE host baseline (layer 0b, Ansible):** `pve-hosts/README.md` — runs against a freshly-installed PVE 9.x host; spec lives in `pve-hosts/CLAUDE.md`
+- **Proxmox API user/token setup (Packer):** `docs/proxmox-permissions.md`
+- **Proxmox API user/token setup (OpenTofu):** `docs/proxmox-tofu-permissions.md`
+- **OpenTofu + Ansible workstation flow:** `docs/opentofu-setup.md`
 - **GPU passthrough (Thunderbolt eGPU on `pve12t`):** `docs/proxmox-gpu-passthrough.md`
 - **Ubuntu base build runbook:** `packer/ubuntu-24-04-base/README.md`
 - **Windows base build runbook (split-host):** `packer/windows-11-base/README.md`
-- **Per-role VM definitions:** `vms/<role>/README.md`
+- **Shared OpenTofu module:** `modules/proxmox-vm/variables.tf` (full input surface) + `modules/proxmox-vm/main.tf` (resource shapes)
+- **Per-role VM definitions:** `vms/<role>/README.md` — canonical example is `vms/openbao/`
 
 ---
 

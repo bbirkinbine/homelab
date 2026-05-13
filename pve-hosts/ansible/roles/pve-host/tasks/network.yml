@@ -1,0 +1,37 @@
+---
+# Stage /etc/network/interfaces from the template and trigger the
+# "Surface networking change" handler — but do NOT reload networking.
+#
+# Why no auto-reload:
+#   * TB interface names can flap if 10-tb-*.link files do not yet have
+#     pci_path filled in (first run on a freshly-arrived node).
+#   * `ifreload -a` over SSH on a host whose vmbr0 stanza is being
+#     rewritten can drop the connection mid-apply.
+#   * Network changes on a clustered node need a controlled blast
+#     radius. Operator-driven `ifreload -a` from console is the safer
+#     contract.
+#
+# The handler prints a clear notice so the operator knows manual reload
+# is pending. Override pve_host_auto_reload_networking in inventory to
+# true only for ephemeral test environments.
+
+- name: Stage /etc/network/interfaces
+  ansible.builtin.template:
+    src: etc/network/interfaces.j2
+    dest: /etc/network/interfaces
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Surface networking change
+  register: pve_host_interfaces_result
+
+# Escape hatch: in non-prod / lab-only contexts the operator can flip
+# pve_host_auto_reload_networking=true in inventory to let the role
+# fire ifreload -a itself. Off by default for the reasons in the
+# header.
+- name: Reload networking (auto, opt-in only)
+  ansible.builtin.command: ifreload -a
+  when:
+    - pve_host_auto_reload_networking | bool
+    - pve_host_interfaces_result is changed
+  changed_when: true

@@ -15,10 +15,16 @@ or more Proxmox nodes.
 | `pve13m` | Intel NUC 13 Pro Mini | i7-1360P (13th gen, 4P+8E / 16T) | 64 GiB | — |
 | `pve13t` | ASUS NUC 13 Pro Tall | i7-13620H (13th gen, 6P+4E / 16T) | 64 GiB | — |
 
-Each node is independent (not clustered): per-node Proxmox user/token
-setup, per-node template builds. Tooling in this repo treats nodes as
-interchangeable apart from peripherals — the GPU-bearing roles obviously
-only deploy to nodes that have a GPU.
+The three nodes are being brought up as a 3-node Proxmox cluster
+(corosync over the 2.5GbE LAN, with a Thunderbolt line-topology overlay
+for live-migration traffic). Until cluster join (`pvecm create` /
+`pvecm add`) lands, each node still gets its own API user/token setup;
+once clustered, users and tokens replicate cluster-wide via pmxcfs.
+Templates remain per-node — Packer writes to local storage on the node
+it builds against. VMs on cluster-shared NFS storage (`nas-vms` from the
+Asustor) can live-migrate between nodes; roles pinned to specific
+hardware (eGPU on `pve12t`, USB-HSM for the offline Root CA on `pve12t`)
+stay node-local.
 
 ### Build hosts (non-Proxmox)
 
@@ -37,11 +43,32 @@ only deploy to nodes that have a GPU.
   9101 on a Proxmox node) and `virtualbox-iso` (local VBox build on the
   T480; outputs VMDK that converts to qcow2 for virt-manager / libvirt).
   See [its README](packer/windows-11-base/README.md).
-- `vms/` — Per-role VM definitions cloned from the base template
-  (cloud-init + a `deploy.sh` per role).
-- `docs/proxmox-permissions.md` — Runbook for provisioning the dedicated
-  Proxmox API user, role, and token used by Packer (least-privilege, per
-  node).
+- `modules/proxmox-vm/` — Shared OpenTofu module that clones a Packer
+  template into a per-role VM with a cloud-init drive. Called from
+  each role's `terraform/` workspace.
+- `vms/` — Per-role VM definitions. New roles use OpenTofu +
+  Ansible (`terraform/` + `ansible/` + `cloud-init/`); see
+  [`vms/openbao/`](vms/openbao/README.md) as the canonical example.
+  Some older roles still ship a shell `deploy.sh` and will migrate
+  in subsequent passes.
+- `pve-hosts/` — Layer-0 Ansible role (`pve-host`) that brings a
+  freshly-installed Proxmox VE 9.x host to baseline (repos, packages,
+  chrony, `/etc/hosts`, network + Thunderbolt overlay, NFS mount,
+  pve-firewall baseline, SSH keys). Stops short of the manual
+  cluster-join ceremony. See [pve-hosts/README.md](pve-hosts/README.md).
+- `scripts/` — Cross-cutting tooling: `preflight.sh` (ssh / Proxmox /
+  template / snippets checks) and `hydrate.sh` (renders
+  `terraform.tfvars` from KeePassXC).
+- `Justfile` — Recipes that wrap the OpenTofu + Ansible flow per
+  role (`just plan openbao`, `just apply openbao`, etc.).
+- `docs/deploying-vms.md` — **Start here** for VM deploys. Orients you
+  among the role-classes, points at the relevant runbooks, and includes
+  the from-scratch checklist for adding a new role.
+- `docs/proxmox-permissions.md` — API user/role/token for Packer.
+- `docs/proxmox-tofu-permissions.md` — API user/role/token for
+  OpenTofu (sibling of the Packer doc; smaller role).
+- `docs/opentofu-setup.md` — Workstation setup, hydrate flow, state
+  management.
 - `docs/proxmox-gpu-passthrough.md` — Host-side runbook for binding an
   NVIDIA GPU (including Thunderbolt eGPUs) to `vfio-pci` so a VM can
   take it over. Prerequisite for [`vms/llm/`](vms/llm/).
@@ -87,12 +114,40 @@ the same sysprep'd state:
 
 ## Getting started
 
-1. Set up the Proxmox API user/token on each node — see
-   [docs/proxmox-permissions.md](docs/proxmox-permissions.md).
+**Standing up the lab from scratch?** Read [docs/0-scratch-build-order.md](docs/0-scratch-build-order.md)
+top-to-bottom — it's the master index that walks the four phases (substrate
+→ cluster bring-up → IaC enablement → per-role deploys) and points at the
+authoritative doc for each step.
+
+If you're rebuilding a node (or the whole cluster) from bare metal,
+work through layer 0 first, then come back to step 1 below:
+
+- **(In parallel)** [docs/asustor-nas-setup.md](docs/asustor-nas-setup.md) —
+  NAS-side NFS export. Can run while the NUC is installing.
+- [docs/proxmox-install.md](docs/proxmox-install.md) — USB media, BIOS
+  prereqs, installer click-through, per-node carve-outs.
+- [pve-hosts/README.md](pve-hosts/README.md) — Ansible baseline against
+  the freshly-installed host (repos, packages, chrony, network +
+  Thunderbolt overlay, NFS mount, firewall, SSH).
+- Cluster join (manual `pvecm create` / `pvecm add`) — quorum-aware,
+  never automated; see [pve-hosts/README.md](pve-hosts/README.md#post-baseline-manual-steps).
+
+Once a node is at PVE baseline + cluster-joined, the IaC quickstart is:
+
+1. Set up the Proxmox API users/tokens on each node — see
+   [docs/proxmox-permissions.md](docs/proxmox-permissions.md) for
+   Packer and [docs/proxmox-tofu-permissions.md](docs/proxmox-tofu-permissions.md)
+   for OpenTofu.
 2. Build the Ubuntu base template — see
    [packer/ubuntu-24-04-base/README.md](packer/ubuntu-24-04-base/README.md).
 3. (Optional) Build the Windows base template — see
    [packer/windows-11-base/README.md](packer/windows-11-base/README.md).
+4. Provision a per-role VM via OpenTofu + Ansible — start with
+   [docs/deploying-vms.md](docs/deploying-vms.md) for orientation
+   (which role-class to copy, the repeatable 7-step flow, the
+   from-scratch checklist for new roles), then drill into the
+   relevant per-role README ([vms/openbao/](vms/openbao/README.md) or
+   [vms/rootca/](vms/rootca/README.md)).
 
 ## Acknowledgements
 

@@ -1,0 +1,23 @@
+# /etc/hosts — managed by Ansible (pve-host role).
+# Proxmox requires every cluster member's hostname → LAN IP mapping to
+# resolve locally (pmxcfs cannot lean on DNS for peer discovery). We
+# additionally emit `<hostname>-tb` entries pointing at TB loopbacks so
+# scripts and ssh shorthand can target the TB fabric explicitly.
+
+127.0.0.1   localhost
+::1         localhost ip6-localhost ip6-loopback
+
+# Cluster nodes — LAN (2.5GbE) addresses
+{% for h in groups['pve_hosts'] | sort %}
+{{ hostvars[h].pve_lan_ip }}   {{ h }}.local {{ h }}
+{% endfor %}
+
+# Cluster nodes — TB loopback addresses (migration network)
+{% for h in groups['pve_hosts'] | sort %}
+{{ hostvars[h].tb_loopback }}   {{ h }}-tb
+{% endfor %}
+
+{% if nas_ip is defined and nas_hostname is defined %}
+# NAS (Asustor AS6706T — NFS shared storage)
+{{ nas_ip }}   {{ nas_hostname }}
+{% endif %}

@@ -1,0 +1,16 @@
+---
+# vms/rootca/ansible/inventory.yml.example
+#
+# Copy to inventory.yml (gitignored) and fill in `ansible_host` from
+# `tofu output ipv4` after the BOOTSTRAP-phase `just apply rootca`.
+# This file is only usable while enable_network=true in
+# terraform.tfvars; after the operator flips it to false and tofu
+# removes the NIC, Ansible can no longer reach the VM and the
+# inventory becomes a museum piece.
+
+rootca_servers:
+  hosts:
+    rootca:
+      ansible_host: 10.0.0.X
+      ansible_user: rootca-admin
+      ansible_python_interpreter: /usr/bin/python3

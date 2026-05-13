@@ -1,0 +1,9 @@
+# /etc/modules-load.d/thunderbolt.conf — managed by Ansible (pve-host role).
+# Loads the kernel modules required for the TB-net fabric at boot.
+# Without these, a freshly-installed PVE host won't surface the TB
+# interfaces and /etc/network/interfaces stanzas referencing them
+# silently no-op. See vault doc [[Thunderbolt Mesh Networking —
+# 3-Node Cluster Option]] Phase 3 for the manual verification.
+
+thunderbolt
+thunderbolt_net

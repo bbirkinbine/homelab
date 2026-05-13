@@ -1,0 +1,388 @@
+---
+# Bootstrap the offline Root CA toolchain. Runs ONCE while the VM
+# still has a NIC; after this the operator flips
+# `enable_network=false` in tofu and re-applies, and the VM is
+# air-gapped forever (until a maintenance re-bootstrap).
+#
+# What this DOES:
+#   1. Install the smartcard PKCS#11 stack (pcscd, opensc, libccid).
+#   2. Install OpenSSL with both pkcs11 paths — the legacy ENGINE
+#      (libengine-pkcs11-openssl) and the OpenSSL 3 provider
+#      (pkcs11-provider). The Root CA doc shows the provider form;
+#      the engine is kept as a fallback.
+#   3. Optionally build CardContact's sc-hsm-embedded module from
+#      source for richer SmartCard-HSM-specific tooling.
+#   4. Lay down the polkit + udev + group plumbing that lets the
+#      admin user reach pcscd over the IPC socket from an SSH or
+#      noVNC session (matches the legacy openbao cloud-init).
+#   5. Create the ceremony scratch directory at /root/secure-removable.
+#   6. Freeze the VM: disable apt-daily timers, disable unattended-
+#      upgrades, lock down ufw to the loopback. Network won't be
+#      reachable after bootstrap, so silent attempts to update would
+#      just produce log noise.
+#   7. Drop a /etc/profile.d/ snippet that exports PKCS11_MODULE for
+#      interactive sessions — saves typing during ceremonies.
+#
+# What this deliberately does NOT do (per
+# CardLogix as Offline Root CA.md):
+#   * Generate the Root CA keypair on HSM-A.
+#   * Wrap-export to HSM-B.
+#   * Self-sign the Root CA cert.
+#   * Sign Intermediate CSRs.
+#   * Touch any HSM PINs.
+# All of those are operator-driven, done at the Proxmox noVNC console
+# after the VM is air-gapped, against the actual hardware token.
+
+- name: Update apt cache (bootstrap window only)
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 600
+
+# --- Phase 1: smartcard + PKCS#11 stack -------------------------------------
+
+- name: Install smartcard + PKCS#11 packages
+  ansible.builtin.apt:
+    name:
+      # pcscd      — PC/SC daemon; userspace USB CCID driver
+      # opensc     — provides pkcs11-tool, sc-hsm-tool, pkcs15-tool
+      # opensc-pkcs11 — generic OpenSC PKCS#11 module (fallback)
+      # pcsc-tools — pcsc_scan for ATR diagnostics
+      # libccid    — userspace CCID driver pcscd dispatches into
+      - pcscd
+      - opensc
+      - opensc-pkcs11
+      - pcsc-tools
+      - libccid
+      # openssl + the two pkcs11 paths
+      - openssl
+      - libengine-pkcs11-openssl
+      - pkcs11-provider
+      # Build tools for sc-hsm-embedded (always install — they're
+      # tiny and the source build may be re-attempted manually later
+      # against a bug-fix release).
+      - build-essential
+      - autoconf
+      - automake
+      - libtool
+      - pkg-config
+      - libpcsclite-dev
+      - libssl-dev
+      - git
+    state: present
+    install_recommends: false
+
+# --- Phase 2: sc-hsm-embedded (optional build) ------------------------------
+
+# CardContact's module exposes SmartCard-HSM-specific PKCS#11
+# functions (richer DKEK plumbing, key-attribute introspection) that
+# the generic OpenSC module doesn't surface. The Root CA doc uses
+# this path; legacy openbao did the same build. Failures are
+# non-fatal — opensc-pkcs11.so is always available as the fallback.
+- name: Clone sc-hsm-embedded source
+  ansible.builtin.git:
+    repo: https://github.com/CardContact/sc-hsm-embedded.git
+    dest: "{{ rootca_sc_hsm_embedded_src }}"
+    depth: 1
+    version: master
+    force: true
+  when: rootca_build_sc_hsm_embedded
+  register: rootca_sc_hsm_clone
+
+- name: Run autoreconf for sc-hsm-embedded
+  ansible.builtin.command:
+    cmd: autoreconf -fi
+    chdir: "{{ rootca_sc_hsm_embedded_src }}"
+    creates: "{{ rootca_sc_hsm_embedded_src }}/configure"
+  when: rootca_build_sc_hsm_embedded and rootca_sc_hsm_clone is changed
+
+- name: Configure sc-hsm-embedded
+  ansible.builtin.command:
+    cmd: ./configure --prefix=/usr/local
+    chdir: "{{ rootca_sc_hsm_embedded_src }}"
+    creates: "{{ rootca_sc_hsm_embedded_src }}/Makefile"
+  when: rootca_build_sc_hsm_embedded and rootca_sc_hsm_clone is changed
+
+- name: Build sc-hsm-embedded
+  community.general.make:
+    chdir: "{{ rootca_sc_hsm_embedded_src }}"
+  when: rootca_build_sc_hsm_embedded and rootca_sc_hsm_clone is changed
+
+- name: Install sc-hsm-embedded
+  community.general.make:
+    chdir: "{{ rootca_sc_hsm_embedded_src }}"
+    target: install
+  when: rootca_build_sc_hsm_embedded and rootca_sc_hsm_clone is changed
+  notify: Run ldconfig
+
+- name: Verify sc-hsm-embedded module landed
+  ansible.builtin.stat:
+    path: "{{ rootca_pkcs11_module_path }}"
+  register: rootca_sc_hsm_stat
+  when: rootca_build_sc_hsm_embedded
+
+- name: Warn if sc-hsm-embedded build did not produce libsc-hsm-pkcs11.so
+  ansible.builtin.debug:
+    msg: >-
+      sc-hsm-embedded build did not produce {{ rootca_pkcs11_module_path }}.
+      The ceremony will fall back to /usr/lib/x86_64-linux-gnu/pkcs11/opensc-pkcs11.so,
+      which is also installed. Investigate the build log if richer
+      SmartCard-HSM features matter for your workflow.
+  when: rootca_build_sc_hsm_embedded and not rootca_sc_hsm_stat.stat.exists
+
+- name: Remove sc-hsm-embedded build directory
+  ansible.builtin.file:
+    path: "{{ rootca_sc_hsm_embedded_src }}"
+    state: absent
+  when: rootca_build_sc_hsm_embedded
+
+# --- Phase 3: polkit + udev + plugdev plumbing ------------------------------
+
+# Same trio as the legacy openbao cloud-init: udev tags CCID devices
+# with uaccess (logind grants ACL access to the active session user),
+# polkit grants pcscd access to the plugdev group (so SSH-session
+# clients aren't rejected as "non-local"), and the admin user is
+# already in plugdev via cloud-init. The pair of mechanisms covers
+# both desktop-session (uaccess) and SSH-session (polkit-plugdev)
+# access paths.
+
+- name: Drop udev rule tagging CCID devices with uaccess
+  ansible.builtin.copy:
+    dest: /etc/udev/rules.d/60-cardlogix-hsm.rules
+    content: |
+      # Managed by Ansible — vms/rootca/ansible/roles/rootca/tasks/main.yml
+      # USB CCID class (bInterfaceClass = 0x0B). Matches every CCID
+      # smart-card reader, including the CardLogix SmartCard-HSM 4K.
+      SUBSYSTEM=="usb", ATTRS{bInterfaceClass}=="0b", TAG+="uaccess"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload udev
+
+- name: Drop polkit rule for plugdev → pcscd
+  ansible.builtin.copy:
+    dest: /etc/polkit-1/rules.d/49-pcscd-plugdev.rules
+    content: |
+      // Managed by Ansible — vms/rootca/ansible/roles/rootca/tasks/main.yml
+      //
+      // Allow members of plugdev to talk to pcscd over its IPC socket
+      // and read cards via PC/SC. Without this, Ubuntu 24.04's stock
+      // pcscd polkit policy rejects SSH-session clients with
+      // CKR_DEVICE_ERROR (sc-hsm-embedded) or "No slots" (opensc-pkcs11)
+      // because it treats SSH sessions as non-local.
+      polkit.addRule(function(action, subject) {
+          if ((action.id == "org.debian.pcsc-lite.access_pcsc" ||
+               action.id == "org.debian.pcsc-lite.access_card") &&
+              subject.isInGroup("plugdev")) {
+              return polkit.Result.YES;
+          }
+      });
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Restart polkit
+    - Restart pcscd
+
+# Belt-and-suspenders: cloud-init already added admin_user to plugdev,
+# but if someone re-runs Ansible against a hand-rolled VM, ensure it.
+- name: Ensure admin user is in plugdev
+  ansible.builtin.user:
+    name: "{{ rootca_admin_user }}"
+    groups: plugdev
+    append: true
+
+- name: Enable + start pcscd
+  ansible.builtin.systemd:
+    name: pcscd
+    enabled: true
+    state: started
+
+# --- Phase 4a: in-VM LUKS partition (TODO — NOT YET IMPLEMENTED) -----------
+#
+# 2026-05-11 architecture change: the Root CA's persistent ceremony
+# state (cert material, audit logs, DKEK-wrap blobs from past wraps)
+# now lives on an in-VM LUKS partition at /var/lib/rootca-encrypted,
+# replacing the prior host-side LUKS Directory pool on pve12t. See
+# vms/rootca/README.md § "How the air-gap is enforced" for the threat-
+# model rationale.
+#
+# This block is a PLACEHOLDER. Until it lands, ceremonies write to the
+# scratch dir below (Phase 4b) but there is no persistent encrypted
+# store — operator must shred + manually back up to KeePassXC after
+# each ceremony, as today.
+#
+# Implementation plan when this lands:
+#   1. Partition: carve the unused tail of the root disk (the
+#      Packer 9100 base + cloud-init growpart should leave ~32 GiB
+#      free if disk_size_gb=40; constrain growpart in cloud-init
+#      user-data via `growpart: {mode: "auto", devices: ["/"], "ignore_growroot_disabled": false}`
+#      with a `runcmd` that caps the root partition to ~8 GiB before
+#      growpart runs, OR partition after growpart by reading the
+#      remaining free space).
+#   2. cryptsetup luksFormat the new partition. Passphrase via
+#      `vars_prompt` in vms/rootca/ansible/site.yml so it never lives
+#      in inventory or a vars file. Operator pastes from KeePassXC
+#      entry Homelab/RootCA/luks-passphrase.
+#   3. luksOpen → /dev/mapper/rootca-encrypted; mkfs.ext4.
+#   4. Mount once at /var/lib/rootca-encrypted, mkdir subdirs the
+#      ceremony procedure expects, umount.
+#   5. /etc/crypttab entry with `noauto,luks` (NOT auto-unlock at boot).
+#   6. /etc/fstab entry with `noauto` + sane mount opts (noatime,
+#      nodev, nosuid).
+#   7. Install /usr/local/sbin/rootca-unlock and rootca-lock helper
+#      scripts (referenced from the README's Ceremony procedure §).
+#      rootca-unlock prompts for the passphrase, runs cryptsetup
+#      luksOpen + mount, verifies. rootca-lock umounts + luksClose
+#      + verifies.
+#   8. luksClose at the end of bootstrap so the partition is locked
+#      when Phase B (air-gap) lands.
+#
+# Idempotency: detect existing LUKS header with `cryptsetup isLuks`
+# before format; skip format if already initialized. Always (re)write
+# crypttab/fstab/helpers from templates.
+
+- name: 'WARNING — in-VM LUKS partition setup is not yet implemented (Phase 4a placeholder)'
+  ansible.builtin.debug:
+    msg: |
+      The /var/lib/rootca-encrypted LUKS partition is NOT being created
+      by this play. Ceremony artifacts will live unencrypted in
+      {{ rootca_ceremony_dir }} until the Phase 4a tasks land. See the
+      TODO block in roles/rootca/tasks/main.yml and the
+      "How the air-gap is enforced" section of vms/rootca/README.md.
+
+# --- Phase 4b: ceremony scratch directory + profile snippet -----------------
+
+# The Root CA doc places .pem / .wrapped / .csr artifacts in
+# /root/secure-removable during ceremonies. Operator copies them off
+# to single-purpose USB and shreds the in-VM copies before ending the
+# session. The directory permissions are restrictive even though the
+# VM is air-gapped — ceremony hygiene.
+- name: Create ceremony scratch directory
+  ansible.builtin.file:
+    path: "{{ rootca_ceremony_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+# Export PKCS11_MODULE for interactive sessions so the operator
+# doesn't have to type the full path every ceremony command. PIN is
+# explicitly NOT in here — that's typed manually each session.
+- name: Drop /etc/profile.d/pkcs11-rootca.sh
+  ansible.builtin.copy:
+    dest: /etc/profile.d/pkcs11-rootca.sh
+    content: |
+      # Managed by Ansible — vms/rootca/ansible/roles/rootca/tasks/main.yml
+      # Sets PKCS11_MODULE for interactive ceremonies. Falls back to
+      # opensc-pkcs11 if the sc-hsm-embedded build did not produce a
+      # module (the role warns earlier in that case).
+      if [ -f {{ rootca_pkcs11_module_path }} ]; then
+          export PKCS11_MODULE={{ rootca_pkcs11_module_path }}
+      else
+          export PKCS11_MODULE=/usr/lib/x86_64-linux-gnu/pkcs11/opensc-pkcs11.so
+      fi
+      # openssl 3 pkcs11-provider variant uses this name.
+      export PKCS11_PROVIDER_MODULE="$PKCS11_MODULE"
+    owner: root
+    group: root
+    mode: "0644"
+
+# --- Phase 5: lock the VM down before NIC removal ---------------------------
+
+# After this, the VM is going air-gap. The default unattended-upgrades
+# config would try to phone home daily and spam the journal; the
+# apt-daily timers would do the same. Mask them now — `systemctl
+# enable` won't override masking, and unmasking is a deliberate
+# operator action via noVNC console if you ever want to update.
+
+- name: Mask apt-daily + unattended-upgrades timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: false
+    masked: true
+    state: stopped
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+    - unattended-upgrades.service
+  failed_when: false
+
+- name: Disable unattended-upgrades config
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "0";
+      APT::Periodic::Unattended-Upgrade "0";
+      APT::Periodic::Download-Upgradeable-Packages "0";
+      APT::Periodic::AutocleanInterval "0";
+    owner: root
+    group: root
+    mode: "0644"
+
+# UFW default-deny in/out. With the NIC removed there's nothing to
+# block, but if the operator ever re-attaches the NIC for a
+# maintenance re-bootstrap, default-deny ensures the VM doesn't
+# inadvertently expose anything during that window.
+- name: ufw — deny incoming, deny outgoing (default-deny posture for the air-gapped role)
+  community.general.ufw:
+    state: enabled
+    direction: "{{ item.dir }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { dir: incoming, policy: deny }
+    - { dir: outgoing, policy: deny }
+
+# Allow SSH inbound ONLY during the bootstrap window — when this
+# play is being run, the operator is connecting over SSH right now.
+# This rule survives into the air-gapped state but is harmless then
+# (no NIC = no inbound to permit).
+- name: ufw — allow SSH (bootstrap window only)
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    comment: "SSH during bootstrap; harmless once NIC is removed"
+
+# --- Phase 6: post-bootstrap verification (smoke test) ----------------------
+
+# Confirm pcscd is responding and the HSM enumerates. We can't run
+# pkcs11-tool with an actual PIN here (the PINs are operator-only
+# and not in any Ansible var), but we CAN list slots, which exercises
+# the polkit/pcscd/CCID path end to end. If the operator sees the
+# token labeled `homelab-rootca-A` in the output, the bootstrap is
+# verified and they can flip enable_network=false.
+
+- name: Verify pcscd is active
+  ansible.builtin.systemd:
+    name: pcscd
+    state: started
+  register: pcscd_check
+  changed_when: false
+
+- name: List PKCS#11 slots as the admin user (smoke test — token should be visible)
+  ansible.builtin.command:
+    cmd: pkcs11-tool --module {{ rootca_pkcs11_module_path }} --list-slots
+  become: true
+  become_user: "{{ rootca_admin_user }}"
+  register: pkcs11_smoke
+  changed_when: false
+  failed_when: false
+
+- name: "Show PKCS#11 slot list — operator should verify HSM-A appears"
+  ansible.builtin.debug:
+    msg: "{{ pkcs11_smoke.stdout_lines + (pkcs11_smoke.stderr_lines | default([])) }}"
+
+- name: Next steps reminder
+  ansible.builtin.debug:
+    msg: |
+      Bootstrap complete. Operator next steps:
+        1. SSH in and confirm `pkcs11-tool --module $PKCS11_MODULE --list-slots`
+           shows the HSM-A token with label `homelab-rootca-A`.
+        2. Optionally run `pkcs11-tool --module $PKCS11_MODULE --login --pin <user-pin> --list-objects`
+           — it should report an empty token (no Root CA keypair generated yet).
+        3. In vms/rootca/terraform/terraform.tfvars, set:
+             enable_network = false
+        4. Run `just apply rootca` — the NIC is removed declaratively.
+        5. From now on, ALL access is via Proxmox noVNC console only.
+        6. Continue with `CardLogix as Offline Root CA.md` Phase 2 (Root CA
+           key generation on HSM-A) at the noVNC console.

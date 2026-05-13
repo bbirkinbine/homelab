@@ -1,0 +1,18 @@
+---
+# Network buffer tuning for high-MTU TB-net flows (MTU 65520). The TB
+# fabric runs ~20-25 Gbps direct, ~10-15 Gbps via transit; default
+# Debian socket buffers throttle that. We bump the upper bounds and
+# leave the kernel to autotune within them.
+#
+# Conservative on purpose — these are ceilings, not commitments. If a
+# specific host needs different values, override `pve_host_tuning_*`
+# in inventory.
+
+- name: Drop in 99-pve-host.conf sysctl tuning
+  ansible.builtin.template:
+    src: etc/sysctl.d/99-pve-host.conf.j2
+    dest: /etc/sysctl.d/99-pve-host.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Apply sysctl

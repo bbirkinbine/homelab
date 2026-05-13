@@ -1,0 +1,22 @@
+# /etc/apt/sources.list.d/pve-no-subscription.sources — managed by Ansible
+# (pve-host role). Replaces the stock /etc/apt/sources.list.d/pve-enterprise.list
+# which 401s without a Proxmox subscription. Format: deb822 (multi-stanza),
+# which Proxmox 9.x defaults to. Reference: https://pve.proxmox.com/wiki/Package_Repositories
+
+Types: deb
+URIs: http://deb.debian.org/debian
+Suites: {{ pve_repo_distribution }} {{ pve_repo_distribution }}-updates
+Components: main contrib
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: http://security.debian.org/debian-security
+Suites: {{ pve_repo_distribution }}-security
+Components: main contrib
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: http://download.proxmox.com/debian/pve
+Suites: {{ pve_repo_distribution }}
+Components: pve-no-subscription
+Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg

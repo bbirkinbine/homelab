@@ -1,0 +1,35 @@
+#cloud-config
+#
+# rootca VM — first-boot identity, with plugdev membership for HSM access.
+#
+# Rendered by templatefile() in vms/rootca/terraform/main.tf — placeholders
+# below are Terraform's $${var} interpolation (escape syntax shown in
+# this comment) substituted before upload, NOT cloud-init or shell.
+#
+# Why plugdev membership here (vs. via Ansible later): Ansible can add a
+# user to plugdev, but the group membership only takes effect on the next
+# login. Setting it in cloud-init avoids one re-login during the bootstrap
+# window — the admin user can talk to pcscd from the first SSH session.
+# Same trick the legacy openbao cloud-init used.
+#
+# What this DELIBERATELY does NOT do (per Provisioning Layers — Packer,
+# Terraform, cloud-init, Ansible.md):
+#   * Install any HSM software. That's Ansible's job — needs network,
+#     can re-run idempotently, has its own audit trail in the role.
+#   * Write polkit/udev rules. Same reasoning. Ansible places them so
+#     a future maintainer reads the role to understand the VM, not a
+#     one-shot cloud-init snippet.
+#   * Run `bao operator init` style commands. The Root CA's equivalents
+#     (key generation, DKEK wrap to HSM-B, Intermediate CSR signing)
+#     are explicitly operator ceremonies per
+#     CardLogix as Offline Root CA.md.
+
+hostname: ${hostname}
+
+users:
+  - name: ${admin_username}
+    groups: [sudo, plugdev]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - "${ssh_public_key}"

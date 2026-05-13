@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: openbao
+  author: brian.birkinbine
+  description: Install OpenBao with a Shamir seal on Ubuntu 24.04 (Packer base).
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+
+dependencies: []
+
+collections:
+  # `community.general.ufw` — apt's ufw module ships there. Make the
+  # dependency explicit so a fresh Ansible install knows what to fetch.
+  - community.general

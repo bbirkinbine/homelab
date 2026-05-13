@@ -1,0 +1,52 @@
+---
+# Cluster-wide pve-firewall baseline.
+#
+# CRITICAL: /etc/pve/firewall/cluster.fw lives under /etc/pve, which
+# Proxmox replicates across all cluster nodes via pmxcfs. Writing the
+# same file from N nodes simultaneously is a race condition that can
+# corrupt the cluster config. Scope the write to a single host via
+# run_once + delegate_to, with an inline comment explaining why every
+# time we do this — see pve-hosts/CLAUDE.md "Idempotency, safety,
+# style" point 5.
+#
+# Pre-cluster: on a node that has not yet joined a cluster, /etc/pve
+# is still the local pmxcfs (single-member). The write still lands
+# correctly; pmxcfs replicates the file once the node joins a cluster.
+
+# Two-task pattern is required because pmxcfs (the FUSE filesystem
+# mounted at /etc/pve) refuses Ansible's atomic_move pattern even with
+# `unsafe_writes: true` — the fallback path uses shutil.copy with
+# metadata-preservation flags that pmxcfs returns EPERM on. Confirmed
+# via direct testing: plain `cp` and shell `>` work fine, only the
+# Ansible-specific copy syscall pattern fails.
+#
+# So: stage the rendered template on a regular filesystem (/root),
+# then push it into pmxcfs with `cp` if it differs from what's there.
+
+- name: Stage cluster.fw on regular filesystem
+  ansible.builtin.template:
+    src: etc/pve/firewall/cluster.fw.j2
+    dest: /root/.cluster.fw.staged
+    owner: root
+    group: root
+    mode: "0640"
+  # run_once + delegate_to ensures exactly one host renders the file.
+  # ansible_play_hosts is the resolved host list for THIS play (post
+  # serial / limit), so the delegate is always reachable.
+  run_once: true
+  delegate_to: "{{ ansible_play_hosts | first }}"
+
+- name: Install cluster.fw into pmxcfs (cp only if staged version differs)
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      if ! cmp -s /root/.cluster.fw.staged /etc/pve/firewall/cluster.fw 2>/dev/null; then
+        cp /root/.cluster.fw.staged /etc/pve/firewall/cluster.fw
+        echo "installed"
+      else
+        echo "unchanged"
+      fi
+  register: fw_install
+  changed_when: "'installed' in fw_install.stdout"
+  run_once: true
+  delegate_to: "{{ ansible_play_hosts | first }}"

@@ -1,0 +1,22 @@
+---
+# vms/rootca/ansible/site.yml
+#
+# Top-level play for the offline Root CA role. Runs ONCE during the
+# bootstrap phase (while the VM still has a NIC). After the operator
+# verifies the HSM tooling works and flips `enable_network=false` in
+# vms/rootca/terraform/terraform.tfvars, this play stops being
+# runnable — the VM has no network. Re-bootstrapping later (e.g. to
+# pull a new sc-hsm-embedded release) means: re-attach the NIC via
+# tofu, run this play, verify, re-detach.
+#
+# Usage from repo root:
+#   just ansible rootca
+# Or directly:
+#   cd vms/rootca/ansible && ansible-playbook -i inventory.yml site.yml
+
+- name: Bootstrap offline Root CA toolchain
+  hosts: rootca_servers
+  become: true
+  gather_facts: true
+  roles:
+    - role: rootca

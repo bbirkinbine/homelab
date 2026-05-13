@@ -1,0 +1,34 @@
+---
+# Defaults for the offline Root CA role. Override sparingly — the
+# canonical procedure in CardLogix as Offline Root CA.md assumes
+# specific paths and module choices.
+
+# Build CardContact's sc-hsm-embedded PKCS#11 module from source?
+# Recommended: true. The module exposes SmartCard-HSM-specific
+# operations (DKEK introspection, wrap/unwrap) that OpenSC's generic
+# module doesn't surface. Build fails fall back to opensc-pkcs11.so,
+# which is always installed. Set false to skip the build entirely
+# (e.g. for offline testing where github.com is unreachable — but
+# the bootstrap phase has network anyway).
+rootca_build_sc_hsm_embedded: true
+
+# Where the source clone lives during the build. Wiped after install.
+rootca_sc_hsm_embedded_src: /tmp/sc-hsm-embedded
+
+# Final install location of the CardContact module. The Root CA doc
+# canonicalizes this path; openssl pkcs11-provider invocations expect
+# it. Do not change unless you also update the role's README example
+# commands.
+rootca_pkcs11_module_path: /usr/local/lib/libsc-hsm-pkcs11.so
+
+# Directory inside the VM where ceremony artifacts (root-ca.pem, the
+# DKEK-wrapped backup blob, ext config files) live during a ceremony.
+# Operator copies them off via single-purpose USB and shreds the
+# in-VM copies before the ceremony ends.
+rootca_ceremony_dir: /root/secure-removable
+
+# Admin user that needs plugdev membership. Set in cloud-init already
+# (see vms/rootca/cloud-init/user-data.yaml.tftpl); the role's polkit
+# rule references the plugdev group, so this just has to match what
+# cloud-init created.
+rootca_admin_user: rootca-admin

@@ -1,0 +1,24 @@
+# Managed by Ansible — vms/openbao/ansible/roles/openbao/templates/openbao.hcl.j2
+#
+# Shamir seal — no `seal` stanza needed. OpenBao generates the master
+# key at `bao operator init` time and splits it via Shamir's Secret
+# Sharing (5 shares, 3-of-5 threshold per [[OpenBao Homelab Setup]]
+# Phase 3). The unseal shares NEVER appear in this file or in Ansible
+# vars — they're surfaced once at init time and the operator captures
+# them by hand.
+
+storage "raft" {
+  path    = "{{ openbao_data_dir }}"
+  node_id = "{{ openbao_node_id }}"
+}
+
+listener "tcp" {
+  address     = "{{ openbao_listen_address }}"
+  tls_disable = {{ openbao_tls_disable }}
+}
+
+api_addr     = "{{ openbao_api_addr }}"
+cluster_addr = "{{ openbao_cluster_addr }}"
+ui           = {{ openbao_ui | string | lower }}
+
+disable_mlock = {{ openbao_disable_mlock | string | lower }}

@@ -1,0 +1,72 @@
+---
+# Defaults for the pve-host role. Override anything here in inventory
+# (group_vars / host_vars / inline `vars:` blocks). Inventory wins; this
+# file is the fallback so a fresh `inventory.yml` doesn't need to list
+# every knob.
+#
+# See pve-hosts/CLAUDE.md for the role's full intent and the vault doc
+# [[Thunderbolt Mesh Networking — 3-Node Cluster Option]] for the
+# authoritative TB fabric design (addresses, MTU, transit placement).
+
+# ----- packages -------------------------------------------------------
+# Baseline package set installed by tasks/packages.yml. Aim small: only
+# things useful on every PVE host. Role-specific packages (qemu-utils,
+# vfio tooling, etc.) belong in role-specific plays or the operator's
+# follow-on docs. state: present, not latest — upgrades are a separate
+# operator decision (see "What this role MUST NOT do" in CLAUDE.md).
+pve_host_packages:
+  - ifupdown2          # ifreload -a support; required for hot interface reloads
+  - vim
+  - htop
+  - iperf3             # used in TB fabric Phase 6 throughput tests
+  - ethtool
+  - bridge-utils
+  - lldpd              # neighbor discovery on the 2.5GbE + TB fabric
+  - chrony             # NTP, replaces systemd-timesyncd (see tasks/time.yml)
+  - tmux
+  - curl
+  - jq
+  - dnsutils
+  - tcpdump
+  - pciutils           # lspci — TB controller checks per the vault runbook
+  - usbutils
+  # bolt: TB peripheral enrollment (Razer Core X eGPU on pve12t). TB
+  # *peer-host* connections are NOT enrolled via boltctl — synthesized
+  # UUIDs aren't supported. See tasks/thunderbolt.yml step (b) for the
+  # udev-based path peers use.
+  - bolt
+  # at: safety net for risky changes over SSH. `echo cmd | at now + N min`
+  # schedules a rollback that fires if the SSH session dies before we
+  # can cancel it. Debian's postinst enables atd automatically.
+  - at
+
+# ----- apt repos ------------------------------------------------------
+# Where the .sources file lands. trixie + pve-no-subscription, deb822
+# format. See templates/etc/apt/sources.list.d/pve-no-subscription.sources.j2.
+pve_host_sources_file: /etc/apt/sources.list.d/pve-no-subscription.sources
+
+# Legacy single-line enterprise repo dropped by Proxmox's installer.
+# tasks/repo.yml removes this so apt-get update stops complaining about
+# the missing subscription.
+pve_host_enterprise_list: /etc/apt/sources.list.d/pve-enterprise.list
+
+# ----- NFS ------------------------------------------------------------
+# Mount options for the Asustor NFS share. vers=4.2 picks up file-locking
+# + delegations needed for Proxmox storage. _netdev keeps the mount from
+# blocking boot if the NAS is offline. noatime cuts spurious writebacks.
+pve_host_nfs_options: "vers=4.2,_netdev,noatime,rsize=1048576,wsize=1048576"
+
+# ----- firewall -------------------------------------------------------
+# Whether the role should drop the cluster.fw template into /etc/pve.
+# The CLAUDE.md spec keeps this on by default and uses run_once +
+# delegate_to to avoid pmxcfs write races. Flip to false during cluster
+# bring-up if pve-firewall is fighting the corosync ring1 traffic.
+pve_host_manage_cluster_firewall: true
+
+# ----- network handler ------------------------------------------------
+# Safety rail: tasks/network.yml never runs `ifreload -a` automatically.
+# It only stages /etc/network/interfaces and fires a handler that prints
+# a one-line "manual reload required from console" notice. Flip to true
+# only in CI/molecule contexts where you've decoupled the play host from
+# the target's networking.
+pve_host_auto_reload_networking: false

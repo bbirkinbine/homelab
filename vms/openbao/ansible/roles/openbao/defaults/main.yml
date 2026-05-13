@@ -1,0 +1,43 @@
+---
+# Defaults for the openbao role. Override in inventory, group_vars, or
+# host_vars if a deployment diverges; the defaults match the canonical
+# Shamir-seal setup documented in [[OpenBao Homelab Setup]].
+
+# Raft node id. Becomes the `node_id` field in the storage block of
+# openbao.hcl. Single-node today; if you add HA replicas later, give
+# each host a distinct id (e.g. homelab-1, homelab-2, ...).
+openbao_node_id: "homelab-1"
+
+# Where Raft keeps its on-disk state. Stays under /var/lib because
+# that's where systemd's default StateDirectory paths land and what
+# the apt-installed unit references.
+openbao_data_dir: /var/lib/openbao/data
+openbao_log_dir: /var/log/openbao
+
+# Listener config. tls_disable=1 is a homelab convenience until the
+# PKI engine inside this OpenBao produces real leaf certs (Phase 4 of
+# [[13 Homelab Blueprint]]). Flip to 0 once that's in place, and add
+# tls_cert_file/tls_key_file values.
+openbao_listen_address: "0.0.0.0:8200"
+openbao_tls_disable: 1
+
+# Cluster + API addresses advertised to clients. 127.0.0.1 is correct
+# for a single-node setup; switch to the VM's LAN IP if you ever
+# expose the cluster port (8201) to peers.
+openbao_api_addr: "http://127.0.0.1:8200"
+openbao_cluster_addr: "http://127.0.0.1:8201"
+
+# Enable the web UI on /ui. No additional auth gate beyond OpenBao's
+# own — keep this VM LAN-only.
+openbao_ui: true
+
+# Keep mlock enabled so secrets pages don't swap. The apt-installed
+# systemd unit grants CAP_IPC_LOCK + LimitMEMLOCK=infinity, which is
+# what makes this work. Flip to true ONLY in a contained dev env.
+openbao_disable_mlock: false
+
+# Whether to drop in the systemd override that re-asserts
+# LimitMEMLOCK + CAP_IPC_LOCK. The stock apt unit already includes
+# these; the override is defensive (and a no-op idempotently). Set
+# false to skip it.
+openbao_install_systemd_override: true

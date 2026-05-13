@@ -1,0 +1,188 @@
+---
+# Install OpenBao from the official apt repo, lay down a Shamir-seal
+# config, and bring the service up. Stops short of `bao operator init`
+# — that's an operator ceremony per [[OpenBao Homelab Setup]] Phase 3
+# (5 unseal shares, custody split between KeePassXC + paper envelopes).
+#
+# Idempotency:
+#   * apt-key landing site: a fixed path under /etc/apt/keyrings.
+#   * Repo file: written via apt_repository (idempotent).
+#   * Config + override: managed via template/copy with explicit modes
+#     and notify-based handlers.
+#   * Service: systemd module with enabled+started — re-running is a
+#     no-op once green.
+
+- name: Ensure dependencies for the apt repo are installed
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure /etc/apt/keyrings exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# OpenBao publishes their archive key as an ASCII-armored .asc. Drop
+# it under keyrings as a stable filename and reference it from the
+# repo file's signed-by= attribute. This is the modern apt pattern
+# (replaces the deprecated apt-key add).
+- name: Install OpenBao apt archive key
+  ansible.builtin.get_url:
+    url: https://apt.openbao.org/pubkey.asc
+    dest: /etc/apt/keyrings/openbao.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add OpenBao apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/openbao.asc] https://apt.openbao.org stable main"
+    filename: openbao
+    state: present
+    update_cache: true
+
+- name: Install openbao package
+  ansible.builtin.apt:
+    name: openbao
+    state: present
+
+# Sanity-check the version — Shamir is built into every release, but
+# the PKI/Transit work in [[13 Homelab Blueprint]] downstream needs
+# >= 2.5. Fail early here rather than discovering the gap during the
+# init ceremony.
+- name: Capture installed bao version
+  ansible.builtin.command: bao --version
+  register: openbao_version_raw
+  changed_when: false
+
+- name: Assert OpenBao >= 2.5
+  ansible.builtin.assert:
+    that:
+      - openbao_version_raw.stdout is regex('v?(2\\.[5-9]|2\\.[1-9][0-9]|[3-9]\\.[0-9])')
+    fail_msg: >-
+      OpenBao version is older than 2.5.x.
+      Installed: {{ openbao_version_raw.stdout | trim }}.
+      Check that /etc/apt/sources.list.d/openbao.list points at stable, then re-run.
+
+- name: Ensure OpenBao directories exist with correct ownership
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: openbao
+    mode: "{{ item.mode }}"
+  loop:
+    # root:openbao 0750 — operator-editable, openbao-readable
+    - { path: /etc/openbao, owner: root, mode: "0750" }
+    # openbao:openbao 0700 — raft state; only the service touches it
+    - { path: "{{ openbao_data_dir }}", owner: openbao, mode: "0700" }
+    # openbao:openbao 0750 — audit logs; allow root + openbao read
+    - { path: "{{ openbao_log_dir }}", owner: openbao, mode: "0750" }
+
+- name: Render /etc/openbao/openbao.hcl
+  ansible.builtin.template:
+    src: openbao.hcl.j2
+    dest: /etc/openbao/openbao.hcl
+    owner: root
+    group: openbao
+    mode: "0640"
+  notify: Restart openbao
+
+# Defensive: the apt-installed unit at /usr/lib/systemd/system/openbao.service
+# already includes LimitMEMLOCK=infinity + CAP_IPC_LOCK on current
+# packages, but the override drop-in re-asserts these so the service
+# survives an upstream unit change. Set openbao_install_systemd_override
+# to false in inventory to skip if you've verified the stock unit is
+# fine on your distro.
+- name: Ensure systemd drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/openbao.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: openbao_install_systemd_override
+
+- name: Install systemd drop-in for mlock + IPC_LOCK
+  ansible.builtin.copy:
+    src: openbao-override.conf
+    dest: /etc/systemd/system/openbao.service.d/override.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: openbao_install_systemd_override
+  notify:
+    - Reload systemd
+    - Restart openbao
+
+- name: Enable and start openbao
+  ansible.builtin.systemd:
+    name: openbao
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# OpenBao API port. The Packer base ships ufw with 22/tcp already
+# allowed; this opens the API. We keep cluster port 8201 closed —
+# only needed when an HA peer joins, which is not in scope today.
+- name: Allow OpenBao API through ufw
+  community.general.ufw:
+    rule: allow
+    port: "8200"
+    proto: tcp
+    comment: "OpenBao API"
+
+# The Packer base masks apt-daily timers so locked-down roles can
+# stay frozen. OpenBao is a trust anchor and patches must keep
+# flowing — re-enable here.
+- name: Unmask apt-daily timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    masked: false
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+- name: Enable unattended-upgrades config
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Start apt-daily timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+# Final state check. `bao status` exits 2 when sealed (expected — we
+# have not initialized), 0 when unsealed, 1 on connection error.
+# We accept 0 OR 2; anything else means the service didn't come up.
+- name: Confirm openbao is responding (sealed=2 or unsealed=0 both OK)
+  ansible.builtin.command: bao status
+  environment:
+    BAO_ADDR: "{{ openbao_api_addr }}"
+  register: openbao_status
+  failed_when: openbao_status.rc not in [0, 2]
+  changed_when: false
+
+- name: Show bao status output
+  ansible.builtin.debug:
+    msg: "{{ openbao_status.stdout_lines }}"

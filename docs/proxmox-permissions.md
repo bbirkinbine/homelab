@@ -5,9 +5,11 @@ role, and the API token that [the Ubuntu base template
 build](../packer/ubuntu-24-04-base/) uses to talk to a Proxmox
 host.
 
-The hosts are independent (not clustered), so **run this on every Proxmox
-node** Packer will build against (`pve12`, `pve13`, ...). Each node has its
-own user database and ACL — the steps don't replicate.
+The hosts are independent today (not yet clustered), so **run this on every
+Proxmox node** Packer will build against (`pve12t`, `pve13m`, `pve13t`).
+Each node has its own user database and ACL — the steps don't replicate.
+When the 3-node cluster lands (see the "Active context" block in
+`CLAUDE.md`), ACLs replicate via corosync and you only need to do this once.
 
 ## TL;DR — fresh-node setup
 

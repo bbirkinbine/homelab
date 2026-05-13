@@ -24,11 +24,16 @@ Enable in firmware (NUC: F2 at boot):
 
 - **VT-d** — Intel's IOMMU; required.
 - **VT-x** — Intel virtualization; required for KVM regardless of GPU.
-- **Thunderbolt Security Level → No Security (SL0)** — simplest for a
-  homelab. Higher levels (SL1/SL2) require explicit enrollment of the
-  enclosure via `boltctl` and silently block the PCIe tunnel until
-  you do; if `lspci` doesn't see the GPU after boot, this is the first
-  thing to check.
+- **Thunderbolt Security Level** — if your firmware exposes it, **No
+  Security (SL0)** is the simplest path for a homelab. ASUS NUC13 /
+  NUC12 firmware does NOT expose this setting; the kernel reports
+  `security=user` (SL1) by default. SL1 requires explicit per-device
+  enrollment via `boltctl`, which silently blocks the PCIe tunnel
+  until you do. If `lspci` doesn't see the GPU after boot, check that
+  the Razer Core X (or your eGPU enclosure) is enrolled with
+  `boltctl list`. On `pve12t` this is already done (see
+  "Thunderbolt enrollment" below); on a new node you'd run
+  `boltctl enroll --policy=auto <uuid>` once after first plug-in.
 - **Primary Display → iGPU / Internal** — keeps the host booting on
   the Iris Xe and never touching the 3090.
 - **Above 4G Decoding → Enabled** — required for the 3090's large BAR
@@ -336,7 +341,8 @@ Thunderbolt link didn't come up. Check, in order:
    # "user" = SL1, "none" = SL0
    ```
 
-   Fix by dropping BIOS to **SL0** (simplest) or by enrolling:
+   Fix by enrolling via `boltctl` (SL0 in BIOS is the historical
+   alternative but isn't exposed on ASUS NUC13 / NUC12 firmware):
 
    ```bash
    systemctl enable --now bolt
@@ -436,11 +442,13 @@ physical change.
 
 ### Thunderbolt enrollment
 
-`pve12`'s BIOS Thunderbolt Security Level is **not** at SL0; the Razer
-Core X is permanently enrolled via `boltctl` with `policy: auto`, so
-the host re-authorizes the enclosure on every boot from the stored
-credential. Equivalent to SL0 in effect, slightly more secure on
-paper (only enrolled devices can tunnel PCIe).
+`pve12t`'s firmware doesn't expose a Thunderbolt Security Level setting
+(ASUS NUC12 firmware regression from older Intel-branded NUCs); the
+kernel runs the TB domain at `security=user` (SL1). The Razer Core X
+is permanently enrolled via `boltctl` with `policy: auto`, so the host
+re-authorizes the enclosure on every boot from the stored credential.
+Equivalent to SL0 in practical effect, slightly more secure on paper
+(only enrolled devices can tunnel PCIe).
 
 ```text
 ● Razer Core X

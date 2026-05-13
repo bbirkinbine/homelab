@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: rootca
+  author: brian.birkinbine
+  description: Bootstrap offline Root CA toolchain on Ubuntu 24.04 (one-shot before NIC removal).
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+
+dependencies: []
+
+collections:
+  - community.general

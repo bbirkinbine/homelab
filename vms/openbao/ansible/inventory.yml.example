@@ -1,0 +1,35 @@
+---
+# vms/openbao/ansible/inventory.yml.example
+#
+# Copy to inventory.yml (gitignored) and fill in `ansible_host` with
+# the IP from `tofu output ipv4` (or `tofu output ansible_inventory_hint`
+# which renders a pre-formatted block you can paste over this).
+#
+# Why static (not dynamic): the homelab convention is to set a DHCP
+# reservation per service VM on the router so the IP stays stable
+# across reboots. Once you've reserved the lease, this file is
+# write-once. See vms/openbao/README.md "Operations" section.
+#
+# Group `openbao_servers` (plural) vs the host `openbao` (singular):
+# Ansible 2.16+ warns when a group and a host share the same name;
+# pluralizing the group sidesteps that. When an HA pair lands, a
+# second host (e.g. `openbao-2`) joins the same group with no naming
+# conflict.
+
+openbao_servers:
+  hosts:
+    openbao:
+      # Paste the value of `tofu output ipv4` here after the first
+      # `just apply openbao`. If the agent hasn't reported yet (output
+      # is null), look up the lease on your router by MAC (from
+      # `tofu output mac`) or hostname (`openbao`).
+      ansible_host: 10.0.0.X
+
+      # First-boot user created by cloud-init (matches the value of
+      # var.admin_username in terraform.tfvars).
+      ansible_user: bao-admin
+
+      # The Packer base image ships /usr/bin/python3 (cloud-init
+      # depends on it). Setting this explicitly skips Ansible's
+      # interpreter discovery and silences the matching warning.
+      ansible_python_interpreter: /usr/bin/python3
