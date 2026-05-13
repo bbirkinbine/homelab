@@ -78,11 +78,19 @@ If `Quorate: No` or the node fails to start, look at `journalctl -u corosync -n 
 
 ## Step 2 — Join pve13m
 
+`pvecm add` prompts for pve12t's root password on stdin, which the non-interactive `ssh root@<ip> 'cmd'` form can't supply cleanly — the command hangs. Use an interactive SSH session instead:
+
 ```bash
-ssh root@192.168.1.163 'pvecm add 192.168.1.227 --link0 192.168.1.163'
+ssh root@192.168.1.163
+# Inside the pve13m shell:
+pvecm add 192.168.1.227 --link0 192.168.1.163
+# It prompts:
+#   "Are you sure you want to continue connecting (yes/no/[fingerprint])?" → yes
+#   "root@192.168.1.227's password:" → pve12t's root password from KeePassXC
+exit
 ```
 
-You'll be prompted for **pve12t's root password** (the cluster creator's password from KeePassXC). The flow:
+What's happening behind the prompts:
 
 1. pve13m SSH's to pve12t with the supplied root password.
 2. Pulls the cluster's `corosync.conf` + auth keys.
@@ -108,13 +116,17 @@ Expect: `cluster.fw` present, `enable: 0` — pmxcfs replicated the file from pv
 
 ## Step 3 — Join pve13t
 
-Same shape, different node:
+Same shape, different node. Again use interactive SSH so the password prompt works:
 
 ```bash
-ssh root@192.168.1.240 'pvecm add 192.168.1.227 --link0 192.168.1.240'
+ssh root@192.168.1.240
+# Inside the pve13t shell:
+pvecm add 192.168.1.227 --link0 192.168.1.240
+# yes to the host-key prompt, pve12t's root password to the password prompt
+exit
 ```
 
-Prompted for pve12t's root password again. After it completes, verify the 3-node quorate state:
+After it completes, verify the 3-node quorate state:
 
 ```bash
 ssh root@192.168.1.227 'pvecm status'
