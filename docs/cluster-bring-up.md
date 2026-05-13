@@ -342,13 +342,26 @@ If ring1 fails to come up:
 - Syntax error: restore `/root/corosync.conf.pre-ring1` over `/etc/pve/corosync.conf`, ring1 reverts. Then redo the edit more carefully.
 - config_version not bumped: corosync won't reread the file. The bump is what triggers the reload.
 
-Migration traffic routing comes separately via `/etc/pve/datacenter.cfg`:
+---
+
+## Step 5 — Route live-migration traffic over the TB fabric
+
+Ring1 covers corosync heartbeat over TB, but `qm migrate` (and the web UI's "Migrate" action) still uses the management LAN by default. Tell Proxmox to route migration over the TB loopback subnet by adding one line to `/etc/pve/datacenter.cfg`. The file is pmxcfs-replicated, so the change propagates cluster-wide.
 
 ```bash
-echo 'migration: type=secure,network=10.10.10.0/24' >> /etc/pve/datacenter.cfg
+ssh root@192.168.1.227 'echo "migration: type=secure,network=10.10.10.0/24" >> /etc/pve/datacenter.cfg'
+
+# Verify the line landed and replicated:
+for ip in 192.168.1.227 192.168.1.163 192.168.1.240; do
+  echo -n "$ip: "; ssh root@$ip 'grep ^migration: /etc/pve/datacenter.cfg'
+done
 ```
 
-(Or via Datacenter → Options in the UI.) After this, `qm migrate` traffic rides the TB fabric.
+Expected: all three nodes show `migration: type=secure,network=10.10.10.0/24`.
+
+Alternative: UI → Datacenter → Options → Migration Settings → set Network to `10.10.10.0/24` and Type to `secure` (default). Same effect; the UI just writes the same line to `datacenter.cfg`.
+
+After this, any `qm migrate <vmid> <target-node>` or live-migration triggered via the UI uses the 20-25 Gbps TB path instead of the 2.5 Gbps LAN. Verify on a future migration by tcpdumping `tbnet-*` on one of the leaves while a small VM moves between nodes — you should see the migration's TCP stream on the TB link, not on `vmbr0`.
 
 ---
 
