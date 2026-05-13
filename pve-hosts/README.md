@@ -102,37 +102,17 @@ pve-hosts/
 
 The role gets each host to baseline. Several follow-ups remain operator-driven — they have quorum, GRUB, or reboot risk that doesn't fit declarative automation:
 
-1. **Cluster join (all three nodes, one-time).** Full runbook in [`docs/cluster-bring-up.md`](../docs/cluster-bring-up.md) — covers `pvecm create homelab` on pve12t, `pvecm add` on the joiners, corosync ring1 over the TB fabric, pmxcfs replication verification, and recovery from common failures. Manual + quorum-aware; never automated. The architecture rationale is in the vault doc `[[VM Mobility — 3-Node Cluster on 2.5GbE]]`.
+1. **Cluster bring-up + post-formation storage/policy.** Full runbook in [`docs/cluster-bring-up.md`](../docs/cluster-bring-up.md) — covers `pvecm create homelab` on pve12t, `pvecm add` on the joiners, corosync ring1 over the TB fabric, migration-network setting, cluster-wide `pve-firewall` enable, `snippets` content type on `local`, and NFS storage registration as `nas-vms`. Manual + quorum-aware; never automated. The architecture rationale is in the vault doc `[[VM Mobility — 3-Node Cluster on 2.5GbE]]`.
 
 2. **TB fabric end-to-end verification.** The initial `ifreload -a` happened in Quick-start step 5; this is the *post-cluster* validation pass. Force-migrate tests need cluster quorum to be meaningful, which is why this lands after step 1. Run the iperf3 + force-migrate suite from the vault doc `[[Thunderbolt Mesh Networking — 3-Node Cluster Option]]` (Phase 6 + Phase 8 of its bring-up runbook).
 
-3. **Cluster-wide `pve-firewall` enable.** The role drops the cluster.fw template via `delegate_to` on a single node, with `enable: 0` so the firewall is staged-but-inert pre-cluster. After Step 1 lands, pmxcfs replicates cluster.fw to all nodes and you can safely turn it on — either via the UI (Datacenter → Firewall → Options → Enable, which writes `enable: 1` to cluster.fw) or directly editing `/etc/pve/firewall/cluster.fw` on any node. Verify SSH still works to all nodes before walking away. Pre-cluster enabling produces asymmetric state (delegate filters, peers don't, TB transit breaks) — discovered 2026-05-13.
-
-4. **Enable `snippets` content type on `local`.** Required before the first `tofu apply` — without it, the `bpg/proxmox` provider's snippet upload silently no-ops, `cicustom` references a non-existent file, and VMs boot with no cloud-init customization (caught us 2026-05-10; see `scripts/preflight.sh`). The repo's tooling defaults `snippets_storage = "local"`; Proxmox doesn't enable the `snippets` content type on `local` by default.
-
-   ```bash
-   # On any cluster member after join (storage.cfg replicates via pmxcfs):
-   pvesm set local --content snippets,iso,vztmpl,backup,images,rootdir
-   ```
-
-   Or UI: Datacenter → Storage → `local` → Edit → Content → check "Snippets". The role doesn't manage `/etc/pve/storage.cfg` — pmxcfs-replicated; writing from N hosts is a race (see `CLAUDE.md` § "What this role MUST NOT do"). `snippets` on `nas-vms` is handled in step 5's registration command.
-
-5. **NFS storage registration in Proxmox** (also enables `snippets` on the share). Register the NFS export at `/mnt/nas-vms` as cluster storage `nas-vms`. Include `snippets` in `--content` from the start so cluster-mobile VMs whose snippet sits on shared storage stay reachable post-live-migration:
-
-   ```bash
-   pvesm add nfs nas-vms --server <nas-ip> --export /volume1/proxmox-vms \
-       --content images,backup,snippets --options vers=4.2
-   ```
-
-   Or UI: Datacenter → Storage → Add → NFS, tick `Disk image`, `VZDump backup file`, and `Snippets` under Content. The role mounts the NFS share at the filesystem level (`/mnt/nas-vms`); this tells Proxmox's storage layer about it. If you used the UI and forgot the Snippets tick, fix with `pvesm set nas-vms --content snippets,images,backup`.
-
-6. **Proxmox API users + tokens (Packer + OpenTofu).** Required before any Packer build or OpenTofu apply against the cluster. Two separate users with least-privilege roles:
+3. **Proxmox API users + tokens (Packer + OpenTofu).** Required before any Packer build or OpenTofu apply against the cluster. Two separate users with least-privilege roles:
    - **Packer** — see [`docs/proxmox-permissions.md`](../docs/proxmox-permissions.md). User `packer@pve` + role `packer-build`, token name `builder`. Used by `packer build` to create the universal Ubuntu/Windows base templates.
    - **OpenTofu** — see [`docs/proxmox-tofu-permissions.md`](../docs/proxmox-tofu-permissions.md). User `tofu@pve` + role `tofu-provision` (Packer's role minus `VM.Config.CDROM` and `VM.Console`). Used by `tofu apply` to clone templates into per-role VMs.
 
    Run **once on any cluster member after join** — `pveum` users + tokens + ACLs are stored in `/etc/pve/`, which pmxcfs replicates cluster-wide. Pre-cluster the docs describe a per-node flow; post-cluster it's a single setup. Token secrets land in your KeePassXC vault; the workstation's `hydrate.sh` reads them at apply time.
 
-7. **eGPU passthrough plumbing on `pve12t` (one-time, then forget).** The Razer Core X + RTX 3090 passthrough to the LLM VM is **not covered by this role** — vfio module loading, IOMMU kernel parameters via GRUB, modprobe driver-binding options, and the per-VM PCI passthrough config. **After the baseline is applied on `pve12t`, follow `docs/proxmox-gpu-passthrough.md` (and the vault doc `[[NUC12-Proxmox-eGPU-Passthrough]]`) to plumb it through.** Requires reboots and GRUB edits; out of scope for the Ansible role for stability reasons (see `CLAUDE.md` under "What this role MUST NOT do").
+4. **eGPU passthrough plumbing on `pve12t` (one-time, then forget).** The Razer Core X + RTX 3090 passthrough to the LLM VM is **not covered by this role** — vfio module loading, IOMMU kernel parameters via GRUB, modprobe driver-binding options, and the per-VM PCI passthrough config. **After the baseline is applied on `pve12t`, follow `docs/proxmox-gpu-passthrough.md` (and the vault doc `[[NUC12-Proxmox-eGPU-Passthrough]]`) to plumb it through.** Requires reboots and GRUB edits; out of scope for the Ansible role for stability reasons (see `CLAUDE.md` under "What this role MUST NOT do").
 
 ## Optional follow-ups
 

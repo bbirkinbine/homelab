@@ -365,6 +365,82 @@ After this, any `qm migrate <vmid> <target-node>` or live-migration triggered vi
 
 ---
 
+## Step 6 — Enable the cluster-wide firewall
+
+The `pve-host` role staged `/etc/pve/firewall/cluster.fw` with `enable: 0` so the firewall was inert pre-cluster (avoiding the asymmetric-state hazard where the delegate filters but peers don't). Now that pmxcfs replicates the file cluster-wide, flip `enable: 0` → `enable: 1`:
+
+```bash
+# Read current, modify in a tempfile, diff, then cp into pmxcfs.
+# Same pattern as the corosync.conf edit — avoids in-place edit risks.
+ssh root@192.168.1.227 '
+  sed "s/^enable: 0/enable: 1/" /etc/pve/firewall/cluster.fw > /tmp/cluster.fw.new
+  diff /etc/pve/firewall/cluster.fw /tmp/cluster.fw.new
+'
+# If the diff shows exactly one line change (enable: 0 → 1), apply:
+ssh root@192.168.1.227 'cp /tmp/cluster.fw.new /etc/pve/firewall/cluster.fw'
+
+# Verify SSH still works to all three nodes IMMEDIATELY — this is the
+# moment-of-truth. If the next SSH hangs, the firewall has a rule
+# bug and you'll need console / Tailscale to recover.
+for ip in 192.168.1.227 192.168.1.163 192.168.1.240; do
+  echo -n "$ip: "; ssh -o ConnectTimeout=5 root@$ip 'grep enable: /etc/pve/firewall/cluster.fw'
+done
+```
+
+Expected: all three respond, all three show `enable: 1`. pmxcfs replicates the file. Each node's pve-firewall service re-reads the config within seconds and installs the rules (LAN admin access, corosync ring0+ring1, TB fabric, NFS loopback).
+
+Alternative: Datacenter → Firewall → Options → Enable in the UI. Same effect — the UI writes `enable: 1` to cluster.fw.
+
+If SSH dies on a node after this step, the lockout-recovery path is via the host's console (PVE node web UI's Shell button uses sshd so won't help) or Tailscale (if installed). Restore inert state by editing cluster.fw back to `enable: 0` and `cp`-ing it back into pmxcfs.
+
+---
+
+## Step 7 — Enable `snippets` content type on `local`
+
+Required before any `tofu apply` against the cluster. The `bpg/proxmox` OpenTofu provider uploads cloud-init snippets to a Proxmox storage that has the `snippets` content type enabled. Proxmox doesn't enable `snippets` on `local` by default; without it, the snippet upload silently no-ops and VMs boot with no cloud-init customization. Caught the hard way 2026-05-10 — see `scripts/preflight.sh`.
+
+```bash
+ssh root@192.168.1.227 'pvesm set local --content snippets,iso,vztmpl,backup,images,rootdir'
+
+# Verify cluster-wide (pmxcfs replicates /etc/pve/storage.cfg)
+for ip in 192.168.1.227 192.168.1.163 192.168.1.240; do
+  echo "=== $ip ==="
+  ssh root@$ip 'pvesm status | grep local$'
+done
+```
+
+Note: `pvesm set --content` is destructive (replaces the existing content list). The full list above preserves Proxmox's defaults (`iso,vztmpl,backup,images,rootdir`) and adds `snippets`.
+
+Alternative: Datacenter → Storage → `local` → Edit → tick **Snippets** under Content.
+
+---
+
+## Step 8 — Register the NAS NFS as cluster storage `nas-vms`
+
+The `pve-host` role already mounted the Asustor NFS export at `/mnt/nas-vms` via fstab. This step tells Proxmox's storage layer about it, so the cluster can use it as a destination for VM disks, backups, and snippets. Including `snippets` in `--content` from the start means cluster-mobile VMs whose cloud-init snippet sits on shared storage stay reachable post-live-migration.
+
+```bash
+ssh root@192.168.1.227 '
+  pvesm add nfs nas-vms \
+    --server 192.168.1.209 \
+    --export /volume1/proxmox-vms \
+    --content images,backup,snippets \
+    --options vers=4.2
+'
+
+# Verify cluster-wide
+for ip in 192.168.1.227 192.168.1.163 192.168.1.240; do
+  echo "=== $ip ==="
+  ssh root@$ip 'pvesm status | grep -E "^Name|nas-vms"'
+done
+```
+
+Expected: every node lists `nas-vms` with type `nfs`, status `active`. Proxmox automatically mounts the share at `/mnt/pve/nas-vms` (its own managed mount, separate from the role's `/mnt/nas-vms` fstab entry). Both can coexist — the role's mount is for non-PVE-layer access if anything ever needs it.
+
+Alternative: UI → Datacenter → Storage → Add → NFS, tick Disk image + VZDump backup + Snippets. If you used the UI and forgot the Snippets tick, fix with `pvesm set nas-vms --content snippets,images,backup`.
+
+---
+
 ## What to verify before moving on
 
 ```bash
@@ -376,27 +452,27 @@ for ip in 192.168.1.227 192.168.1.163 192.168.1.240; do
   ssh root@$ip 'echo "=== $(hostname) ==="; corosync-cfgtool -s'
 done
 
-# pmxcfs replicates writes (already proven in step 3 — re-run if you skipped)
-# Cluster.fw replicated to all nodes
+# cluster.fw enabled cluster-wide
 for ip in 192.168.1.227 192.168.1.163 192.168.1.240; do
   ssh root@$ip 'grep enable: /etc/pve/firewall/cluster.fw'
 done
 
+# storage.cfg has snippets on local + nas-vms registered, replicated
+for ip in 192.168.1.227 192.168.1.163 192.168.1.240; do
+  echo "=== $ip ==="
+  ssh root@$ip 'pvesm status'
+done
+
 # Web UI confirms 3 nodes (Datacenter view, all green)
-# Open https://192.168.1.227:8006 — login as root@pam — see all three in the tree
+# Open https://192.168.1.227:8006 — login as root@pam — see all three
+# nodes + both storages (local-lvm, local with snippets, nas-vms)
 ```
 
 ---
 
 ## What comes next
 
-After cluster join + ring1 is verified, return to [docs/0-scratch-build-order.md](0-scratch-build-order.md) Phase 2 starting at step 8:
-
-- Cluster-wide `pve-firewall` enable (flip `enable: 0` → `1` in cluster.fw, replicates everywhere)
-- Enable `snippets` content type on `local` (`pvesm set local --content snippets,iso,vztmpl,backup,images,rootdir`)
-- Register the Asustor NFS export as cluster storage `nas-vms` (`pvesm add nfs nas-vms ...` with `--content images,backup,snippets`)
-
-Then Phase 3 (IaC enablement): Packer + OpenTofu API users, base templates.
+After this runbook completes, return to [docs/0-scratch-build-order.md](0-scratch-build-order.md) **Phase 3** for IaC enablement: Packer + OpenTofu API users, workstation setup, base template builds. The eGPU passthrough plumbing on pve12t (for the future LLM VM) is deferred until you're ready to deploy that role.
 
 ---
 
