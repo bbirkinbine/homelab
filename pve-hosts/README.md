@@ -102,7 +102,7 @@ pve-hosts/
 
 The role gets each host to baseline. Several follow-ups remain operator-driven — they have quorum, GRUB, or reboot risk that doesn't fit declarative automation:
 
-1. **Cluster join (all three nodes, one-time).** Manual `pvecm create` on the first node, `pvecm add <first-node-ip>` on the other two. Per the vault doc `[[VM Mobility — 3-Node Cluster on 2.5GbE]]`. Has quorum risk; never automated.
+1. **Cluster join (all three nodes, one-time).** Full runbook in [`docs/cluster-bring-up.md`](../docs/cluster-bring-up.md) — covers `pvecm create homelab` on pve12t, `pvecm add` on the joiners, corosync ring1 over the TB fabric, pmxcfs replication verification, and recovery from common failures. Manual + quorum-aware; never automated. The architecture rationale is in the vault doc `[[VM Mobility — 3-Node Cluster on 2.5GbE]]`.
 
 2. **TB fabric end-to-end verification.** The initial `ifreload -a` happened in Quick-start step 5; this is the *post-cluster* validation pass. Force-migrate tests need cluster quorum to be meaningful, which is why this lands after step 1. Run the iperf3 + force-migrate suite from the vault doc `[[Thunderbolt Mesh Networking — 3-Node Cluster Option]]` (Phase 6 + Phase 8 of its bring-up runbook).
 

@@ -39,7 +39,7 @@ Per-node prep. Steps 1 + 2 can run in parallel (NAS-side prep doesn't depend on 
 
 ## Phase 2 — Cluster bring-up
 
-7. **`pvecm create` on the first node, `pvecm add <first-node-ip>` on the other two.** Vault doc `[[VM Mobility — 3-Node Cluster on 2.5GbE]]`. Quorum-aware; never automated. **Joining nodes must have empty `/etc/pve/qemu-server/` + `/etc/pve/lxc/` and no custom `pveum` users** — the creator's `/etc/pve/` becomes the cluster's.
+7. **Cluster join (`pvecm create` + `pvecm add` + corosync ring1 over TB)** — full runbook in [docs/cluster-bring-up.md](cluster-bring-up.md). Quorum-aware; never automated. Covers the prerequisite checks, `pvecm create homelab --link0 <pve12t-ip>` on the creator, two `pvecm add` invocations on the joiners (with the empty-`/etc/pve/qemu-server` requirement), the corosync.conf edit for ring1 over the TB loopback subnet, verification, and recovery from common failures. Architecture rationale is in the vault: `Projects/Homelab/VM Mobility — 3-Node Cluster on 2.5GbE.md`.
 
 8. **Cluster-wide `pve-firewall` enable.** The `pve-host` role staged the cluster.fw rules with `enable: 0` so the firewall is inert pre-cluster (avoiding the asymmetric-state hazard where the delegate filters but peers don't). Now that pmxcfs replicates the file cluster-wide, turn it on: Datacenter → Firewall → Options → Enable (UI writes `enable: 1` to cluster.fw), or `sed -i 's/^enable: 0/enable: 1/' /etc/pve/firewall/cluster.fw` on any node. Verify SSH still works to every node before walking away.
 

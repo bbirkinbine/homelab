@@ -124,6 +124,7 @@ When a task touches one of these areas, read the local doc first before suggesti
 - **Asustor NAS setup (NFS prereqs):** `docs/asustor-nas-setup.md` — NFS server enablement, shared folder creation, export ACLs (squash/sync/subnet); must land before the `pve-host` role's `nfs.yml` task runs
 - **Proxmox bare-metal install (layer 0a):** `docs/proxmox-install.md` — USB media, BIOS prereqs, installer click-through, post-install carve-outs (`nuc12-fast` LVM-thin), TB cabling; precedes the `pve-host` Ansible role
 - **PVE host baseline (layer 0b, Ansible):** `pve-hosts/README.md` — runs against a freshly-installed PVE 9.x host; spec lives in `pve-hosts/CLAUDE.md`
+- **Cluster bring-up (layer 0c, manual + quorum-aware):** `docs/cluster-bring-up.md` — `pvecm create` + `pvecm add` + corosync ring1 over the TB fabric. Runs after every node is at baseline. Never automate this; botched re-join can fence a node.
 - **Proxmox API user/token setup (Packer):** `docs/proxmox-permissions.md`
 - **Proxmox API user/token setup (OpenTofu):** `docs/proxmox-tofu-permissions.md`
 - **OpenTofu + Ansible workstation flow:** `docs/opentofu-setup.md`
