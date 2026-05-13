@@ -39,7 +39,11 @@ Per-node prep. Steps 1 + 2 can run in parallel (NAS-side prep doesn't depend on 
 
 ## Phase 2 — Cluster bring-up
 
-7. **Cluster join (`pvecm create` + `pvecm add` + corosync ring1 over TB)** — full runbook in [docs/cluster-bring-up.md](cluster-bring-up.md). Quorum-aware; never automated. Covers the prerequisite checks, `pvecm create homelab --link0 <pve12t-ip>` on the creator, two `pvecm add` invocations on the joiners (with the empty-`/etc/pve/qemu-server` requirement), the corosync.conf edit for ring1 over the TB loopback subnet, verification, and recovery from common failures. Architecture rationale is in the vault: `Projects/Homelab/VM Mobility — 3-Node Cluster on 2.5GbE.md`.
+**Step 7 below is the cluster-formation work — [docs/cluster-bring-up.md](cluster-bring-up.md) is the runbook to follow during execution.** That doc walks through prerequisite checks, `pvecm create` on the creator, the two `pvecm add` invocations on the joiners, the corosync.conf edit for ring1 over the TB fabric, the migration-network setting, verification, and recovery from common failures. Don't try to execute Phase 2 from this index alone — drop into the runbook.
+
+Steps 8-10 are post-cluster storage + policy configuration; their detail lives in [pve-hosts/README.md](../pve-hosts/README.md)'s post-baseline section.
+
+7. **Cluster formation (`pvecm create` + 2× `pvecm add` + corosync ring1 + migration network)** — see [docs/cluster-bring-up.md](cluster-bring-up.md). Quorum-aware; never automated. Architecture rationale is in the vault: `Projects/Homelab/VM Mobility — 3-Node Cluster on 2.5GbE.md`.
 
 8. **Cluster-wide `pve-firewall` enable.** The `pve-host` role staged the cluster.fw rules with `enable: 0` so the firewall is inert pre-cluster (avoiding the asymmetric-state hazard where the delegate filters but peers don't). Now that pmxcfs replicates the file cluster-wide, turn it on: Datacenter → Firewall → Options → Enable (UI writes `enable: 1` to cluster.fw), or `sed -i 's/^enable: 0/enable: 1/' /etc/pve/firewall/cluster.fw` on any node. Verify SSH still works to every node before walking away.
 
