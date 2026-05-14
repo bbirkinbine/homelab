@@ -23,7 +23,7 @@ Optional hardening (mail, non-root admin) lives at the end — not blockers for 
 
 Per-node prep. Steps 1 + 2 can run in parallel (NAS-side prep doesn't depend on the NUC installs).
 
-1. **NAS NFS export ready** — [docs/asustor-nas-setup.md](asustor-nas-setup.md). Enable NFS server on the Asustor, create the shared folder (`/volume1/proxmox-vms`), set export ACLs (subnet `192.168.1.0/24`, sync, no-root-squash or matched UID). Must land before `pve-host`'s `nfs.yml` task runs.
+1. **NAS NFS export ready** — [docs/asustor-nas-setup.md](asustor-nas-setup.md). Enable NFS server on the Asustor, create the shared folder (`/volume1/proxmox-vms`), set export ACLs (subnet matching `pve_lan_subnet` from inventory, sync, no-root-squash or matched UID). Must land before `pve-host`'s `nfs.yml` task runs.
 
 2. **Bare-metal PVE 9.x install on each NUC** — [docs/proxmox-install.md](proxmox-install.md). USB media, BIOS prereqs (IOMMU on, Secure Boot off), installer click-through, per-node root password from KeePassXC, filesystem layout. On `pve12t` only: post-install creation of the `nuc12-fast` LVM-thin pool on a dedicated 2.5" SATA SSD (1 TB in this lab; see [docs/proxmox-install.md § 2](proxmox-install.md) for the `pvcreate` → `vgcreate nuc12fast_vg` → `lvcreate -T` → `pvesm add` sequence, plus the fallback if the node has no second drive). Repeat the install for `pve12t`, `pve13m`, `pve13t`. Outputs three PVE 9.x hosts reachable on the LAN.
 

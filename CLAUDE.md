@@ -18,9 +18,9 @@ A few states that won't be obvious from the code alone:
 
 **Both base templates are committed and shipping.** Treat `packer/ubuntu-24-04-base/` and `packer/windows-11-base/` as load-bearing — both build reproducibly and have been validated end-to-end. The Windows pipeline shipped in commit 5135652 (proxmox-iso + virtualbox-iso). When working on one base, don't modify the other for "while I'm here" cleanups; if a fix genuinely belongs across both, surface it and ask first.
 
-**Cluster transition in progress.** `README.md` currently describes the three NUCs as independent (per-node tokens, per-node template builds). Brian is moving to a 3-node Proxmox cluster (corosync) with NFS-shared storage from the Asustor AS6706T. Authoritative design in the vault's `VM Mobility — 3-Node Cluster on 2.5GbE.md`; hardware inventory in `Homelab Inventory.md`. Until that transition lands in a commit:
+**Cluster transition in progress.** `README.md` currently describes the three NUCs as independent (per-node tokens, per-node template builds). The lab is moving to a 3-node Proxmox cluster (corosync) with NFS-shared storage from the Asustor AS6706T. Authoritative design lives in the project's private design vault — ask the maintainer if you need access. Until that transition lands in a commit:
 
-- **Proxmox hostnames stay `pveXX` (`pve12t`, `pve13m`, `pve13t`).** The vault Inventory doc's `nuc12 / nuc13-mini / nuc13-tall` are physical-chassis labels, NOT Proxmox node names — don't rename one to the other.
+- **Proxmox hostnames stay `pveXX` (`pve12t`, `pve13m`, `pve13t`).** Physical-chassis labels in the design vault (`nuc12 / nuc13-mini / nuc13-tall`) are NOT Proxmox node names — don't rename one to the other.
 - **`cpu_type = "x86-64-v3"`** is the right module default (set in `modules/proxmox-vm/variables.tf`) for cluster-mobile VMs; it's the common baseline across Alder/Raptor Lake-P/H. Use `host` only on hardware-pinned VMs (eGPU on `pve12t` for the LLM role, USB-HSM passthrough for the Root CA role).
 - **NFS shared storage (`nas-vms`) does not exist yet.** Cluster-mobile roles (openbao, future amp-game) will eventually default to that pool instead of `local-lvm`; don't pre-flip the defaults until the NAS export is mounted and the cluster is up.
 - **Storage exceptions that stay node-pinned** even after the cluster lands: `nuc12-fast` (LVM-thin on a dedicated 1 TB SATA SSD in `pve12t`'s 2.5" bay, VG `nuc12fast_vg`, for the LLM models cache — physically separate from the NVMe-backed `pve` VG so the NVMe stays full-size as `local-lvm`) and the per-node ISO library. The Root CA VM is still pve12t-pinned but for the HSM USB-passthrough reason, not for a host-side encrypted Directory pool — Root CA encryption was moved inside the guest (2026-05-11). See `vms/rootca/README.md`. If `pve12t` is ever rebuilt with a single-NVMe layout (no SATA), `nuc12-fast` would have to come out of the `pve` VG via `lvreduce` — see `docs/proxmox-install.md` § 2 for the fallback procedure.
@@ -28,7 +28,7 @@ A few states that won't be obvious from the code alone:
 
 **OpenTofu + Ansible migration underway.** The first port landed at `vms/openbao/` (OpenTofu provisioning + Ansible config + identity-only cloud-init, with the legacy shell + HSM-passthrough preserved at `vms/openbao/legacy/`). The shared module is `modules/proxmox-vm/`; cross-cutting tooling lives at `scripts/` + `Justfile`; the workstation flow is in `docs/opentofu-setup.md`. New roles should copy that shape rather than authoring fresh `deploy.sh` scripts. Existing shell scripts in other `vms/*/` may stay for now — don't rewrite them speculatively without asking.
 
-**OpenBao seal model changed (2026-05-10).** OpenBao now uses Shamir (5-of-3 manual unseal). The CardLogix SmartCard-HSM 4K pair was re-roled to the offline Root CA position — see the vault's `OpenBao Homelab Setup.md` and `CardLogix as Offline Root CA.md` (paths under `Projects/Homelab/` in the Obsidian vault). Don't restore the HSM-via-PKCS#11 seal path on this VM; the mechanism intersection between OpenBao's seal and SC-HSM 4K is empty.
+**OpenBao seal model changed (2026-05-10).** OpenBao now uses Shamir (5-of-3 manual unseal). The PKCS#11 HSM that was originally going to back the OpenBao seal was re-roled to the offline Root CA position instead — see [`vms/rootca/README.md`](vms/rootca/README.md) for the Root CA's HSM integration, and the project's private design vault for the seal-rationale + repurposing context. Don't restore the HSM-via-PKCS#11 seal path on this VM; the mechanism intersection between OpenBao's seal and the SmartCard-HSM is empty.
 
 ---
 
@@ -63,10 +63,10 @@ This is a public GitHub repo. Anything that lands in a commit can be scraped wit
 - VM hostnames or IPs that aren't already in `README.md`'s hardware table.
 - Cleartext build passwords *beyond* the intentional `packer-build-only-Win11!` in `http/Autounattend.xml`. That one is deliberate and rotated by sysprep at the end of the build — don't replace it with a "real" secret.
 
-**Brian's local secret store is KeePassXC unlocked with a YubiKey** (with a backup YubiKey enrolled). When suggesting credential patterns for IaC:
+**Secrets flow in from the operator's credential store at run time, never embedded in code.** The current shape uses a local password manager (resolved by [`scripts/hydrate.sh`](scripts/hydrate.sh) for OpenTofu, and by `.env.<target>` reads for Packer). When suggesting credential patterns for IaC:
 
-- Default to "read from `.env.<target>` at invocation time" or "fetch from KeePassXC at run time", not "embed in the `.tf` / `.pkr.hcl`".
-- Don't suggest 1Password CLI, Vault, or SOPS as the default — Brian is aware of those; they're options, not the current shape.
+- Default to "read from `.env.<target>` at invocation time" or "fetch from the local password manager at run time", not "embed in the `.tf` / `.pkr.hcl`".
+- Don't propose swapping in 1Password CLI, Vault, or SOPS unless the user asks — those are alternatives, not the current shape.
 
 If a secret has to flow through HCL, it goes through `variable {}` with `sensitive = true` and is set via `PKR_VAR_*` env vars at build time. The existing `build-pve.sh` / `build-vbox.sh` wrappers are canonical examples.
 

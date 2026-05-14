@@ -10,17 +10,17 @@
 # thermal monitoring.
 #
 # Usage:
-#   scripts/cluster-fan-speeds.sh                # all 3 nodes
-#   NODES="192.168.1.227" scripts/cluster-fan-speeds.sh    # one node
+#   NODES="10.0.0.12 10.0.0.13 10.0.0.14" scripts/cluster-fan-speeds.sh
+#   NODES="10.0.0.12" scripts/cluster-fan-speeds.sh                       # one node
 #
-# IPs default to the lab's three Proxmox nodes (matching
-# pve-hosts/ansible/inventory.yml). Override via NODES env var as a
-# space-separated list.
+# Set NODES to your cluster's LAN IPs (space-separated). The defaults
+# below are RFC 5737 documentation addresses — they won't route to real
+# hardware; override via the env var.
 
 set -euo pipefail
 
-# Default to the homelab's three nodes. Override via env var if needed.
-read -r -a NODES <<< "${NODES:-192.168.1.227 192.168.1.163 192.168.1.240}"
+# RFC 5737 documentation defaults — replace via NODES env var.
+read -r -a NODES <<< "${NODES:-192.0.2.12 192.0.2.13 192.0.2.14}"
 
 for ip in "${NODES[@]}"; do
   echo "===== $ip ====="

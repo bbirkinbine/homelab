@@ -21,15 +21,15 @@ pve_hosts:
   vars:
     # ----- cluster-wide -----
     # Replace with your actual LAN subnet/gateway.
-    pve_lan_subnet: "192.168.1.0/24"        # TODO: real LAN subnet
-    pve_lan_gateway: "192.168.1.1"          # TODO: real LAN gateway
+    pve_lan_subnet: "192.0.2.0/24"          # RFC 5737 docs range — replace with real LAN subnet
+    pve_lan_gateway: "192.0.2.1"            # replace with real LAN gateway
 
     # TB fabric — frozen per the vault decision doc
     pve_tb_migration_subnet: "10.10.10.0/24"
 
     # NAS
     nas_hostname: "asustor.lan"             # TODO: confirm or change
-    nas_ip: "192.168.1.10"                  # TODO: real NAS IP
+    nas_ip: "192.0.2.10"                    # replace with real NAS IP
     nas_nfs_export: "/volume1/proxmox-vms"  # confirm against ADM Shared Folders
     nas_mount_point: "/mnt/nas-vms"
 
@@ -69,9 +69,9 @@ pve_hosts:
 
     # ---- pve12t (NUC12 Pro Tall, eGPU host, TB leaf) ----
     pve12t:
-      ansible_host: 192.168.1.12            # TODO: real LAN IP
+      ansible_host: 192.0.2.12              # replace with real LAN IP
       pve_lan_iface: "nic0"                 # PVE 9 default (verify with `ip link`)
-      pve_lan_ip: "192.168.1.12"            # TODO
+      pve_lan_ip: "192.0.2.12"              # replace with real LAN IP
       tb_role: "leaf"
       tb_loopback: "10.10.10.12"
       # Single TB link to pve13m.
@@ -89,9 +89,9 @@ pve_hosts:
 
     # ---- pve13m (NUC13 Pro slim, TB transit node) ----
     pve13m:
-      ansible_host: 192.168.1.13            # TODO: real LAN IP
+      ansible_host: 192.0.2.13              # replace with real LAN IP
       pve_lan_iface: "nic0"                 # PVE 9 default (verify with `ip link`)
-      pve_lan_ip: "192.168.1.13"            # TODO
+      pve_lan_ip: "192.0.2.13"              # replace with real LAN IP
       tb_role: "transit"
       tb_loopback: "10.10.10.13"
       # Two TB links — one to each leaf.
@@ -110,9 +110,9 @@ pve_hosts:
 
     # ---- pve13t (NUC13 Pro Tall, TB leaf, spare port for future use) ----
     pve13t:
-      ansible_host: 192.168.1.14            # TODO: real LAN IP
+      ansible_host: 192.0.2.14              # replace with real LAN IP
       pve_lan_iface: "nic0"                 # PVE 9 default (verify with `ip link`)
-      pve_lan_ip: "192.168.1.14"            # TODO
+      pve_lan_ip: "192.0.2.14"              # replace with real LAN IP
       tb_role: "leaf"
       tb_loopback: "10.10.10.14"
       # Single TB link to pve13m.

@@ -2,13 +2,13 @@
 
 > **Purpose.** Scaffolding spec + persistent context for Claude Code (or any AI tool) implementing the `pve-host` Ansible role under `pve-hosts/ansible/roles/pve-host/`. Read this file fully before generating anything. The folder skeleton already exists; your job is to fill in the role's task/template/handler/var files per this spec, and to verify the result with the acceptance gates at the bottom.
 
-Read the **repo-level** `CLAUDE.md` at the root of this repository first if you haven't — it covers tone, no-emojis style, public-repo hygiene rules, secrets handling, and Brian's KeePassXC + YubiKey workflow. The conventions below extend those, they don't replace them.
+Read the **repo-level** `CLAUDE.md` at the root of this repository first if you haven't — it covers tone, no-emojis style, public-repo hygiene rules, and the secrets-handling philosophy (operator's local credential store, read at invocation time, never embedded). The conventions below extend those, they don't replace them.
 
 ---
 
 ## Why this folder exists, in one paragraph
 
-The repo's existing Ansible roles all live under `vms/<role>/ansible/` and configure Linux VMs running on Proxmox. `pve-host` is different: it configures the Proxmox hypervisor hosts themselves. The hosts are the substrate that everything in `vms/` runs on top of. Brian decided 2026-05-11 to add a TB4 line-topology fabric between the three nodes for live-migration traffic; that decision pushed the per-node config past "I can hold it in my head" complexity, and an Ansible role to capture the per-node baseline becomes the right time-investment. The vault decision doc `[[Thunderbolt Mesh Networking — 3-Node Cluster Option]]` is the authoritative network design; this role implements its templates.
+The repo's existing Ansible roles all live under `vms/<role>/ansible/` and configure Linux VMs running on Proxmox. `pve-host` is different: it configures the Proxmox hypervisor hosts themselves. The hosts are the substrate that everything in `vms/` runs on top of. We added a TB4 line-topology fabric between the three nodes for live-migration traffic (decision 2026-05-11); that pushed the per-node config past "I can hold it in my head" complexity, and an Ansible role to capture the per-node baseline became the right time-investment. The authoritative network design lives in the project's private design vault; this role implements its templates.
 
 ---
 
@@ -409,13 +409,13 @@ If any of these don't match, fix the template and re-verify before signing off.
 
 ---
 
-## Things to leave for Brian
+## Things to leave for the operator
 
 These need human input that isn't safe to guess:
 
 - Real LAN subnet + IPs in `inventory.yml` (post-scaffold copy of `.example`).
 - Real NAS IP/hostname.
-- Brian's SSH pubkey for the `admin_ssh_pubkey` var.
+- The operator's SSH pubkey for the `admin_ssh_pubkey` var.
 - BIOS settings on each NUC: IOMMU enabled. Document as a manual prereq in the role's README. Note that ASUS NUC13 / NUC12 firmware does NOT expose Thunderbolt security level as a BIOS option (older Intel-branded NUC firmware did) — the domain stays at `security=user` and the role's `thunderbolt.yml` step (b) handles persistent peer-host enrollment via `boltctl`. No operator action required for TB trust on first plug-in beyond running the role.
 
 ---
@@ -458,7 +458,7 @@ Leave a `SCAFFOLD-NOTES.md` at `pve-hosts/ansible/roles/pve-host/SCAFFOLD-NOTES.
 
 - Files you generated (one-line each).
 - Any assumptions you made beyond what this CLAUDE.md specified.
-- What Brian needs to fill in before the first run (cross-reference "Things to leave for Brian" above).
+- What the operator needs to fill in before the first run (cross-reference "Things to leave for the operator" above).
 - Any deviations from this spec, each with a one-paragraph rationale.
 - Output of all four acceptance gates (paste the relevant lines, not full logs).
 
@@ -466,14 +466,6 @@ Then update the top-level `README.md` of the repo to mention `pve-hosts/` in the
 
 ---
 
-## Vault references (read these for design context)
+## Design vault (operator-only)
 
-The Obsidian vault lives at `~/Downloads/obsidian-vault/`. Reference docs (don't modify them):
-
-- `Projects/Homelab/00-Homelab-MOC.md` — index over the whole homelab folder.
-- `Projects/Homelab/Thunderbolt Mesh Networking — 3-Node Cluster Option.md` — TB line topology decision + bring-up runbook. Authoritative on TB IPs, link plan, ip_forward placement.
-- `Projects/Homelab/VM Mobility — 3-Node Cluster on 2.5GbE.md` — cluster + NFS architecture. Filename retained for wikilink stability; content is the broader cluster design.
-- `Projects/Homelab/PVE Host Bootstrap — Manual Install + Ansible Role.md` — original spec for this role. Read for additional context; if it conflicts with anything in this CLAUDE.md, this file wins.
-- `Projects/Homelab/Homelab Inventory.md` — hardware specifics.
-
-If reading those would help disambiguate a decision, do it before generating files. They're public to you via the vault path above.
+The project's authoritative design docs live in a private vault outside this repo — TB line topology rationale, cluster + NFS architecture, the original role spec, and hardware specifics. If something in this CLAUDE.md is ambiguous and the rationale matters, ask the maintainer for vault access rather than guessing. If you have local access already, the maintainer's working copy is wherever they keep it; this file deliberately doesn't pin the filesystem path.

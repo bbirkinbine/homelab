@@ -5,6 +5,26 @@ hardened VM templates (Ubuntu Server 24.04 LTS, Windows 11 Pro x64) that
 serve as the universal parent images for downstream VMs running across one
 or more Proxmox nodes.
 
+> ## Status
+>
+> Published as a personal-lab reference, not an actively maintained product.
+> Issues and PRs are welcome but won't get fast turnaround. The
+> [`docs/`](docs/) tree — especially
+> [docs/0-scratch-build-order.md](docs/0-scratch-build-order.md), the phased
+> walkthrough that drives bare metal → quorate cluster → IaC enablement →
+> per-role deploys — and the per-component runbooks under
+> [`packer/*/README.md`](packer/) and [`vms/*/README.md`](vms/) are the parts
+> most likely to be useful to others.
+>
+> **This repo is in-flight.** The lab is being built out role-by-role;
+> expect the shape of [`vms/`](vms/), the
+> [`modules/proxmox-vm`](modules/proxmox-vm/) input surface, the
+> [`pve-host`](pve-hosts/) Ansible role, and the docs to shift as new
+> requirements surface. Anything called out as "validated" or "shipping" in
+> a per-component README has been exercised end-to-end on real hardware;
+> the rest is subject to change without notice. Pin a specific commit if
+> you depend on a snapshot.
+
 ## Hardware
 
 ### Proxmox nodes

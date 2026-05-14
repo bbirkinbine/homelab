@@ -120,7 +120,7 @@ Clean — no errors.
 
 ### 2. Template render against the example inventory (all three hosts)
 
-Used a tiny playbook with `connection: local` to invoke the role's `template` module against the example inventory's placeholders (192.168.1.0/24 LAN), writing renders to `/tmp/pve-host-render/`. Verified per-host expectations from CLAUDE.md § "Acceptance gates":
+Used a tiny playbook with `connection: local` to invoke the role's `template` module against the example inventory's placeholders (192.0.2.0/24 LAN, RFC 5737 docs range), writing renders to `/tmp/pve-host-render/`. Verified per-host expectations from CLAUDE.md § "Acceptance gates":
 
 - **pve12t** — `vmbr0` over `nic0` at the host's LAN IP; one TB stanza `tbnet-13m` at `10.10.0.0/31` MTU 65520; `lo:10` at `10.10.10.12/32`; two `post-up ip route` lines for `10.10.10.13/32` and `10.10.10.14/32` via `10.10.0.1` on `tbnet-13m`. ✓
 - **pve13m** — `vmbr0` over `nic0`; two TB stanzas (`tbnet-12t` at `10.10.0.1/31`, `tbnet-13t` at `10.10.0.2/31`); `lo:10` at `10.10.10.13/32`; two `dev`-style `post-up ip route` lines (no next-hop on /31): `10.10.10.12/32 dev tbnet-12t` and `10.10.10.14/32 dev tbnet-13t`. `99-tb-forward.conf` rendered. ✓

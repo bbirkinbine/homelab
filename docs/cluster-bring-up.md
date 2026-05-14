@@ -54,23 +54,23 @@ If any of these aren't true, fix before proceeding. **There is no "undo" for `pv
 Pick the creator. We use **pve12t** because it's the node with the most state (Razer Core X enrolled, eGPU passthrough config eventually). The creator's `/etc/pve/` contents become the cluster's; everyone else's gets replaced. pve12t's existing `cluster.fw` (with `enable: 0`) is what we want everywhere.
 
 ```bash
-ssh root@192.168.1.227 'pvecm create homelab --link0 192.168.1.227'
+ssh root@192.0.2.12 'pvecm create homelab --link0 192.0.2.12'
 ```
 
 - `homelab` — cluster name. Convention only; any short alphanumeric string works.
-- `--link0 192.168.1.227` — pins corosync ring0 to pve12t's LAN address. Without this, corosync picks the first non-loopback IP it finds, which is usually fine but explicit is better.
+- `--link0 192.0.2.12` — pins corosync ring0 to pve12t's LAN address. Without this, corosync picks the first non-loopback IP it finds, which is usually fine but explicit is better.
 
 Expected output: a few seconds of corosync startup messages, no errors. Verify:
 
 ```bash
-ssh root@192.168.1.227 'pvecm status'
+ssh root@192.0.2.12 'pvecm status'
 ```
 
 You should see:
 
 - `Cluster information` block: name `homelab`, config version `1`, transport `knet`
 - `Quorum information`: `Quorate: Yes`, `Nodes: 1`
-- `Membership information`: a single member at `192.168.1.227`, you're it
+- `Membership information`: a single member at `192.0.2.12`, you're it
 
 If `Quorate: No` or the node fails to start, look at `journalctl -u corosync -n 50` and the next attempt should be `pvecm delnode pve12t` to clear state before retrying.
 
@@ -81,12 +81,12 @@ If `Quorate: No` or the node fails to start, look at `journalctl -u corosync -n 
 `pvecm add` prompts for pve12t's root password on stdin, which the non-interactive `ssh root@<ip> 'cmd'` form can't supply cleanly — the command hangs. Use an interactive SSH session instead:
 
 ```bash
-ssh root@192.168.1.163
+ssh root@192.0.2.13
 # Inside the pve13m shell:
-pvecm add 192.168.1.227 --link0 192.168.1.163
+pvecm add 192.0.2.12 --link0 192.0.2.13
 # It prompts:
 #   "Are you sure you want to continue connecting (yes/no/[fingerprint])?" → yes
-#   "root@192.168.1.227's password:" → pve12t's root password from KeePassXC
+#   "root@192.0.2.12's password:" → pve12t's root password from KeePassXC
 exit
 ```
 
@@ -100,14 +100,14 @@ What's happening behind the prompts:
 Expected: a sequence of "successfully added node" + key-fingerprint messages, no errors. Verify from pve12t:
 
 ```bash
-ssh root@192.168.1.227 'pvecm status'
+ssh root@192.0.2.12 'pvecm status'
 ```
 
 Now shows `Nodes: 2`, both members listed. From pve13m, the cluster's `cluster.fw` should now be replicated:
 
 ```bash
-ssh root@192.168.1.163 'ls -la /etc/pve/firewall/'
-ssh root@192.168.1.163 'grep enable: /etc/pve/firewall/cluster.fw'
+ssh root@192.0.2.13 'ls -la /etc/pve/firewall/'
+ssh root@192.0.2.13 'grep enable: /etc/pve/firewall/cluster.fw'
 ```
 
 Expect: `cluster.fw` present, `enable: 0` — pmxcfs replicated the file from pve12t.
@@ -119,9 +119,9 @@ Expect: `cluster.fw` present, `enable: 0` — pmxcfs replicated the file from pv
 Same shape, different node. Again use interactive SSH so the password prompt works:
 
 ```bash
-ssh root@192.168.1.240
+ssh root@192.0.2.14
 # Inside the pve13t shell:
-pvecm add 192.168.1.227 --link0 192.168.1.240
+pvecm add 192.0.2.12 --link0 192.0.2.14
 # yes to the host-key prompt, pve12t's root password to the password prompt
 exit
 ```
@@ -129,19 +129,19 @@ exit
 After it completes, verify the 3-node quorate state:
 
 ```bash
-ssh root@192.168.1.227 'pvecm status'
+ssh root@192.0.2.12 'pvecm status'
 ```
 
-Should now show `Nodes: 3`, `Quorate: Yes`, three members on ring 0 over 192.168.1.0/24, with `Link 0 status: active` for each.
+Should now show `Nodes: 3`, `Quorate: Yes`, three members on ring 0 over 192.0.2.0/24, with `Link 0 status: active` for each.
 
 Sanity-check pmxcfs replication by writing a probe file from one node and reading it from another:
 
 ```bash
-ssh root@192.168.1.227 'echo probe-$(date +%s) > /etc/pve/.bringup-probe'
-ssh root@192.168.1.163 'cat /etc/pve/.bringup-probe'
-ssh root@192.168.1.240 'cat /etc/pve/.bringup-probe'
+ssh root@192.0.2.12 'echo probe-$(date +%s) > /etc/pve/.bringup-probe'
+ssh root@192.0.2.13 'cat /etc/pve/.bringup-probe'
+ssh root@192.0.2.14 'cat /etc/pve/.bringup-probe'
 # clean up
-ssh root@192.168.1.227 'rm /etc/pve/.bringup-probe'
+ssh root@192.0.2.12 'rm /etc/pve/.bringup-probe'
 ```
 
 If all three reads return the same string, pmxcfs is healthy.
@@ -155,13 +155,13 @@ Ring0 is live on the 2.5GbE LAN. We now add ring1 over the TB fabric so corosync
 **Back up the running config first** in case the edit goes wrong:
 
 ```bash
-ssh root@192.168.1.227 'cp /etc/pve/corosync.conf /root/corosync.conf.pre-ring1'
+ssh root@192.0.2.12 'cp /etc/pve/corosync.conf /root/corosync.conf.pre-ring1'
 ```
 
 Then edit `/etc/pve/corosync.conf` on **any one node** (pmxcfs will replicate). Add a `ring1_addr` to each node's nodelist entry and a `linknumber: 1` interface block under `totem`, and **bump `config_version`** by one:
 
 ```bash
-ssh root@192.168.1.227 'cat /etc/pve/corosync.conf'
+ssh root@192.0.2.12 'cat /etc/pve/corosync.conf'
 ```
 
 You'll see something like:
@@ -177,19 +177,19 @@ nodelist {
     name: pve12t
     nodeid: 1
     quorum_votes: 1
-    ring0_addr: 192.168.1.227
+    ring0_addr: 192.0.2.12
   }
   node {
     name: pve13m
     nodeid: 2
     quorum_votes: 1
-    ring0_addr: 192.168.1.163
+    ring0_addr: 192.0.2.13
   }
   node {
     name: pve13t
     nodeid: 3
     quorum_votes: 1
-    ring0_addr: 192.168.1.240
+    ring0_addr: 192.0.2.14
   }
 }
 
@@ -221,21 +221,21 @@ nodelist {
     name: pve12t
     nodeid: 1
     quorum_votes: 1
-    ring0_addr: 192.168.1.227
+    ring0_addr: 192.0.2.12
     ring1_addr: 10.10.10.12
   }
   node {
     name: pve13m
     nodeid: 2
     quorum_votes: 1
-    ring0_addr: 192.168.1.163
+    ring0_addr: 192.0.2.13
     ring1_addr: 10.10.10.13
   }
   node {
     name: pve13t
     nodeid: 3
     quorum_votes: 1
-    ring0_addr: 192.168.1.240
+    ring0_addr: 192.0.2.14
     ring1_addr: 10.10.10.14
   }
 }
@@ -263,7 +263,7 @@ totem {
 # Write the target content to a tempfile (paste the entire desired
 # corosync.conf, including the parts you're NOT changing, into the
 # heredoc):
-ssh root@192.168.1.227 "cat > /tmp/corosync.conf.new <<'CONFEOF'
+ssh root@192.0.2.12 "cat > /tmp/corosync.conf.new <<'CONFEOF'
 logging {
   debug: off
   to_syslog: yes
@@ -274,21 +274,21 @@ nodelist {
     name: pve12t
     nodeid: 1
     quorum_votes: 1
-    ring0_addr: 192.168.1.227
+    ring0_addr: 192.0.2.12
     ring1_addr: 10.10.10.12
   }
   node {
     name: pve13m
     nodeid: 2
     quorum_votes: 1
-    ring0_addr: 192.168.1.163
+    ring0_addr: 192.0.2.13
     ring1_addr: 10.10.10.13
   }
   node {
     name: pve13t
     nodeid: 3
     quorum_votes: 1
-    ring0_addr: 192.168.1.240
+    ring0_addr: 192.0.2.14
     ring1_addr: 10.10.10.14
   }
 }
@@ -320,10 +320,10 @@ CONFEOF
 #   1 `config_version` line change (3 → 4)
 #   1 added `+ interface { linknumber: 1 ... }` block
 # If you see anything else, stop and inspect before proceeding.
-ssh root@192.168.1.227 'diff /etc/pve/corosync.conf /tmp/corosync.conf.new'
+ssh root@192.0.2.12 'diff /etc/pve/corosync.conf /tmp/corosync.conf.new'
 
 # If the diff is right, push into pmxcfs:
-ssh root@192.168.1.227 'cp /tmp/corosync.conf.new /etc/pve/corosync.conf'
+ssh root@192.0.2.12 'cp /tmp/corosync.conf.new /etc/pve/corosync.conf'
 ```
 
 **Alternative: `vim /etc/pve/corosync.conf` directly.** pmxcfs handles atomic-write semantics so vim's `:w` is safe; the risk is purely typos. Use only if you're comfortable making the edits in place without the diff safety net above.
@@ -331,10 +331,10 @@ ssh root@192.168.1.227 'cp /tmp/corosync.conf.new /etc/pve/corosync.conf'
 corosync detects the `config_version` bump and re-applies within seconds. Verify both rings are up:
 
 ```bash
-ssh root@192.168.1.227 'corosync-cfgtool -s'
+ssh root@192.0.2.12 'corosync-cfgtool -s'
 ```
 
-Expected output shows ring0 over 192.168.1.0/24 AND ring1 over 10.10.10.0/24, both `enabled` and `connected` per node. `pvecm status` shows `Link 0 status` and `Link 1 status` both active for each member.
+Expected output shows ring0 over 192.0.2.0/24 AND ring1 over 10.10.10.0/24, both `enabled` and `connected` per node. `pvecm status` shows `Link 0 status` and `Link 1 status` both active for each member.
 
 If ring1 fails to come up:
 
@@ -349,10 +349,10 @@ If ring1 fails to come up:
 Ring1 covers corosync heartbeat over TB, but `qm migrate` (and the web UI's "Migrate" action) still uses the management LAN by default. Tell Proxmox to route migration over the TB loopback subnet by adding one line to `/etc/pve/datacenter.cfg`. The file is pmxcfs-replicated, so the change propagates cluster-wide.
 
 ```bash
-ssh root@192.168.1.227 'echo "migration: type=secure,network=10.10.10.0/24" >> /etc/pve/datacenter.cfg'
+ssh root@192.0.2.12 'echo "migration: type=secure,network=10.10.10.0/24" >> /etc/pve/datacenter.cfg'
 
 # Verify the line landed and replicated:
-for ip in 192.168.1.227 192.168.1.163 192.168.1.240; do
+for ip in 192.0.2.12 192.0.2.13 192.0.2.14; do
   echo -n "$ip: "; ssh root@$ip 'grep ^migration: /etc/pve/datacenter.cfg'
 done
 ```
@@ -372,17 +372,17 @@ The `pve-host` role staged `/etc/pve/firewall/cluster.fw` with `enable: 0` so th
 ```bash
 # Read current, modify in a tempfile, diff, then cp into pmxcfs.
 # Same pattern as the corosync.conf edit — avoids in-place edit risks.
-ssh root@192.168.1.227 '
+ssh root@192.0.2.12 '
   sed "s/^enable: 0/enable: 1/" /etc/pve/firewall/cluster.fw > /tmp/cluster.fw.new
   diff /etc/pve/firewall/cluster.fw /tmp/cluster.fw.new
 '
 # If the diff shows exactly one line change (enable: 0 → 1), apply:
-ssh root@192.168.1.227 'cp /tmp/cluster.fw.new /etc/pve/firewall/cluster.fw'
+ssh root@192.0.2.12 'cp /tmp/cluster.fw.new /etc/pve/firewall/cluster.fw'
 
 # Verify SSH still works to all three nodes IMMEDIATELY — this is the
 # moment-of-truth. If the next SSH hangs, the firewall has a rule
 # bug and you'll need console / Tailscale to recover.
-for ip in 192.168.1.227 192.168.1.163 192.168.1.240; do
+for ip in 192.0.2.12 192.0.2.13 192.0.2.14; do
   echo -n "$ip: "; ssh -o ConnectTimeout=5 root@$ip 'grep enable: /etc/pve/firewall/cluster.fw'
 done
 ```
@@ -400,10 +400,10 @@ If SSH dies on a node after this step, the lockout-recovery path is via the host
 Required before any `tofu apply` against the cluster. The `bpg/proxmox` OpenTofu provider uploads cloud-init snippets to a Proxmox storage that has the `snippets` content type enabled. Proxmox doesn't enable `snippets` on `local` by default; without it, the snippet upload silently no-ops and VMs boot with no cloud-init customization. Caught the hard way 2026-05-10 — see `scripts/preflight.sh`.
 
 ```bash
-ssh root@192.168.1.227 'pvesm set local --content snippets,iso,vztmpl,backup,images,rootdir'
+ssh root@192.0.2.12 'pvesm set local --content snippets,iso,vztmpl,backup,images,rootdir'
 
 # Verify cluster-wide (pmxcfs replicates /etc/pve/storage.cfg)
-for ip in 192.168.1.227 192.168.1.163 192.168.1.240; do
+for ip in 192.0.2.12 192.0.2.13 192.0.2.14; do
   echo "=== $ip ==="
   ssh root@$ip 'pvesm status | grep local$'
 done
@@ -420,16 +420,16 @@ Alternative: Datacenter → Storage → `local` → Edit → tick **Snippets** u
 The `pve-host` role already mounted the Asustor NFS export at `/mnt/nas-vms` via fstab. This step tells Proxmox's storage layer about it, so the cluster can use it as a destination for VM disks, backups, and snippets. Including `snippets` in `--content` from the start means cluster-mobile VMs whose cloud-init snippet sits on shared storage stay reachable post-live-migration.
 
 ```bash
-ssh root@192.168.1.227 '
+ssh root@192.0.2.12 '
   pvesm add nfs nas-vms \
-    --server 192.168.1.209 \
+    --server 192.0.2.10 \
     --export /volume1/proxmox-vms \
     --content images,backup,snippets \
     --options vers=4.2
 '
 
 # Verify cluster-wide
-for ip in 192.168.1.227 192.168.1.163 192.168.1.240; do
+for ip in 192.0.2.12 192.0.2.13 192.0.2.14; do
   echo "=== $ip ==="
   ssh root@$ip 'pvesm status | grep -E "^Name|nas-vms"'
 done
@@ -445,26 +445,26 @@ Alternative: UI → Datacenter → Storage → Add → NFS, tick Disk image + VZ
 
 ```bash
 # 3-node quorate, both rings up
-ssh root@192.168.1.227 'pvecm status'
+ssh root@192.0.2.12 'pvecm status'
 
 # Both rings showing as enabled+connected on every node
-for ip in 192.168.1.227 192.168.1.163 192.168.1.240; do
+for ip in 192.0.2.12 192.0.2.13 192.0.2.14; do
   ssh root@$ip 'echo "=== $(hostname) ==="; corosync-cfgtool -s'
 done
 
 # cluster.fw enabled cluster-wide
-for ip in 192.168.1.227 192.168.1.163 192.168.1.240; do
+for ip in 192.0.2.12 192.0.2.13 192.0.2.14; do
   ssh root@$ip 'grep enable: /etc/pve/firewall/cluster.fw'
 done
 
 # storage.cfg has snippets on local + nas-vms registered, replicated
-for ip in 192.168.1.227 192.168.1.163 192.168.1.240; do
+for ip in 192.0.2.12 192.0.2.13 192.0.2.14; do
   echo "=== $ip ==="
   ssh root@$ip 'pvesm status'
 done
 
 # Web UI confirms 3 nodes (Datacenter view, all green)
-# Open https://192.168.1.227:8006 — login as root@pam — see all three
+# Open https://192.0.2.12:8006 — login as root@pam — see all three
 # nodes + both storages (local-lvm, local with snippets, nas-vms)
 ```
 

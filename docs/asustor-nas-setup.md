@@ -106,7 +106,7 @@ the share.
 
    | Field | Value | Why |
    |---|---|---|
-   | **Allowed IP / Host** | `192.168.1.0/24` <!-- TODO: replace with your actual PVE LAN subnet, must match `pve_lan_subnet` in inventory --> | Restrict to LAN; never `*` for a homelab on a flat network. |
+   | **Allowed IP / Host** | your PVE LAN subnet (e.g. `192.0.2.0/24` from the inventory example — must match `pve_lan_subnet`) | Restrict to LAN; never `*` for a homelab on a flat network. |
    | **Privilege** | Read/Write | PVE writes VM disks. |
    | **Squash option** | **No root squash** (`no_root_squash`) | Proxmox stores VM disk images as `root:root`. With root-squash on, every write gets remapped to `nobody` and disk creation fails with EPERM. |
    | **Anonymous GID/UID** | leave blank | Only relevant when root-squash is on. |
@@ -159,7 +159,7 @@ reachable, mounts cleanly, and accepts a root-owned write:
 ```bash
 # List exports (sanity check the path)
 showmount -e <nas_ip>
-# Expected: /volume1/proxmox-vms  192.168.1.0/24
+# Expected: /volume1/proxmox-vms  <your LAN subnet, e.g. 192.0.2.0/24>
 
 # Mount it
 sudo mkdir -p /mnt/nas-test

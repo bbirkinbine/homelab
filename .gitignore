@@ -1,6 +1,12 @@
 .DS_Store
 .claude/
 
+# Editor / merge / backup detritus — never commit these by accident.
+*.bak
+*.orig
+*.swp
+*~
+
 # Local credentials — never commit (defense in depth; subdirs may have their own .gitignore too)
 .env
 .env.*
