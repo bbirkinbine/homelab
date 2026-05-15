@@ -48,6 +48,26 @@ if [[ ! -d "$ROLE_ANSIBLE_DIR" ]]; then
   exit 66
 fi
 
+# Refresh outputs from real infra before reading. `tofu output` reads
+# cached values from state, NOT re-evaluated expressions. Two ways that
+# bites without this step:
+#   1. The output's `format(...)` string in outputs.tf changes (e.g. a
+#      new field added to the inventory shape) — the cached value is
+#      stale until the next `tofu apply`.
+#   2. The VM's DHCP lease changes IP between deploys — the cached ipv4
+#      output points at the old IP.
+# `apply -refresh-only -auto-approve` re-runs both: pulls live agent
+# state from Proxmox AND re-evaluates output expressions. Doesn't touch
+# infrastructure (refresh-only is a no-op for resources by definition).
+# Skip with BUILD_SKIP_REFRESH=1 if you have a reason (e.g. probing an
+# offline cluster from a stale local state).
+if [[ "${BUILD_SKIP_REFRESH:-0}" != "1" ]]; then
+  (cd "$ROLE_TF_DIR" && tofu apply -refresh-only -auto-approve -input=false) >/dev/null 2>&1 || {
+    echo "WARN: 'tofu apply -refresh-only' failed for role=$ROLE — proceeding with cached state." >&2
+    echo "      If the inventory ends up wrong, run 'tofu apply' in $ROLE_TF_DIR first." >&2
+  }
+fi
+
 # Pull the inventory hint from tofu. `tofu output -raw <name>` prints the
 # raw string value (no JSON wrapping). Capture, don't pipe, so we can
 # inspect the content before writing.
