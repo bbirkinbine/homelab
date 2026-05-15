@@ -19,8 +19,9 @@ output "mac" {
 
 output "ansible_inventory_hint" {
   description = "Convenience string for pasting into ansible/inventory.yml after the first apply."
+  // See amp-game's outputs.tf for the ansible_ssh_common_args rationale.
   value = format(
-    "openbao:\n  hosts:\n    openbao:\n      ansible_host: %s\n      ansible_user: %s\n      ansible_python_interpreter: /usr/bin/python3",
+    "openbao:\n  hosts:\n    openbao:\n      ansible_host: %s\n      ansible_user: %s\n      ansible_python_interpreter: /usr/bin/python3\n      ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'",
     coalesce(module.openbao.ipv4, "<paste-from-tofu-output-or-router>"),
     "bao-admin",
   )

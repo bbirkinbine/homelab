@@ -20,8 +20,9 @@ output "mac" {
 
 output "ansible_inventory_hint" {
   description = "Pre-formatted inventory.yml block. Paste over vms/rootca/ansible/inventory.yml during bootstrap."
+  // See amp-game's outputs.tf for the ansible_ssh_common_args rationale.
   value = format(
-    "rootca_servers:\n  hosts:\n    rootca:\n      ansible_host: %s\n      ansible_user: %s\n      ansible_python_interpreter: /usr/bin/python3",
+    "rootca_servers:\n  hosts:\n    rootca:\n      ansible_host: %s\n      ansible_user: %s\n      ansible_python_interpreter: /usr/bin/python3\n      ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'",
     coalesce(module.rootca.ipv4, "<bootstrap-NIC-IP-or-paste-from-router>"),
     "rootca-admin",
   )
