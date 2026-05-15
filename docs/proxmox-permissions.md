@@ -5,15 +5,14 @@ role, and the API token that [the Ubuntu base template
 build](../packer/ubuntu-24-04-base/) uses to talk to a Proxmox
 host.
 
-The hosts are independent today (not yet clustered), so **run this on every
-Proxmox node** Packer will build against (`pve12t`, `pve13m`, `pve13t`).
-Each node has its own user database and ACL — the steps don't replicate.
-When the 3-node cluster lands (see the "Active context" block in
-`CLAUDE.md`), ACLs replicate via corosync and you only need to do this once.
+The three nodes are clustered (`homelab`), so `/etc/pve/user.cfg` is
+replicated cluster-wide via pmxcfs. **Run the steps below once on any
+node** — SSH into whichever is convenient (`pve12t`, `pve13m`, `pve13t`)
+and the user, role, ACL, and token will land on all three.
 
-## TL;DR — fresh-node setup
+## TL;DR — cluster-wide setup
 
-SSH in as `root` on the target Proxmox host and run:
+SSH in as `root` on any one node and run:
 
 ```bash
 # 1. Create the user (no shell login — purely an API identity)

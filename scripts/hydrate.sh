@@ -25,6 +25,10 @@
 #   KEEPASSXC_KEYFILE — OPTIONAL. Path to a key file (if the DB uses
 #                       a key file in addition to or instead of a master
 #                       password).
+#   KEEPASSXC_YUBIKEY — OPTIONAL. YubiKey HMAC-SHA1 challenge-response
+#                       slot, e.g. "2" or "2:1234567" to disambiguate by
+#                       serial when multiple YubiKeys are plugged in.
+#                       The key will blink for a touch once per lookup.
 #
 # Idempotency: if terraform.tfvars already exists and is newer than the
 # .tpl, hydrate is a no-op. Pass --force to rehydrate anyway.
@@ -92,6 +96,9 @@ KP_ARGS=(-q)
 if [[ -n "${KEEPASSXC_KEYFILE:-}" ]]; then
   KP_ARGS+=(--key-file "$KEEPASSXC_KEYFILE")
 fi
+if [[ -n "${KEEPASSXC_YUBIKEY:-}" ]]; then
+  KP_ARGS+=(--yubikey "$KEEPASSXC_YUBIKEY")
+fi
 
 # Prompt for the master password once. We read it here and pipe to
 # keepassxc-cli on stdin for each lookup; KeePassXC has no
@@ -136,13 +143,25 @@ trap 'rm -f "$TMP"' EXIT
 LINE_NO=0
 while IFS= read -r line || [[ -n "$line" ]]; do
   LINE_NO=$((LINE_NO + 1))
+  # Skip HCL comments — kp:// inside a `#` line is documentation, not a placeholder.
+  if [[ "$line" =~ ^[[:space:]]*# ]]; then
+    printf '%s\n' "$line" >> "$TMP"
+    continue
+  fi
   while [[ "$line" =~ kp://([^[:space:]\"\'\)]+) ]]; do
     SPEC="${BASH_REMATCH[1]}"
-    if ! VALUE="$(kp_lookup "$SPEC" 2>/dev/null)"; then
+    KP_ERR="$(mktemp)"
+    if ! VALUE="$(kp_lookup "$SPEC" 2>"$KP_ERR")"; then
       echo "ERROR: line $LINE_NO: could not resolve kp://$SPEC" >&2
       echo "       Check the entry exists in $KEEPASSXC_DB and the field name is correct." >&2
+      if [[ -s "$KP_ERR" ]]; then
+        echo "       keepassxc-cli said:" >&2
+        sed 's/^/         /' "$KP_ERR" >&2
+      fi
+      rm -f "$KP_ERR"
       exit 70
     fi
+    rm -f "$KP_ERR"
     # Escape sed metacharacters in the value so the replacement is literal.
     ESCAPED="$(printf '%s' "$VALUE" | sed -e 's/[\/&|]/\\&/g')"
     line="$(printf '%s' "$line" | sed -E "s|kp://${SPEC//|/\\|}|$ESCAPED|")"

@@ -11,15 +11,14 @@ OpenTofu's role is Packer's **minus** `VM.Config.CDROM` and
 `VM.Console`, because tofu does not attach an install ISO and does
 not send boot commands over VNC.
 
-The hosts are independent today (not clustered), so **run this on every
-Proxmox node** tofu will target (`pve12t`, `pve13`, ...). Each node has
-its own user database and ACL — the steps don't replicate. When the
-3-node cluster lands (see the "Active context" block in `CLAUDE.md`),
-ACLs replicate via corosync and you only need to do this once.
+The three nodes are clustered (`homelab`), so `/etc/pve/user.cfg` is
+replicated cluster-wide via pmxcfs. **Run the steps below once on any
+node** — SSH into whichever is convenient (`pve12t`, `pve13m`, `pve13t`)
+and the user, role, ACL, and token will land on all three.
 
-## TL;DR — fresh-node setup
+## TL;DR — cluster-wide setup
 
-SSH in as `root` on the target Proxmox host and run:
+SSH in as `root` on any one node and run:
 
 ```bash
 # 1. Create the user (no shell login — purely an API identity)
@@ -74,7 +73,7 @@ to root is already the established convention from the Packer side.
 From your workstation:
 
 ```bash
-PROXMOX_TOKEN="tofu@pve!apply=<secret-uuid>"
+PROXMOX_TOKEN='tofu@pve!apply=<secret-uuid>'
 curl -k -H "Authorization: PVEAPIToken=$PROXMOX_TOKEN" \
   "https://pve12t:8006/api2/json/version"
 ```
