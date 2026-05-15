@@ -24,6 +24,7 @@ The live docs (`docs/*.md`, `*/README.md`) describe *current* state and get prun
 | [0004](0004-three-node-proxmox-cluster.md) | 3-node Proxmox cluster with TB ring1 + NFS shared storage | 2026-05-13 | Accepted |
 | [0005](0005-no-claude-coauthor-trailer.md) | No `Co-Authored-By: Claude` trailer in commits | 2026-05-14 | Accepted |
 | [0006](0006-packer-templates-per-node.md) | Packer base templates per-node with distinct VMIDs | 2026-05-14 | Accepted |
+| [0007](0007-thunderbolt-fabric-line-topology.md) | Thunderbolt fabric topology: line, not full mesh | 2026-05-11 | Accepted |
 
 ## Adding a new ADR
 
