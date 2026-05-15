@@ -23,6 +23,14 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get autoremove -y --purge
 apt-get clean
 rm -rf /var/lib/apt/lists/*
+# Also drop the parsed pkgcache. `apt-get clean` only removes downloaded
+# .deb files in /var/cache/apt/archives/; pkgcache.bin + srcpkgcache.bin
+# (the binary index ansible's apt module stat()s to decide cache age)
+# survive with a recent mtime from the build's `apt update`. If we leave
+# them, ansible's `cache_valid_time` check on a fresh clone says "cache
+# is fresh — skip apt update" and the subsequent `apt install` fails
+# because the actual lists at /var/lib/apt/lists/ are empty.
+rm -f /var/cache/apt/pkgcache.bin /var/cache/apt/srcpkgcache.bin
 
 echo "==> truncate logs"
 find /var/log -type f -name "*.gz" -delete

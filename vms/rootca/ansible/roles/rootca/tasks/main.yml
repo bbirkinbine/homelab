@@ -36,7 +36,11 @@
 - name: Update apt cache (bootstrap window only)
   ansible.builtin.apt:
     update_cache: true
-    cache_valid_time: 600
+    # No cache_valid_time — see amp_game/tasks/main.yml for the
+    # explanation. Short version: Packer base wipes
+    # /var/lib/apt/lists/* but leaves /var/cache/apt/pkgcache.bin
+    # mtime recent, so cache_valid_time would mask the empty lists
+    # and the subsequent `apt install` would fail.
 
 # --- Phase 1: smartcard + PKCS#11 stack -------------------------------------
 

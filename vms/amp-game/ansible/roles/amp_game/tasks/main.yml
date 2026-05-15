@@ -28,7 +28,15 @@
     name: "{{ amp_prereq_packages }}"
     state: present
     update_cache: true
-    cache_valid_time: 3600
+    # No cache_valid_time: ansible's apt module checks
+    # /var/cache/apt/pkgcache.bin's mtime to decide if a refresh is
+    # needed. The Packer base wipes /var/lib/apt/lists/* but leaves
+    # pkgcache.bin's recent mtime alone, so cache_valid_time would
+    # let ansible skip `apt update` on a fresh clone — then `apt
+    # install` fails with "No package matching 'unzip' is available".
+    # Forcing the refresh on every run is cheap and removes that
+    # foot-gun; cleanup of pkgcache.bin is also handled in the base
+    # going forward, but this is the defensive fix at the role layer.
 
 # UFW rules. The Packer base ships ufw active with allow 22/tcp; we add
 # the AMP-specific ports. Using community.general.ufw (not the legacy
