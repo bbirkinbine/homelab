@@ -163,8 +163,9 @@ Concrete steps:
      `cloud-init/`).
    - `variables.tf` — drop or rename variables that don't apply.
    - `terraform.tfvars.example` + `.tfvars.tpl` — update both. Pick a
-     unique `VM_ID` (openbao=130, rootca=110; next free is 111+ or
-     pick a number per the role family).
+     unique `VM_ID` per the convention in [ADR-0008](decisions/0008-service-vmid-range.md):
+     services live in 8000-8099 (`openbao=8030`, `rootca=8031`), workloads
+     in 100-399 (`amp-game=110`).
 
 4. **Edit the cloud-init template** (`vms/<newrole>/cloud-init/user-data.yaml.tftpl`):
    - Hostname, admin username placeholders are already in the right

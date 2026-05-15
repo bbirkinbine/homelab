@@ -22,7 +22,7 @@ and validation rules. Quick reference:
 | --- | --- | --- |
 | `name` | yes | VM name + cloud-init hostname (lowercase, no spaces). |
 | `node_name` | yes | Proxmox node to create the VM on. Pairs with `template_id` — same-node by construction when the caller uses the node-keyed map pattern from [ADR-0006](../../docs/decisions/0006-packer-templates-per-node.md). |
-| `vm_id` | yes | Stable per-role VM ID (`130` = openbao, `131` = rootca, etc.). |
+| `vm_id` | yes | Stable per-role VM ID. Per [ADR-0008](../../docs/decisions/0008-service-vmid-range.md): services in 8000-8099 (`8030` = openbao, `8031` = rootca), workloads in 100-399 (`110` = amp-game). |
 | `template_id` | yes | Source template VMID on `node_name`. Per-node post-cluster — Ubuntu base: 9100/9101/9102 for pve12t/pve13m/pve13t; Windows base: 9200/9201/9202. Callers typically pass the result of a node-keyed lookup; see [ADR-0006](../../docs/decisions/0006-packer-templates-per-node.md) and `local.ubuntu_template_ids` in [`vms/openbao/terraform/main.tf`](../../vms/openbao/terraform/main.tf). |
 | `cores` / `memory_mb` / `disk_size_gb` | yes | VM shape. Validated for sanity. |
 | `cpu_type` | no | Defaults to `x86-64-v3` (cluster-mobile baseline across Alder/Raptor Lake-P/H). Override to `host` only for hardware-pinned VMs. |

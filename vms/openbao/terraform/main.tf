@@ -55,7 +55,7 @@ module "openbao" {
   name        = "openbao"
   node_name   = var.proxmox_node
   template_id = local.ubuntu_template_ids[var.proxmox_node]
-  vm_id       = 130
+  vm_id       = 8030 // Service VMID range — see ADR-0008
 
   // Sizing rationale (matches legacy .env defaults; Shamir-seal OpenBao
   // is a light service):

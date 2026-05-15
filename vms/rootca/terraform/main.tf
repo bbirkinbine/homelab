@@ -48,8 +48,8 @@ module "rootca" {
 
   name        = "rootca"
   node_name   = var.proxmox_node
-  template_id = 9100
-  vm_id       = 110
+  template_id = 9100 // pve12t-pinned (HSM USB passthrough); template_id stays hardcoded to pve12t's Ubuntu base. Don't generalize to a node-keyed map — rootca will never run on another node.
+  vm_id       = 8031 // Service VMID range — see ADR-0008
 
   // Sizing rationale (per the vault's "Operational VM setup" specs in
   // `CardLogix HSM Receipt Validation and VM Setup`):

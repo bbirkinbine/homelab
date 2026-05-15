@@ -30,7 +30,7 @@ variable "node_name" {
 
 variable "vm_id" {
   type        = number
-  description = "Unique VM ID on the target node. Pick something stable per-role (e.g. 130 for openbao) so DHCP reservations and Proxmox URLs stay predictable."
+  description = "Unique VM ID on the target node. Pick something stable per-role per the convention in ADR-0008: services in 8000-8099 (e.g. 8030 for openbao, 8031 for rootca), workloads in 100-399 (e.g. 110 for amp-game). Stable VMIDs keep DHCP reservations and Proxmox URLs predictable across rebuilds."
 }
 
 variable "template_id" {
