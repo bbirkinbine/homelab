@@ -65,6 +65,34 @@ echo "==> defer packer user removal to first boot of clone"
 # Before=cloud-init-local.service so the build user is gone before any clone
 # networking/sshd comes up — eliminates the "known-password user with sudo
 # briefly reachable on a clone" window.
+#
+# Critical: `DefaultDependencies=no` + `WantedBy=sysinit.target`. Without
+# `DefaultDependencies=no`, systemd auto-adds an `After=basic.target` to the
+# unit (the default for service units). basic.target sits between sysinit
+# and multi-user, and is therefore After= the systemd-networkd.service chain
+# that cloud-init-local has its own After= relationship with through
+# sysinit. Pairing that auto-added `After=basic.target` with our explicit
+# `Before=cloud-init-local.service` (a sysinit-phase unit) creates an
+# ordering cycle:
+#
+#   sysinit.target -> cloud-init-local.service
+#                  -> packer-cleanup.service     (Before= cloud-init-local)
+#                  -> basic.target               (auto-added After=)
+#                  -> sysinit.target             (basic.target -> sysinit.target)
+#
+# systemd resolves the cycle by deleting cloud-init-local.service from the
+# boot graph, with no logged error other than "Job
+# cloud-init-local.service/start deleted to break ordering cycle". Result
+# on every fresh clone: NoCloud is never probed, `DataSourceNone` fallback
+# is selected, no hostname / user / netplan are written. This was the root
+# cause of the 2026-05-15 TODO.md cloud-init bug — see
+# `journalctl -b | grep -E 'cycle|deleted to break'` on a pre-fix clone.
+#
+# `DefaultDependencies=no` strips those auto-added deps; `Conflicts=
+# shutdown.target` is the standard sibling that ensures the unit doesn't
+# try to start during shutdown. `WantedBy=sysinit.target` (not
+# multi-user.target) means the unit is pulled in for the sysinit phase
+# where it actually needs to run, matching the explicit ordering.
 
 install -m 0755 /dev/stdin /usr/local/sbin/packer-cleanup.sh <<'CLEANUP_EOF'
 #!/bin/bash
@@ -83,8 +111,10 @@ CLEANUP_EOF
 install -m 0644 /dev/stdin /etc/systemd/system/packer-cleanup.service <<'UNIT_EOF'
 [Unit]
 Description=Remove packer build user from cloned image (one-shot on first boot)
+DefaultDependencies=no
 After=local-fs.target
 Before=cloud-init-local.service
+Conflicts=shutdown.target
 ConditionPathExists=/usr/local/sbin/packer-cleanup.sh
 
 [Service]
@@ -92,7 +122,7 @@ Type=oneshot
 ExecStart=/usr/local/sbin/packer-cleanup.sh
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=sysinit.target
 UNIT_EOF
 
 systemctl enable packer-cleanup.service
