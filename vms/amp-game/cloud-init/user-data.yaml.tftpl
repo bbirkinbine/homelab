@@ -1,0 +1,36 @@
+#cloud-config
+#
+# amp-game VM — first-boot identity ONLY.
+#
+# Rendered by templatefile() in vms/amp-game/terraform/main.tf. Cloud-init
+# placeholders are Terraform's $${var} interpolation (shown here with
+# the escape that hides the literal from templatefile itself), NOT
+# shell or cloud-init's own variable syntax — cloud-init does not
+# interpret anything in this file; Terraform substitutes everything
+# before upload.
+#
+# Per the 2026-04-25 provisioning-layer model (Provisioning Layers —
+# Packer, Terraform, cloud-init, Ansible.md), cloud-init's job here is
+# narrow:
+#   1. Set the hostname.
+#   2. Create the admin user with sudo + SSH key.
+#
+# Everything else — AMP prerequisites, ufw rules for 8080/tcp and
+# 25565/tcp+udp, unattended-upgrades — is Ansible's job. Cloud-init
+# runs ONCE per instance-id; Ansible can re-run idempotently, so
+# anything that might need to change later belongs there.
+#
+# AMP itself (the CubeCoders panel) is NOT installed by either layer.
+# Operator runs `bash <(curl -fsSL https://getamp.sh)` interactively
+# post-Ansible — license key + dashboard setup is a manual ceremony,
+# analogous to openbao's `bao operator init`.
+
+hostname: ${hostname}
+
+users:
+  - name: ${admin_username}
+    groups: [sudo]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - "${ssh_public_key}"

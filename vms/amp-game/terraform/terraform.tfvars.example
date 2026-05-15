@@ -1,0 +1,38 @@
+# vms/amp-game/terraform/terraform.tfvars.example
+#
+# Copy to terraform.tfvars (gitignored) and fill in real values, OR
+# copy to terraform.tfvars.tpl with kp:// placeholders and use
+# `just hydrate amp-game` to resolve them against KeePassXC.
+#
+# See docs/opentofu-setup.md for the hydration workflow.
+
+# Proxmox API endpoint URL. The bpg/proxmox provider expects scheme
+# + host + port; trailing slash is OK. Any cluster node is fine —
+# pmxcfs replicates user.cfg so the token works against all nodes.
+proxmox_endpoint = "https://pve13t:8006/"
+
+# Full API token in `user@realm!tokenid=secret-uuid` form.
+# See docs/proxmox-tofu-permissions.md for how to mint one.
+proxmox_api_token = "tofu@pve!apply=00000000-0000-0000-0000-000000000000"
+
+# Proxmox node name to create the VM on. Default pve13t = newest
+# hardware, no GPU. amp-game is node-pinned (local-lvm storage for
+# I/O latency) rather than cluster-mobile.
+proxmox_node = "pve13t"
+
+# First-boot admin user. cloud-init creates this with sudo + the SSH
+# key below. Ansible runs against this user for all subsequent config,
+# including the eventual operator-run AMP installer ceremony.
+admin_username = "amp-admin"
+
+# Single-line authorized_key. ssh-ed25519 recommended (shorter, faster
+# verify, and what KeePassXC stores cleanly on a single line).
+ssh_public_key = "ssh-ed25519 AAAA...your-pubkey... brianbirkinbine@workstation"
+
+# Sizing overrides — uncomment to deviate from the defaults in
+# variables.tf (4 cores / 12 GiB / 100 GiB). Bump per game served:
+#   * Minecraft modpacks:        24-32 GiB RAM, 6-8 cores.
+#   * Steam games (ARK/Rust/...): 16+ GiB RAM, 6+ cores.
+# vm_cores         = 6
+# vm_memory_mb     = 24576
+# vm_disk_size_gb  = 200

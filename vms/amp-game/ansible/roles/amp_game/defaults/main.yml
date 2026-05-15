@@ -1,0 +1,37 @@
+---
+# Defaults for the amp_game role. Override in inventory, group_vars, or
+# host_vars if a deployment diverges from these.
+#
+# Scope: this role only sets up the OS-level prerequisites for the AMP
+# panel (firewall rules, base packages, unattended-upgrades). The AMP
+# installer itself (`bash <(curl -fsSL https://getamp.sh)`) is operator-
+# run, analogous to openbao's `bao operator init`.
+
+# Web UI port. CubeCoders' installer typically lands AMP on 8080/tcp,
+# but the operator can change it during getamp.sh. If you bump it,
+# update this default so ufw allows the new port.
+amp_web_ui_port: 8080
+
+# Whether to open the Minecraft ports (Java 25565/tcp + Bedrock
+# 25565/udp). Toggle to false if you're only hosting Steam games
+# (ARK/Rust/7DTD) — they use their own port ranges that you'd add
+# manually post-install, or via additional ufw tasks if/when this
+# role grows a per-game-type matrix.
+amp_ports_minecraft: true
+
+# Enable unattended-upgrades for security patches. Matches the legacy
+# amp-game cloud-init's behavior. No auto-reboot (set in the dropped
+# 50unattended-upgrades file via the template task below).
+amp_unattended_upgrades: true
+
+# Apt prerequisites for getamp.sh to fetch + install AMP cleanly.
+# The Packer base is network-quiet on purpose, so we explicitly install
+# anything the installer expects to be present.
+amp_prereq_packages:
+  - curl
+  - wget
+  - unzip
+  - tar
+  - software-properties-common
+  - ca-certificates
+  - gnupg

@@ -1,0 +1,6 @@
+---
+# No handlers today. ufw rules are applied directly via
+# community.general.ufw (which handles reload internally) and the
+# unattended-upgrades tasks are stateless drops. If future tasks
+# need restart-on-config-change behavior (e.g. a managed AMP systemd
+# override), add the handlers here.

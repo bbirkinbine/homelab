@@ -1,0 +1,19 @@
+---
+# vms/amp-game/ansible/site.yml
+#
+# Top-level play for the amp-game role. Runs the `amp_game` role
+# against the inventory's `amp_game_servers` host group. Single-host
+# today; trivially scales to additional game-server VMs by adding
+# more hosts to the group.
+#
+# Usage from repo root:
+#   just ansible amp-game
+# Or directly:
+#   cd vms/amp-game/ansible && ansible-playbook -i inventory.yml site.yml
+
+- name: Bootstrap amp-game (AMP prerequisites; operator runs getamp.sh after)
+  hosts: amp_game_servers
+  become: true
+  gather_facts: true
+  roles:
+    - role: amp_game

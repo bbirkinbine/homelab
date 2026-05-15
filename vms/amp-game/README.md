@@ -1,199 +1,182 @@
 # amp-game
 
-VM running [CubeCoders AMP](https://cubecoders.com/AMP) for hosting game servers
-(Minecraft initially). Cloned at deploy time from the `ubuntu-24-04-base`
-template; cloud-init lays down the admin user, ufw rules, and unattended-upgrades.
-AMP itself is installed manually after first boot — see [Post-deploy](#post-deploy).
+VM running [CubeCoders AMP](https://cubecoders.com/AMP) for hosting game
+servers (Minecraft Java + Bedrock by default, ARK/Rust/7DTD and other
+Steam-based games optional).
 
-## Prerequisites
+Cloned at deploy time from the Ubuntu 24.04 base template (per-node VMID
+per [ADR-0006](../../docs/decisions/0006-packer-templates-per-node.md));
+cloud-init lays down hostname + admin user + SSH key only. Ansible installs
+apt prerequisites, opens ufw ports (8080/tcp AMP UI, 25565/tcp+udp
+Minecraft), enables unattended-upgrades. **AMP itself is operator-installed**
+post-Ansible via `bash <(curl -fsSL https://getamp.sh)` — the AMP installer
+is interactive (license key, dashboard creds, Standalone mode) and not
+amenable to fully-automated provisioning. This mirrors openbao's "Ansible
+installs the service, `bao operator init` is operator ceremony" pattern.
 
-Things that must already be true on the Proxmox node before `deploy.sh` will work:
+VMID `110` per [ADR-0008](../../docs/decisions/0008-service-vmid-range.md)
+(workload range 100-399). Services like openbao (8030) and rootca (8031)
+live in the 8000-8099 range, kept distinct from workloads.
 
-1. **`ubuntu-24-04-base` template exists** (default ID `9100`).
-   If not, run `packer/ubuntu-24-04-base/build.sh <node>` first.
+The legacy shell-script + cloud-init shape is preserved under
+[`legacy/`](legacy/README.md) for reference.
 
-2. **Snippets content type enabled on the snippets storage.**
-   Datacenter → Storage → `local` (or whichever you use) → Edit →
-   under **Content**, check **Snippets**. Without this, `deploy.sh` will
-   fail at the snippet upload step.
+## Deployment flow
 
-3. **SSH access from this Mac to the Proxmox node** as a user that can run
-   `qm` and `pvesh` (typically `root`). Test with:
-   ```
-   ssh root@<proxmox-host> 'qm list | head'
-   ```
+The Justfile recipes are parameterized by role name. From repo root:
 
-4. **Target VM ID is free.** `deploy.sh` is fail-fast — it will refuse to
-   touch an existing VM (protects saved games). Default ID is `110`;
-   change in `.env` if it collides.
+```bash
+# One-time per workstation: install Galaxy collections.
+just ansible-deps amp-game
 
-## Configuration
+# Resolve KeePassXC placeholders into vms/amp-game/terraform/terraform.tfvars.
+just hydrate amp-game
 
+# Per session/reboot: load your homelab SSH key into the agent if it
+# isn't already. (preflight fails with "ssh-agent has no keys loaded"
+# otherwise.) Skip if macOS keychain integration is set up.
+ssh-add -l >/dev/null 2>&1 || ssh-add ~/.ssh/id_ed25519_homelab
+
+# Verify ssh/Proxmox/template/snippets prerequisites.
+just check amp-game
+
+# Plan + apply.
+just plan amp-game
+just apply amp-game
+
+# Paste tofu output into the static Ansible inventory.
+just output amp-game
+$EDITOR vms/amp-game/ansible/inventory.yml          # ansible_host = <ipv4>
+
+# Run the role's playbook (apt deps + ufw + unattended-upgrades).
+just ansible amp-game
 ```
-cp .env.example .env
-# edit .env: set PROXMOX_HOST, SSH_PUBLIC_KEY, confirm VM_ID
-```
 
-`.env` is gitignored.
+After Ansible completes, the VM is in the state described in [Post-deploy
+ceremony](#post-deploy-ceremony) below — bootstrap complete, AMP not yet
+installed.
 
-## Deploy
+## Post-deploy ceremony
 
-```
-./deploy.sh
-```
+The Ansible role intentionally stops short of running AMP's installer.
+Operator runs the ceremony manually:
 
-Runs from your Mac, SSHes to the Proxmox node, and:
+1. **SSH in:**
 
-1. Verifies template `9100` exists and target `VM_ID` does not.
-2. Resolves the snippets path on the node via `pvesh`.
-3. Renders `cloud-init/user-data.yaml` with values from `.env`.
-4. `scp`s the rendered snippet to `<storage_path>/snippets/`.
-5. `qm clone` (full) → `qm set` (cores/memory/balloon) → `qm resize scsi0`
-   → `qm set --cicustom + --ipconfig0 ip=dhcp` → `qm start`.
-
-The script prints next-step instructions on success.
-
-## Post-deploy
-
-Once the VM is up and reachable:
-
-1. Find the VM's IP — see [Find the VM's IP](#find-the-vms-ip) below.
-
-2. SSH in and run the AMP installer:
-   ```
+   ```bash
    ssh amp-admin@<vm-ip>
-   sudo su -
+   ```
+
+2. **Run the AMP installer:**
+
+   ```bash
    bash <(curl -fsSL https://getamp.sh)
    ```
-   `https://getamp.sh` is CubeCoders' canonical short URL — at the time
-   of writing it 302-redirects to `https://cdn-downloads.c7rs.com/getamp.sh`
-   (their Cloudflare-fronted CDN). The short URL is the documented entrypoint;
-   prefer it over hardcoding the CDN URL so future CDN changes don't break.
+
+   `https://getamp.sh` is CubeCoders' canonical short URL (302-redirects
+   to their Cloudflare-fronted CDN). Prefer the short URL over hardcoding
+   the CDN URL so future CDN changes don't break.
 
    Installer prompts:
-   - Dashboard username + password: your choice
-   - "Run Docker?": **n** — vanilla MC doesn't benefit from container
-     isolation. Answer **y** only if you add Steam-based games (ARK, Rust,
-     7DTD) where Docker isolates library/glibc conflicts.
-   - "Configure HTTPS?": **n** (LAN-only)
+   - **Dashboard username + password**: your choice.
+   - **"Run Docker?"**: `n` for vanilla Minecraft (no isolation needed).
+     Answer `y` only if you're hosting Steam games (ARK, Rust, 7DTD)
+     where Docker isolates library/glibc conflicts.
+   - **"Configure HTTPS?"**: `n` (LAN-only).
 
-3. Open `http://<vm-ip>:<port shown by installer>` (default 8080), paste
-   your AMP license key, choose **Standalone** mode.
+3. **Web UI**: open `http://<vm-ip>:8080`, paste your CubeCoders license
+   key, choose **Standalone** mode.
 
-After this, day-to-day admin is via the AMP web UI — no Linux access required.
+4. **Game-server config**: AMP dashboard → create your first instance,
+   pick a game (Minecraft Java / Bedrock / Steam title), AMP handles
+   the rest.
+
+After this, day-to-day admin is via the AMP web UI — no Linux access
+required for game-server management.
 
 ## Sizing
 
-Default in `.env.example`:
+Defaults in [`terraform/variables.tf`](terraform/variables.tf):
 
-| Resource | Value | Why |
-|---|---|---|
-| vCPU | 4 | MC's main thread is single-threaded; 4 cores covers AMP + JVM GC + a 2nd instance later |
-| RAM | 12288 MB | ~8 GB JVM heap + headroom for AMP/OS/page cache; well past the 8 GB rpi5 baseline |
-| Disk | 100 GB | Game installs + AMP backups + world growth; thin-provisioned |
+| Resource | Default | When to bump |
+| --- | --- | --- |
+| vCPU | 4 | Modded Minecraft: 6-8. Steam games: 6+. Multiple instances: scale linearly. |
+| RAM | 12288 MB (12 GiB) | Modpacks: 24-32 GiB. Multiple instances: ~6 GiB per instance + AMP overhead. |
+| Disk | 100 GiB | Pure Steam-game host: 200+ GiB (game installs balloon). |
+| balloon | 0 (disabled) | Don't enable — game-server latency suffers under memory pressure. |
+| Storage | `local-lvm` (NVMe) | Stay on local-lvm. Game-server I/O latency outweighs cluster-mobility from `nas-vms`. |
 
-Resize-able later via `qm` on the node — see [Operations](#operations).
+Override per deploy in `terraform.tfvars` (uncomment the sizing lines).
 
 ## Ports
 
 | Port | Protocol | Source | Purpose |
-|---|---|---|---|
-| 22 | tcp | LAN | SSH (allowed by base template) |
-| 8080 | tcp | LAN | AMP web UI (default; installer may pick a different port) |
-| 25565 | tcp/udp | LAN | Minecraft Java / Bedrock |
+| --- | --- | --- | --- |
+| 22 | tcp | LAN | SSH (open by the Packer base) |
+| 8080 | tcp | LAN | AMP web UI (installer default; change `amp_web_ui_port` in Ansible defaults if it shifts) |
+| 25565 | tcp | LAN | Minecraft Java |
+| 25565 | udp | LAN | Minecraft Bedrock / query |
 
-UFW is set inside the VM. Perimeter firewall (router) is what gates external
-access — port-forward only when guests need to connect from outside the LAN.
+ufw is set inside the VM by Ansible. Perimeter firewall (router) is what
+gates external access — port-forward only when guests need to connect
+from outside the LAN.
 
 ## Operations
 
 ### Find the VM's IP
 
-DHCP lease, so the IP can change. Three ways to look it up:
+DHCP lease, so the IP can change. Three lookups:
 
-**1. qm guest cmd from your Mac (works as long as qemu-guest-agent is running in the VM):**
+1. **`tofu output ipv4`** in `vms/amp-game/terraform/` — what qemu-guest-agent
+   reports, scraped by the provider. Usually the easiest.
+2. **Proxmox Web UI** → VM 110 → Summary tab → "IPs" row.
+3. **Router DHCP lease table** by hostname `amp-game` or by MAC (from
+   `tofu output mac`).
 
-```bash
-ssh root@<proxmox-host> 'qm guest cmd 110 network-get-interfaces' \
-  | grep -E '"ip-address" *: *"[0-9]+\.' \
-  | grep -v '"127\.0\.0\.1"'
-```
-
-If `jq` is installed locally, this is cleaner:
-
-```bash
-ssh root@<proxmox-host> 'qm guest cmd 110 network-get-interfaces' \
-  | jq -r '.[] | select(.name != "lo") | ."ip-addresses"[]? | select(."ip-address-type" == "ipv4") | ."ip-address"'
-```
-
-**2. Proxmox Web UI:** open `https://<proxmox-host>:8006`, select VM `110` → Summary
-tab. The "IPs" row shows what qemu-guest-agent reports, same data as above.
-
-**3. Router / DHCP server lease table:** look for hostname `amp-game`. Useful as a
-fallback if qemu-guest-agent is broken or the VM hasn't booted far enough yet.
-
-If you want to stop chasing the IP, set a DHCP reservation on your router for
-the VM's MAC address (visible via `ssh root@<proxmox-host> 'qm config 110 | grep ^net0'`).
+For stability, pin a DHCP reservation on the router using the MAC.
 
 ### Resize a running VM
 
-`deploy.sh` will refuse to touch an existing VM. To change sizing on the
-running deployment, ssh to the node:
+Edit `terraform.tfvars` to bump sizing, then `just apply amp-game`. The
+provider's clone block reconciles in place:
 
-```
-qm set 110 --memory 16384 --cores 6
-qm resize 110 scsi0 +50G
-```
-
-Memory and disk grow live (no reboot for memory if balloon is enabled;
-disk grows online). Cores require a reboot to take effect.
-
-### Re-apply cloud-init
-
-The cloud-init snippet runs once per `instance-id`. To re-run on next boot:
-
-```
-ssh amp-admin@<vm-ip> 'sudo cloud-init clean'
-ssh root@<proxmox-host> 'qm reboot 110'
+```bash
+# Edit terraform.tfvars: uncomment + raise vm_memory_mb / vm_cores
+just plan amp-game        # confirm only memory/cores change
+just apply amp-game
 ```
 
-Note: this re-runs `runcmd`, which is idempotent for our config (ufw rules
-add cleanly even if already present).
-
-### Update the cloud-init snippet on the node
-
-If you edit `cloud-init/user-data.yaml`, the change does NOT propagate to
-the running VM automatically. Either re-deploy from scratch (destroy +
-re-create — only acceptable if no saved data) or manually edit the file
-on the Proxmox node:
-
-```
-ssh root@<proxmox-host>
-vi /var/lib/vz/snippets/vm-110-amp-game-user.yaml
-qm reboot 110   # only if you want it to take effect now
-```
+Memory grows live (no reboot needed when balloon=0). Cores require a
+VM reboot to take effect — the provider triggers it automatically.
 
 ### Recovery
 
-VM won't boot or AMP corrupted:
-
-1. Take a Proxmox snapshot before any risky change (UI: VM → Snapshots).
-2. Roll back via Proxmox UI or `qm rollback 110 <snapshot-name>`.
-3. Game-server-level backups: AMP has its own backup feature in the web UI.
-   Configure scheduled backups under each instance's Schedule tab.
+- **Take a Proxmox snapshot** before risky changes (UI: VM 110 → Snapshots).
+- **Roll back**: `qm rollback 110 <snapshot-name>` on the node.
+- **Game-server-level backups**: AMP has its own backup feature in the
+  web UI. Configure scheduled backups under each instance's Schedule tab.
 
 ### Destroy and rebuild
 
-If you really need to start over (no saved games, or saves are backed up):
-
+```bash
+just destroy amp-game     # or: tofu destroy in vms/amp-game/terraform/
+just apply amp-game       # re-creates the VM; cloud-init re-runs identity
+just ansible amp-game     # re-applies prereqs + ufw + unattended-upgrades
+# Then re-run the AMP installer ceremony (Post-deploy ceremony above).
 ```
-ssh root@<proxmox-host> 'qm stop 110 && qm destroy 110'
-./deploy.sh
-```
 
-## Files
+## Legacy
 
-- `.env.example` — committed; documents required vars
-- `.env` — gitignored; your real values
-- `deploy.sh` — clone + size + start
-- `cloud-init/user-data.yaml` — first-boot config (rendered before upload)
+The pre-port shell+packer shape (legacy `deploy.sh` + `cloud-init/user-data.yaml`)
+is preserved under [`legacy/`](legacy/README.md). It still works as a
+reference for the deploy steps and ufw/unattended-upgrades patterns that
+moved into the Ansible role.
+
+## Related
+
+- [`docs/0-scratch-build-order.md`](../../docs/0-scratch-build-order.md) — full lab bring-up sequence
+- [`docs/deploying-vms.md`](../../docs/deploying-vms.md) — role-class chooser + 7-step VM flow
+- [`docs/opentofu-setup.md`](../../docs/opentofu-setup.md) — workstation setup, hydrate flow
+- [`vms/openbao/README.md`](../openbao/README.md) — canonical OpenTofu + Ansible + cloud-init role (this role is the second instance of the pattern)
+- [ADR-0006](../../docs/decisions/0006-packer-templates-per-node.md) — per-node template VMIDs
+- [ADR-0008](../../docs/decisions/0008-service-vmid-range.md) — service vs workload VMID convention

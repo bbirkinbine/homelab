@@ -1,0 +1,124 @@
+---
+# Bootstrap an Ubuntu 24.04 VM (Packer base) into a state where the
+# operator can run CubeCoders' getamp.sh installer non-interactively
+# at the apt/ufw layer.
+#
+# What this role does:
+#   * Installs the apt prerequisites getamp.sh expects.
+#   * Opens the AMP web UI port + (optionally) Minecraft ports via ufw.
+#   * Enables unattended-upgrades for security patches (no auto-reboot —
+#     game servers shouldn't reboot themselves under active player load).
+#
+# What this role deliberately does NOT do:
+#   * Run getamp.sh itself. That installer is interactive (license key,
+#     dashboard creds, Standalone vs Docker mode) and its prompts shift
+#     between AMP versions; scripting it is fragile. Operator runs it
+#     manually post-Ansible. See vms/amp-game/README.md.
+#   * Configure game-server instances inside AMP. That's done via the
+#     AMP web UI after the operator ceremony.
+#   * Manage AMP license keys. Out of scope for now; AMP licensing is
+#     coupled to CubeCoders' account, not Ansible vars.
+#
+# Idempotency: every task is idempotent. Re-running this role on a
+# live AMP host is safe — apt packages stay installed, ufw rules
+# already in place no-op, unattended-upgrades stay enabled.
+
+- name: Ensure AMP installer prerequisites are present
+  ansible.builtin.apt:
+    name: "{{ amp_prereq_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# UFW rules. The Packer base ships ufw active with allow 22/tcp; we add
+# the AMP-specific ports. Using community.general.ufw (not the legacy
+# `ufw` module) for idempotency and proper rule-deduplication.
+
+- name: Allow AMP web UI port through ufw
+  community.general.ufw:
+    rule: allow
+    port: "{{ amp_web_ui_port }}"
+    proto: tcp
+    comment: "AMP web UI"
+
+- name: Allow Minecraft Java port through ufw
+  when: amp_ports_minecraft
+  community.general.ufw:
+    rule: allow
+    port: "25565"
+    proto: tcp
+    comment: "Minecraft Java"
+
+- name: Allow Minecraft Bedrock / query port through ufw
+  when: amp_ports_minecraft
+  community.general.ufw:
+    rule: allow
+    port: "25565"
+    proto: udp
+    comment: "Minecraft Bedrock / query"
+
+# Unattended-upgrades. Matches the legacy cloud-init's behavior but
+# moved to Ansible so it's re-runnable + idempotent. Drops the
+# `20auto-upgrades` file from a template (security patches only, no
+# auto-reboot — see comment in the template).
+
+- name: Ensure unattended-upgrades package is installed
+  when: amp_unattended_upgrades
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+
+- name: Configure unattended-upgrades to enable security updates only
+  when: amp_unattended_upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      // No auto-reboot — game servers shouldn't restart under load.
+      // Reboots happen during the operator's maintenance windows.
+
+- name: Unmask + enable the apt-daily timers
+  when: amp_unattended_upgrades
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    masked: false
+    state: started
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+# Final reminder for the operator. This is just a debug message —
+# Ansible doesn't run getamp.sh; the operator does.
+
+- name: Print operator next-steps
+  ansible.builtin.debug:
+    msg: |
+      ===========================================================
+      Bootstrap complete. Next steps (operator-run):
+
+        1. SSH in:
+             ssh {{ ansible_user | default('amp-admin') }}@{{ ansible_host | default(inventory_hostname) }}
+
+        2. Run the AMP installer interactively:
+             bash <(curl -fsSL https://getamp.sh)
+
+           Have your CubeCoders license key in hand. Pick
+           Standalone mode for single-host setups (not Docker)
+           unless you have a reason.
+
+        3. Once installed, the AMP web UI is at:
+             http://{{ ansible_host | default(inventory_hostname) }}:{{ amp_web_ui_port }}
+
+        4. AMP dashboard → create your first instance, pick the
+           game (Minecraft Java / Bedrock / Steam game / etc.),
+           and AMP handles the rest.
+
+      See vms/amp-game/README.md for ops (find IP, resize live,
+      destroy/rebuild) and the legacy/ directory for what this
+      role replaced.
+      ===========================================================

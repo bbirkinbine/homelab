@@ -40,8 +40,10 @@ Three patterns ship today; new roles should fit one of them.
 
 A long-running service that wants live migration eventually, doesn't
 need any host hardware, doesn't store irreplaceable state on local
-disk. Examples: OpenBao (already shipping), future amp-game, future
-k3s nodes.
+disk. Examples: OpenBao (shipping), future k3s nodes. (amp-game is
+intentionally NOT cluster-mobile despite being on the new shape —
+its `disk_storage` is pinned to `local-lvm` for I/O latency; see
+[`vms/amp-game/README.md`](../vms/amp-game/README.md).)
 
 - **Disk storage**: `local-lvm` today; will move to `nas-vms` (NFS from
   the Asustor) when the cluster transition lands.
@@ -130,7 +132,7 @@ Don't re-derive — read the existing doc.
 | Shared OpenTofu module input surface | [`modules/proxmox-vm/variables.tf`](../modules/proxmox-vm/variables.tf) |
 | Packer base templates | [`packer/ubuntu-24-04-base/README.md`](../packer/ubuntu-24-04-base/README.md), [`packer/windows-11-base/README.md`](../packer/windows-11-base/README.md) |
 | Per-role deploy + ops | `vms/<role>/README.md` — start with [`vms/openbao/README.md`](../vms/openbao/README.md) and [`vms/rootca/README.md`](../vms/rootca/README.md) |
-| Legacy (pre-2026-05-11) shell `deploy.sh` artifacts | [`vms/openbao/legacy/`](../vms/openbao/legacy/) (preserved for the USB-passthrough discovery trick) |
+| Legacy shell `deploy.sh` artifacts (preserved as reference) | [`vms/openbao/legacy/`](../vms/openbao/legacy/) (USB-passthrough discovery), [`vms/amp-game/legacy/`](../vms/amp-game/legacy/) (cloud-init drive-recreate dance + ufw/unattended-upgrades pattern that moved to Ansible) |
 
 The vault has the design context behind all of this — read the
 relevant doc there if you need the *why*, not the *how*. Pointers in
