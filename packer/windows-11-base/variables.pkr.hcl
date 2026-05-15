@@ -40,8 +40,8 @@ variable "proxmox_node" {
 
 variable "vm_id" {
   type        = number
-  description = "Target VM ID for the Proxmox template. Must not collide with existing VMs. (Ubuntu base is 9100; Windows is 9101.)"
-  default     = 9101
+  description = "Target VM ID for the Proxmox template. Per-node post-cluster — see ADR-0006. Windows convention: 9200/9201/9202 for pve12t/pve13m/pve13t (Ubuntu uses 9100/9101/9102). Override via VM_ID in .env.<node>; the 9200 default assumes pve12t."
+  default     = 9200
 }
 
 variable "vm_name" {

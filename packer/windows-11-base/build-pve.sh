@@ -15,9 +15,9 @@
 # PROXMOX_TOKEN_ID, PROXMOX_TOKEN_SECRET, PROXMOX_NODE plus the storage
 # pool ISO references. .env.* files are gitignored.
 #
-# Output: a Proxmox template VM (default ID 9101, name windows-11-base)
-# on the configured Proxmox node, sysprep'd and ready to clone via
-# Terraform/OpenTofu cicustom user-data.
+# Output: a Proxmox template VM (per-node default IDs 9200/9201/9202 for
+# pve12t/pve13m/pve13t — see ADR-0006), name windows-11-base, sysprep'd
+# and ready to clone via Terraform/OpenTofu cicustom user-data.
 
 set -euo pipefail
 
@@ -156,7 +156,7 @@ echo "Target: ${TARGET}  (proxmox-iso, node=${PROXMOX_NODE})"
 # node. The build-pve.sh <node> arg should be unambiguous — confirm
 # before letting this run on a node that may have an in-use template.
 
-TARGET_VMID="${PKR_VAR_vm_id:-9101}"
+TARGET_VMID="${PKR_VAR_vm_id:-9200}"
 PROXMOX_SSH_HOST="${PROXMOX_SSH_HOST:-$(printf '%s' "$PROXMOX_URL" | sed -E 's|^https?://||; s|:[0-9]+.*||; s|/.*||')}"
 PROXMOX_SSH_USER="${PROXMOX_SSH_USER:-root}"
 PREFLIGHT_TARGET="${PROXMOX_SSH_USER}@${PROXMOX_SSH_HOST}"

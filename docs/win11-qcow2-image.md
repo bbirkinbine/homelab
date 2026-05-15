@@ -2,7 +2,7 @@
 
 The qcow2 image produced by `packer/windows-11-base/build-vbox.sh` (and converted from VMDK via `qemu-img convert -f vmdk -O qcow2`) is sysprep'd and ready for cloning. On first boot of every clone, a one-shot `PackerBuildCleanup` scheduled task disables the build credentials before any login is possible — so the only supported login path is to attach a NoCloud cidata seed and let `cloudbase-init` create your account from it.
 
-For the Proxmox-template equivalent (VM 9101) the per-clone identity flows through `cicustom` cloud-init; see [docs/cloning-templates.md](cloning-templates.md). The credential model is the same on both targets — the cleanup task is registered by the shared [provision/99-sysprep.ps1](../packer/windows-11-base/provision/99-sysprep.ps1) and rides into every clone via sysprep `/generalize`.
+For the Proxmox-template equivalent (per-node VMIDs 9200/9201/9202 — see [ADR-0006](decisions/0006-packer-templates-per-node.md)) the per-clone identity flows through `cicustom` cloud-init; see [docs/cloning-templates.md](cloning-templates.md). The credential model is the same on both targets — the cleanup task is registered by the shared [provision/99-sysprep.ps1](../packer/windows-11-base/provision/99-sysprep.ps1) and rides into every clone via sysprep `/generalize`.
 
 ## What's on disk after sysprep
 

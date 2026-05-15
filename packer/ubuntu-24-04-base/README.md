@@ -32,7 +32,27 @@ packer init .
 ```
 
 The build takes ~20-30 minutes on an NUC12. When it's done you have a
-Proxmox template at VM ID `9100` named `ubuntu-24-04-base`.
+Proxmox template named `ubuntu-24-04-base` at the VMID configured in
+`.env.<node>` (per-node convention: `9100`/`9101`/`9102` for
+`pve12t`/`pve13m`/`pve13t` — see [ADR-0006](../../docs/decisions/0006-packer-templates-per-node.md)).
+
+## What's in the image
+
+- Current Ubuntu 24.04 LTS install via autoinstall (subiquity), fully
+  upgraded at build time.
+- Hardening: UFW (allow 22 only), auditd active, snap removed and held,
+  Ubuntu Pro apt-news disabled, motd-news off.
+- Network-quiet by default: auto-update timers masked, cloud-init
+  datasources locked to NoCloud + ConfigDrive (what Proxmox provides),
+  no background package fetchers. See [Network-quiet by design](#network-quiet-by-design).
+- A cloud-init drive for clone-time configuration (hostname, SSH keys, IP).
+- A self-destructing first-boot `packer-cleanup.service` that removes the
+  build-time `packer` user and then deletes itself. See [Clone-side
+  verification](#clone-side-verification).
+
+Per-VM software (k3s, container runtimes, databases, application stacks)
+is layered on top per role — the base image stays generic and minimal
+so any downstream VM can clone from it.
 
 ## What you need before you start
 
@@ -42,7 +62,7 @@ Proxmox template at VM ID `9100` named `ubuntu-24-04-base`.
   token, separate from the Terraform token. The full setup runbook (user,
   role, ACL, token) lives in
   [../../docs/proxmox-permissions.md](../../docs/proxmox-permissions.md) —
-  run it once on every Proxmox node before pointing Packer at it.
+  run it once cluster-wide (token replicates via pmxcfs).
 - **Ubuntu 24.04.x live-server ISO** uploaded to the node's ISO storage pool,
   OR a reachable URL Proxmox can download. The variable `iso_file` controls
   which (default expects an already-uploaded ISO at
@@ -132,22 +152,24 @@ runs on first boot of any clone (see [provision/99-cleanup.sh](provision/99-clea
 and the design note inline). Validate by cloning:
 
 ```bash
-# On the Proxmox host
-qm clone 9100 9101 --name test-clone --full
-qm set 9101 --ipconfig0 ip=dhcp --sshkeys ~/.ssh/authorized_keys
-qm start 9101
+# On the Proxmox host. Auto-pick a free VMID so this never collides
+# with the per-node templates (9100/9101/9102) or other VMs in the cluster.
+TEST_VMID=$(pvesh get /cluster/nextid)
+qm clone 9100 "$TEST_VMID" --name test-clone --full
+qm set "$TEST_VMID" --ipconfig0 ip=dhcp --sshkeys ~/.ssh/authorized_keys
+qm start "$TEST_VMID"
 
 # Wait ~30s for first boot to settle, then run via guest agent
-qm guest exec 9101 -- /usr/bin/getent passwd packer
+qm guest exec "$TEST_VMID" -- /usr/bin/getent passwd packer
 #   exitcode=2, no stdout — packer user gone
 
-qm guest exec 9101 -- /usr/bin/systemctl is-enabled packer-cleanup.service
+qm guest exec "$TEST_VMID" -- /usr/bin/systemctl is-enabled packer-cleanup.service
 #   exitcode=1, stdout="disabled" — unit ran and self-disabled
 
-qm guest exec 9101 -- /bin/ls /etc/systemd/system/packer-cleanup.service
+qm guest exec "$TEST_VMID" -- /bin/ls /etc/systemd/system/packer-cleanup.service
 #   exitcode=2 — unit file removed by self-destruct
 
-qm guest exec 9101 -- /bin/ls /usr/local/sbin/packer-cleanup.sh
+qm guest exec "$TEST_VMID" -- /bin/ls /usr/local/sbin/packer-cleanup.sh
 #   exitcode=2 — script removed by self-destruct
 ```
 
@@ -165,7 +187,7 @@ pro config show apt_news                # false
 
 # Tear down the test
 exit
-qm stop 9101 && qm destroy 9101
+qm stop "$TEST_VMID" && qm destroy "$TEST_VMID"
 ```
 
 ## Network-quiet by design

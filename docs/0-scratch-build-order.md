@@ -95,7 +95,7 @@ Per-node prep. Steps 1 + 2 can run in parallel (NAS-side prep doesn't depend on 
 
 12. **(Optional) Build the Windows 11 base template** — [packer/windows-11-base/README.md](../packer/windows-11-base/README.md). Two targets — `proxmox-iso` (per-node Windows base; VMIDs `9200`/`9201`/`9202` for `pve12t`/`pve13m`/`pve13t`, same per-node-distinct-VMID rule as step 11 — see [ADR-0006](decisions/0006-packer-templates-per-node.md)) and `virtualbox-iso` (T480-only; outputs qcow2 for libvirt). Required only if you'll deploy Windows roles.
 
-    The current `packer/windows-11-base/` config still uses 9101 (its pre-cluster VMID). When you build the Windows base on the cluster, set `VM_ID=9200` in `.env.pve12t`, `VM_ID=9201` in `.env.pve13m`, `VM_ID=9202` in `.env.pve13t`. Future Windows roles will need their own `local.windows_template_ids` map in role tfvars (analogous to the Ubuntu one).
+    `packer/windows-11-base/` defaults to `VM_ID=9200` (pve12t); bump per node when fanning out the env files (`9201` for pve13m, `9202` for pve13t) — same pattern as the Ubuntu series. Future Windows roles will need their own `local.windows_template_ids` map in role tfvars (analogous to the Ubuntu one in [`vms/openbao/terraform/main.tf`](../vms/openbao/terraform/main.tf)).
 
 ---
 

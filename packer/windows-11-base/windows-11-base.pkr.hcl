@@ -2,7 +2,10 @@
 // windows-11-base.pkr.hcl
 //
 // Builds a Windows 11 Pro x64 VM template with two target builders:
-//   1. proxmox-iso    : Proxmox template VM 9101 (parallel to Ubuntu 9100)
+//   1. proxmox-iso    : Per-node Proxmox templates VM 9200/9201/9202 for
+//                       pve12t/pve13m/pve13t (parallel to Ubuntu 9100/
+//                       9101/9102 — see ADR-0006). Override per host via
+//                       VM_ID= in each .env.<node>.
 //   2. virtualbox-iso : standalone VMDK/OVF in output-vbox/, convertible
 //                       to qcow2 for virt-manager via `qemu-img convert`
 //

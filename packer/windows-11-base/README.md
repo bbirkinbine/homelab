@@ -2,7 +2,7 @@
 
 Builds a Windows 11 Pro x64 VM template for two targets in one Packer config:
 
-- **`proxmox-iso`** — Proxmox template VM 9101 (parallel to `ubuntu-24-04-base` at VM 9100). **Validated, shipping.**
+- **`proxmox-iso`** — Per-node Proxmox templates: VMIDs `9200`/`9201`/`9202` for `pve12t`/`pve13m`/`pve13t` (parallel to `ubuntu-24-04-base` at `9100`/`9101`/`9102` — see [ADR-0006](../../docs/decisions/0006-packer-templates-per-node.md)). **Validated, shipping.**
 - **`virtualbox-iso`** — VMware-style OVF + VMDK + NVRAM in `output-vbox/`. Local builds on a Linux host with VirtualBox 7.0+; the VMDK converts to qcow2 in ~5 minutes for use in virt-manager / libvirt. **Validated end-to-end 2026-05-08** — full Win11 24H2 install + sysprep in ~44 minutes.
 
 Both share the same `Autounattend.xml` and the same PowerShell provisioner pipeline, ending at the same sysprep'd state.
@@ -94,8 +94,9 @@ harmless either way.)
 **On the Mac (proxmox-iso target):**
 
 ```bash
-./build-pve.sh pve12t       # → Proxmox template VM 9101 on pve12t
-./build-pve.sh pve13m       # → Proxmox template VM 9101 on pve13m
+./build-pve.sh pve12t       # → Proxmox template VM 9200 on pve12t
+./build-pve.sh pve13m       # → Proxmox template VM 9201 on pve13m
+./build-pve.sh pve13t       # → Proxmox template VM 9202 on pve13t
 ```
 
 **On the T480 (virtualbox-iso target):**
@@ -125,15 +126,29 @@ A single invocation runs one source. There are deliberately two separate build s
 
 ## What the build produces
 
+### OS state (both targets)
+
+The two targets share the same `Autounattend.xml` and PowerShell provisioner
+pipeline, so the OS state is identical at sysprep:
+
+- Windows 11 Pro x64 install via Autounattend.xml (UEFI + TPM 2.0).
+- VirtIO drivers + QEMU guest agent installed during build.
+- Hardening: Windows Firewall on (default-deny inbound; RDP, SSH, WinRM,
+  ICMP allowed), telemetry minimum, Cortana off, OneDrive removed,
+  LLMNR off, SMBv1 disabled, basic audit policy enabled.
+- cloudbase-init pre-installed for clone-time configuration (hostname,
+  network, admin password, SSH keys), reading Proxmox's cloud-init drive
+  or a libvirt NoCloud seed ISO.
+- Sysprep'd and shut down — boots into OOBE-mini → cloudbase-init on the
+  first boot of every clone.
+
 ### Proxmox target
 
-Template VM 9101 in the configured Proxmox node:
+Per-node template VM (`9200`/`9201`/`9202`; see [ADR-0006](../../docs/decisions/0006-packer-templates-per-node.md)):
 
 - BIOS=ovmf (UEFI), EFI vars disk + emulated TPM 2.0
 - VirtIO SCSI disk + VirtIO NIC
 - Cloud-init drive attached for first-boot per-clone configuration
-- VirtIO drivers + QEMU guest agent + cloudbase-init installed
-- Sysprep'd and shut down — boots into OOBE-mini → cloudbase-init on next clone
 
 Clone with Terraform/OpenTofu the same way as the Ubuntu base.
 
@@ -234,10 +249,10 @@ windows-11-base/
 
 ## Validation after build
 
-After `./build-pve.sh pve12t`:
+After `./build-pve.sh pve12t` (substitute 9201/9202 if you built on pve13m/pve13t):
 
-1. Proxmox UI → confirm VM 9101 exists, marked as template, BIOS=ovmf, EFI disk + TPM present, no CD-ROM attached.
-2. Clone via Terraform/OpenTofu (or `qm clone 9101 999 --name wintest`).
+1. Proxmox UI → confirm VM 9200 exists, marked as template, BIOS=ovmf, EFI disk + TPM present, no CD-ROM attached.
+2. Clone via Terraform/OpenTofu (or `TEST_VMID=$(pvesh get /cluster/nextid); qm clone 9200 "$TEST_VMID" --name wintest`).
 3. RDP/SSH in via the credentials cloudbase-init configured.
 4. From inside the VM:
    ```powershell
@@ -266,7 +281,7 @@ After `./build-vbox.sh t480-vbox`:
 - **VirtualBox kernel modules.** `build-vbox.sh` requires `vboxdrv` / `vboxnetadp` / `vboxnetflt` loaded. After a kernel upgrade these can be missing until DKMS rebuilds — `sudo modprobe vboxdrv` or `sudo /sbin/vboxconfig`.
 - **Sysprep terminates the WinRM session.** The `99-sysprep.ps1` script generalizes and shuts down; Packer expects the WinRM disconnect. The build block sets `valid_exit_codes = [0]` to allow it.
 - **License activation watermark.** The KMS install key in Autounattend gets you through setup but doesn't activate Windows. Clones will show an activation watermark unless you supply a real key or use the eval ISO. Acceptable for lab.
-- **VM ID collision.** Default is 9101 (next to Ubuntu's 9100). If 9101 is taken on the target node, set `VM_ID=` in the env file.
+- **VM ID collision.** Per-node convention is 9200/9201/9202 (`pve12t`/`pve13m`/`pve13t`), set via `VM_ID=` in each `.env.<node>`. The 9200 series gives a 100-VMID gap above the Ubuntu 9100 series for additional Linux variants. See [ADR-0006](../../docs/decisions/0006-packer-templates-per-node.md).
 - **Build user password embedded.** Both `variables.pkr.hcl` and `http/Autounattend.xml` have `packer-build-only-Win11!`. Change one, change the other.
 - **Windows Update is disabled by default.** See *Patching strategy* above. The default fast path produces an unpatched template; clones must be patched downstream via cloud-init `runcmd:` or per-role Ansible. The HCL toggle is a documented one-line uncomment.
 

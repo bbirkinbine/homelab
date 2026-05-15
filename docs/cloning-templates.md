@@ -113,7 +113,7 @@ users:
       - ssh-ed25519 AAAA... brian@laptop
 EOF
 
-qm clone 9101 201 --name myvm --full --storage local-lvm
+qm clone 9200 201 --name myvm --full --storage local-lvm   # 9200 = Windows base on pve12t; use 9201/9202 on pve13m/pve13t (ADR-0006)
 qm set 201 --cicustom "user=local:snippets/myvm.yaml" --ipconfig0 ip=dhcp
 qm start 201
 ```
@@ -149,7 +149,7 @@ resource "proxmox_virtual_environment_vm" "myvm" {
   name      = "myvm"
   node_name = "pve12"
   clone {
-    vm_id = 9101
+    vm_id = 9200    # Windows base on pve12t; per-node, see ADR-0006
     full  = true
   }
   initialization {

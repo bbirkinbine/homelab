@@ -1,7 +1,7 @@
 # `modules/proxmox-vm` — shared Proxmox VM provisioner
 
 A thin OpenTofu module that clones a Packer-built template (Ubuntu 24.04
-base = VM ID `9100`, Windows 11 base = VM ID `9101`) into a per-role VM
+base = per-node VMIDs `9100`/`9101`/`9102`, Windows 11 base = `9200`/`9201`/`9202` — see [ADR-0006](../../docs/decisions/0006-packer-templates-per-node.md)) into a per-role VM
 and attaches a cloud-init snippet for first-boot configuration. Every
 role under [`vms/`](../../vms/) calls this module from its
 `terraform/main.tf`; [`vms/openbao/`](../../vms/openbao/) and
@@ -38,7 +38,7 @@ By design — speculative features bloat the surface and slow validation:
 
 - **GPU / PCIe passthrough.** Will be added when the LLM role ports to
   OpenTofu; doing it speculatively means a `dynamic "hostpci"` block
-  + balloon=0 cross-var preconditions that the current roles don't
+  plus balloon=0 cross-var preconditions that the current roles don't
   exercise. See [`docs/proxmox-gpu-passthrough.md`](../../docs/proxmox-gpu-passthrough.md)
   for the manual flow that exists today.
 - **Storage attachments beyond a single boot disk.** Roles that need a
