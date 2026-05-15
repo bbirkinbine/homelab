@@ -6,7 +6,7 @@ cloud-init installs the NVIDIA driver, Docker, the NVIDIA container toolkit,
 and Ollama, then reboots so the kernel module loads cleanly.
 
 Designed for an RTX 3090 (24 GB VRAM) attached to a Proxmox node via
-Thunderbolt eGPU, but works for any NVIDIA card the host has already bound
+Thunderbolt eGPU (Razer Core X), but works for any NVIDIA card the host has already bound
 to `vfio-pci`.
 
 ## Prerequisites

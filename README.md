@@ -51,7 +51,9 @@ nodes; roles pinned to specific hardware (eGPU, USB-HSM) stay node-local.
 | VM configuration | Ansible | Per-role playbooks under `vms/<role>/ansible/` |
 | Task runner | `just` | `just plan openbao`, `just apply openbao`, etc. |
 | Host baseline | Ansible role `pve-host` | Brings a fresh PVE 9.x host to cluster-ready state |
-| Secrets | KeePassXC + YubiKey HMAC | `scripts/hydrate.sh` resolves `kp://` placeholders at apply time |
+| Bootstrap secrets | KeePassXC + YubiKey HMAC | `scripts/hydrate.sh` resolves `kp://` placeholders in `terraform.tfvars.tpl` at apply time |
+| Runtime secrets | OpenBao (Shamir-sealed) | In-cluster KV / PKI store for service-to-service secrets; see [ADR-0002](docs/decisions/0002-openbao-seal-shamir-not-hsm.md) and [`vms/openbao/`](vms/openbao/README.md) |
+| AI / LLM | Ollama | Local model serving on the [eGPU RTX 3090](docs/proxmox-gpu-passthrough.md) (24 GB VRAM) attached to `pve12t`; see [`vms/llm/`](vms/llm/README.md) |
 | Build hosts | macOS / Ubuntu | Mac drives all `proxmox-iso` builds; T480 drives the Windows `virtualbox-iso` target |
 | Design rationale | ADRs in [`docs/decisions/`](docs/decisions/) | Append-only records for non-obvious choices |
 
