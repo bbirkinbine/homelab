@@ -1,14 +1,21 @@
 ---
 # vms/amp-game/ansible/inventory.yml.example
 #
-# Copy to inventory.yml (gitignored) and fill in `ansible_host` with
-# the IP from `tofu output ipv4` (or `tofu output ansible_inventory_hint`
-# which renders a pre-formatted block you can paste over this).
+# This file documents the inventory shape. The actual inventory.yml is
+# gitignored and is populated automatically by:
 #
-# Why static (not dynamic): the homelab convention is to set a DHCP
-# reservation per service VM on the router so the IP stays stable
-# across reboots. Once you've reserved the lease, this file is
-# write-once. See vms/amp-game/README.md "Operations" section.
+#   just inventory amp-game
+#
+# That recipe runs scripts/write-inventory.sh, which reads
+# `tofu output ansible_inventory_hint` and writes the result here as
+# vms/amp-game/ansible/inventory.yml. It refuses to write if the
+# qemu-guest-agent hasn't reported the VM's IP yet — wait ~30s after
+# `just apply amp-game` and retry.
+#
+# IP stability: pin a DHCP reservation per service VM on the router
+# (by MAC, visible via `tofu output mac`). Without that, the lease can
+# rotate and the inventory.yml's `ansible_host` goes stale; you'd have
+# to re-run `just inventory amp-game` after each rotation.
 #
 # Group `amp_game_servers` (plural) vs the host `amp-game` (singular):
 # Ansible 2.16+ warns when a group and a host share the same name;
@@ -17,10 +24,10 @@
 amp_game_servers:
   hosts:
     amp-game:
-      # Paste the value of `tofu output ipv4` here after the first
-      # `just apply amp-game`. If the agent hasn't reported yet (output
-      # is null), look up the lease on your router by MAC (from
-      # `tofu output mac`) or hostname (`amp-game`).
+      # Populated by `just inventory amp-game` from `tofu output ipv4`.
+      # If the agent hasn't reported yet (output is null), look up the
+      # lease on your router by MAC (from `tofu output mac`) or
+      # hostname (`amp-game`).
       ansible_host: 10.0.0.X
 
       # First-boot user created by cloud-init (matches the value of

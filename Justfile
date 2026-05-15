@@ -58,6 +58,10 @@ output role:
 ansible-deps role:
     cd vms/{{role}}/ansible && ansible-galaxy collection install -r requirements.yml
 
+# Write vms/<role>/ansible/inventory.yml from `tofu output ansible_inventory_hint` (replaces the manual paste step).
+inventory role:
+    @./scripts/write-inventory.sh {{role}}
+
 # Run the role's site.yml against vms/<role>/ansible/inventory.yml.
 ansible role:
     cd vms/{{role}}/ansible && ansible-playbook -i inventory.yml site.yml

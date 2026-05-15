@@ -52,8 +52,7 @@ just ansible-deps openbao   # one-time per workstation
 just hydrate openbao        # render terraform.tfvars from KeePassXC
 just plan openbao           # review the plan
 just apply openbao          # create the VM
-just output openbao         # surface the VM's IPv4
-$EDITOR vms/openbao/ansible/inventory.yml   # paste the IPv4 over ansible_host
+just inventory openbao      # write ansible/inventory.yml from tofu output (waits on guest-agent)
 just ansible openbao        # install + configure OpenBao
 ```
 

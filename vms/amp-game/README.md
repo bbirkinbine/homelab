@@ -44,9 +44,10 @@ just check amp-game
 just plan amp-game
 just apply amp-game
 
-# Paste tofu output into the static Ansible inventory.
-just output amp-game
-$EDITOR vms/amp-game/ansible/inventory.yml          # ansible_host = <ipv4>
+# Write the static Ansible inventory from tofu output. Fails if the
+# qemu-guest-agent hasn't reported the VM's IP yet (wait ~30s and retry).
+# can also check for IP in the PVE node UI before running inventory.
+just inventory amp-game
 
 # Run the role's playbook (apt deps + ufw + unattended-upgrades).
 just ansible amp-game

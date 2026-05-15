@@ -103,8 +103,7 @@ just hydrate     <role>     # renders terraform.tfvars from KeePassXC
 just check       <role>     # preflight: ssh, Proxmox API, template, snippets
 just plan        <role>     # review the plan
 just apply       <role>     # create the VM
-just output      <role>     # surface the VM's IPv4 / MAC
-$EDITOR vms/<role>/ansible/inventory.yml   # paste IPv4 over ansible_host
+just inventory   <role>     # write ansible/inventory.yml from tofu output (waits on guest-agent)
 just ansible     <role>     # install + configure
 ```
 

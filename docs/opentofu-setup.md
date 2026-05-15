@@ -222,9 +222,9 @@ just check openbao
 just plan openbao
 just apply openbao
 
-# Paste tofu output into the static Ansible inventory.
-just output openbao
-$EDITOR vms/openbao/ansible/inventory.yml          # ansible_host = <ipv4>
+# Write the static Ansible inventory from tofu output. Fails if the
+# qemu-guest-agent hasn't reported the VM's IP yet (wait ~30s and retry).
+just inventory openbao
 
 # Run the role's playbook.
 just ansible openbao

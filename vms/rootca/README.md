@@ -66,10 +66,10 @@ Phase A: Bootstrap (network attached)
   2. just apply rootca             # creates VM with NIC, USB passthrough'd,
                                    # disk on standard local-lvm (no host-side
                                    # encryption — see prereq 4).
-  3. just output rootca            # → VM's IPv4 during the bootstrap window
-  4. $EDITOR ansible/inventory.yml # paste IPv4 over ansible_host
-  5. just ansible-deps rootca      # one-time per workstation
-  6. just ansible rootca           # installs smartcard stack, sc-hsm-embedded,
+  3. just inventory rootca         # writes ansible/inventory.yml from tofu output
+                                   # (waits on qemu-guest-agent — retry if "not reported")
+  4. just ansible-deps rootca      # one-time per workstation
+  5. just ansible rootca           # installs smartcard stack, sc-hsm-embedded,
                                    # polkit + udev + plugdev plumbing, carves
                                    # + LUKS-formats /var/lib/rootca-encrypted
                                    # (operator pastes the passphrase from
@@ -78,7 +78,7 @@ Phase A: Bootstrap (network attached)
                                    # air-gap. Idempotent on re-runs.
 
   ── Verification gate (do this before Phase B) ──
-  7. ssh rootca-admin@<vm-ip>
+  6. ssh rootca-admin@<vm-ip>
      # Confirm the in-VM LUKS partition is present and mounted:
      lsblk -o NAME,FSTYPE,MOUNTPOINT | grep rootca-encrypted
      mountpoint /var/lib/rootca-encrypted
@@ -90,10 +90,10 @@ Phase A: Bootstrap (network attached)
      # Should show: DKEK shares=1, DKEK key check value=0x70406861715AF81F
 
 Phase B: Make air-gap permanent
-  8. $EDITOR vms/rootca/terraform/terraform.tfvars
+  7. $EDITOR vms/rootca/terraform/terraform.tfvars
      # change: enable_network = false
-  9. just apply rootca             # NIC removed declaratively
-  10. just output rootca           # → "network REMOVED — VM is AIR-GAPPED"
+  8. just apply rootca             # NIC removed declaratively
+  9. just output rootca            # → "network REMOVED — VM is AIR-GAPPED"
 
 Phase C: Ceremonies (forever after)
   All future access is via Proxmox noVNC console only. The
