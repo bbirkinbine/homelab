@@ -53,9 +53,49 @@ Per-node prep. Steps 1 + 2 can run in parallel (NAS-side prep doesn't depend on 
 
 10. **Workstation setup** — [docs/opentofu-setup.md](opentofu-setup.md). Install `opentofu`, configure the `hydrate.sh` flow to read tokens from KeePassXC at apply time.
 
-11. **Build the Ubuntu 24.04 base template** — [packer/ubuntu-24-04-base/README.md](../packer/ubuntu-24-04-base/README.md). Produces template VM 9100 on whichever PVE node you target. Required for every Linux role downstream.
+11. **Build the Ubuntu 24.04 base template on every cluster node, with distinct VMIDs** — [packer/ubuntu-24-04-base/README.md](../packer/ubuntu-24-04-base/README.md). Required for every Linux role downstream. See [ADR-0006](decisions/0006-packer-templates-per-node.md) for why per-node templates with distinct VMIDs (rather than one shared template on NFS, or one template + cross-node clone).
 
-12. **(Optional) Build the Windows 11 base template** — [packer/windows-11-base/README.md](../packer/windows-11-base/README.md). Two targets — `proxmox-iso` (template VM 9101 on a PVE node) and `virtualbox-iso` (T480-only; outputs qcow2 for libvirt). Required only if you'll deploy Windows roles.
+    **Per-node VMID convention** (matches [`local.ubuntu_template_ids`](../vms/openbao/terraform/main.tf) in every Linux role and the case statement in [`scripts/preflight.sh`](../scripts/preflight.sh)):
+
+    | Node | Ubuntu base VMID | Windows base VMID (future) |
+    | --- | --- | --- |
+    | `pve12t` | 9100 | 9200 |
+    | `pve13m` | 9101 | 9201 |
+    | `pve13t` | 9102 | 9202 |
+
+    VMIDs are cluster-wide unique post-cluster — building the same VMID on two nodes fails with HTTP 500 ("VM 9100 already exists"). The Windows series skips up by 100 to leave room for additional Linux variants.
+
+    **Env files (one per host).** The wrapper sources `.env.<node>`. Token + secret are cluster-replicated via `/etc/pve/user.cfg`, so the per-host deltas are `PROXMOX_URL`, `PROXMOX_NODE`, and `VM_ID`:
+
+    ```bash
+    cd packer/ubuntu-24-04-base
+    cp .env.example .env.pve12t && $EDITOR .env.pve12t   # fill PROXMOX_TOKEN_* once
+    sed -e 's/pve12t/pve13m/g' -e 's/^VM_ID="9100"/VM_ID="9101"/' \
+        .env.pve12t > .env.pve13m
+    sed -e 's/pve12t/pve13t/g' -e 's/^VM_ID="9100"/VM_ID="9102"/' \
+        .env.pve12t > .env.pve13t
+    chmod 600 .env.pve12t .env.pve13m .env.pve13t
+    ```
+
+    Files are gitignored; `chmod 600` because they hold the token secret.
+
+    **Build (one invocation per host):**
+
+    ```bash
+    ./build-pve.sh pve12t       # VM 9100 on pve12t
+    ./build-pve.sh pve13m       # VM 9101 on pve13m
+    ./build-pve.sh pve13t       # VM 9102 on pve13t
+    ```
+
+    Each run takes ~20–30 min on an NUC12.
+
+    **Role coupling.** Linux roles look up the right VMID via a local map keyed on `proxmox_node` — see `local.ubuntu_template_ids` in [vms/openbao/terraform/main.tf](../vms/openbao/terraform/main.tf). Copy that block (or its evolving form) into every new Linux role so the lookup stays consistent.
+
+    **Auth note:** Packer uses the Proxmox API over HTTPS only — the token in `.env.<node>` (from step 8) is sufficient. The workstation→PVE SSH setup from step 10 §2 is OpenTofu-specific (`bpg/proxmox` uploads cloud-init snippets over SSH) and is not a prerequisite for this step.
+
+12. **(Optional) Build the Windows 11 base template** — [packer/windows-11-base/README.md](../packer/windows-11-base/README.md). Two targets — `proxmox-iso` (per-node Windows base; VMIDs `9200`/`9201`/`9202` for `pve12t`/`pve13m`/`pve13t`, same per-node-distinct-VMID rule as step 11 — see [ADR-0006](decisions/0006-packer-templates-per-node.md)) and `virtualbox-iso` (T480-only; outputs qcow2 for libvirt). Required only if you'll deploy Windows roles.
+
+    The current `packer/windows-11-base/` config still uses 9101 (its pre-cluster VMID). When you build the Windows base on the cluster, set `VM_ID=9200` in `.env.pve12t`, `VM_ID=9201` in `.env.pve13m`, `VM_ID=9202` in `.env.pve13t`. Future Windows roles will need their own `local.windows_template_ids` map in role tfvars (analogous to the Ubuntu one).
 
 ---
 
@@ -63,7 +103,7 @@ Per-node prep. Steps 1 + 2 can run in parallel (NAS-side prep doesn't depend on 
 
 13. **Read the role-class chooser + 7-step VM flow first** — [docs/deploying-vms.md](deploying-vms.md). Orients you on which existing role to copy from for a new role, and walks the repeatable apply loop.
 
-14. **First role: OpenBao** (or whichever you want first) — [vms/openbao/README.md](../vms/openbao/README.md). Canonical example of the current OpenTofu + Ansible + cloud-init shape; copy this as the template for new roles.
+14. **First role: OpenBao** (or whichever you want first) — [vms/openbao/README.md](../vms/openbao/README.md). Canonical example of the current OpenTofu + Ansible + cloud-init shape; copy this as the template for new roles. Before `tofu apply`, run `scripts/preflight.sh openbao` — it looks up the per-node template VMID from its case statement and verifies it exists on the node the role's tfvars targets. If step 11 wasn't run for that node, this is where it surfaces.
 
 15. **eGPU passthrough plumbing on `pve12t`** — [docs/proxmox-gpu-passthrough.md](proxmox-gpu-passthrough.md). One-time, only when you're ready to host the LLM VM. Requires reboots + GRUB edits; deferred until needed.
 
@@ -84,7 +124,7 @@ Neither of these blocks any role. Captured here so the manual-step inventory is 
 
 Common shortcuts when you don't need the whole sequence:
 
-- **Single-node reinstall** (DR or hardware swap): repeat steps 2, 4 (just that host's entries), 5, 6 against the one node. Then `pvecm add` to rejoin per `docs/cluster-bring-up.md`. Don't re-run `pvecm create`.
+- **Single-node reinstall** (DR or hardware swap): repeat steps 2, 4 (just that host's entries), 5, 6 against the one node. Then `pvecm add` to rejoin per `docs/cluster-bring-up.md`. Don't re-run `pvecm create`. Re-run step 11 (and step 12 if you use Windows roles) against the rebuilt node so its local `local-lvm` regains the 9100/9101 templates at the cluster-standard VMIDs.
 - **Inventory change only** (new SSH key, added DNS entry, NAS-IP rotation): re-run step 5. The role is idempotent on healthy nodes.
 - **NAS export reconfigured** (path change, ACL tweak): re-run step 1, then update `inventory.yml`'s `nas_*` vars, re-run step 5. If the storage path changed, also update Proxmox's NFS storage def (`docs/cluster-bring-up.md` Step 8).
 - **New role on existing cluster**: skip Phase 1-2. Start at step 14.

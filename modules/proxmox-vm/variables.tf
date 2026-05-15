@@ -35,7 +35,7 @@ variable "vm_id" {
 
 variable "template_id" {
   type        = number
-  description = "Source template VM ID to clone from. 9100 = packer/ubuntu-24-04-base; 9101 = packer/windows-11-base."
+  description = "Source template VM ID on `node_name`. Templates are per-node (cluster VMIDs are unique), so callers typically pass the result of a node-keyed map lookup — see ADR-0006 and the openbao role's `local.ubuntu_template_ids` pattern. Ubuntu base: 9100 on pve12t, 9101 on pve13m, 9102 on pve13t. Windows base: 9200/9201/9202 (gap of 100 to leave room for the Ubuntu series)."
 }
 
 variable "cores" {

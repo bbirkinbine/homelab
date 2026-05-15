@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# build.sh — convenience wrapper around `packer validate` + `packer build`.
+# build-pve.sh — convenience wrapper around `packer validate` + `packer build`.
 #
-# Usage: ./build.sh <node>
-#   e.g. ./build.sh pve12
+# Usage: ./build-pve.sh <node>
+#   e.g. ./build-pve.sh pve12t
+#
+# Naming mirrors packer/windows-11-base/build-pve.sh; the Ubuntu base has
+# only a proxmox-iso source today, but the parallel name keeps the two
+# Packer trees consistent and matches the convention documented in
+# CLAUDE.md + docs/decisions/0001-windows-base-build-host-virtualbox.md.
 #
 # Loads .env.<node> (gitignored), exports PKR_VAR_* for every PROXMOX_* /
 # VM_* / ISO_* / BUILD_* variable found, then runs the build. Fails loudly
@@ -127,7 +132,7 @@ export PKR_VAR_proxmox_skip_tls_verify="${PROXMOX_SKIP_TLS_VERIFY:-true}"
 # existing VM at vm_id.
 #
 # WARNING: this destroys any existing VM at PKR_VAR_vm_id on the target
-# node. The build.sh <node> arg should be unambiguous — confirm before
+# node. The build-pve.sh <node> arg should be unambiguous — confirm before
 # letting this run on a node that may have an in-use template.
 
 TARGET_VMID="${PKR_VAR_vm_id:-9100}"

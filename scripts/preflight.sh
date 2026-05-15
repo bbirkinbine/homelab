@@ -118,12 +118,28 @@ if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=
   exit 71
 fi
 
-# ---- 4. Template VM 9100 exists on the target node ---------------------------
-TEMPLATE_VM_ID="${TEMPLATE_VM_ID:-9100}"
+# ---- 4. Template VM exists on the target node --------------------------------
+# Per-node Ubuntu template VMIDs (matches local.ubuntu_template_ids in each
+# Linux role's terraform/main.tf — see ADR-0006). Duplicated here because
+# parsing HCL from a shell preflight is more fragile than a 5-line case.
+# Override via the TEMPLATE_VM_ID env var if a role needs a different one.
+if [[ -z "${TEMPLATE_VM_ID:-}" ]]; then
+  case "$PROXMOX_NODE" in
+    pve12t) TEMPLATE_VM_ID=9100 ;;
+    pve13m) TEMPLATE_VM_ID=9101 ;;
+    pve13t) TEMPLATE_VM_ID=9102 ;;
+    *)
+      echo "ERROR: no Ubuntu template VMID mapped for node '$PROXMOX_NODE'." >&2
+      echo "       Update the case statement in $0 (or set TEMPLATE_VM_ID)." >&2
+      exit 72
+      ;;
+  esac
+fi
 echo "==> template VM $TEMPLATE_VM_ID present on $PROXMOX_NODE?"
 if ! ssh "root@$SSH_HOST" "qm status $TEMPLATE_VM_ID" >/dev/null 2>&1; then
   echo "ERROR: template VM $TEMPLATE_VM_ID not found on $PROXMOX_NODE." >&2
   echo "       Build it first: packer/ubuntu-24-04-base/build-pve.sh $PROXMOX_NODE" >&2
+  echo "       (with VM_ID=$TEMPLATE_VM_ID in .env.$PROXMOX_NODE)" >&2
   exit 72
 fi
 

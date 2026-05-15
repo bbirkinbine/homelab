@@ -36,12 +36,25 @@ provider "proxmox" {
   }
 }
 
+// Per-node Ubuntu base template VMIDs. The Packer build produces one
+// template per cluster node (VMIDs are cluster-wide unique post-cluster,
+// so a single constant VMID doesn't work). See ADR-0006 for the rationale
+// and step 11 of docs/0-scratch-build-order.md for the build workflow.
+// Every Linux role copying from openbao should carry this same map.
+locals {
+  ubuntu_template_ids = {
+    pve12t = 9100
+    pve13m = 9101
+    pve13t = 9102
+  }
+}
+
 module "openbao" {
   source = "../../../modules/proxmox-vm"
 
   name        = "openbao"
   node_name   = var.proxmox_node
-  template_id = 9100
+  template_id = local.ubuntu_template_ids[var.proxmox_node]
   vm_id       = 130
 
   // Sizing rationale (matches legacy .env defaults; Shamir-seal OpenBao

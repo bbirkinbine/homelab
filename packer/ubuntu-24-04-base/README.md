@@ -11,15 +11,24 @@ services).
 # 1. Install packer (macOS)
 brew install packer
 
-# 2. Configure local credentials (one per Proxmox node)
-cp .env.example .env.pve12t   # repeat for each node, e.g. .env.pve13
-$EDITOR .env.pve12t           # fill in PROXMOX_URL, PROXMOX_TOKEN_*, NODE, etc.
+# 2. Configure local credentials — ONE .env.<node> PER PROXMOX HOST you'll build on.
+#    `build-pve.sh <node>` sources `.env.<node>`, so a missing file = 401 or env-not-found.
+#    Each node also needs a DIFFERENT VM_ID — cluster VMIDs are unique post-cluster
+#    (see ADR-0006). Convention: pve12t=9100, pve13m=9101, pve13t=9102.
+cp .env.example .env.pve12t && $EDITOR .env.pve12t      # fill PROXMOX_TOKEN_* once
+sed -e 's/pve12t/pve13m/g' -e 's/^VM_ID="9100"/VM_ID="9101"/' \
+    .env.pve12t > .env.pve13m
+sed -e 's/pve12t/pve13t/g' -e 's/^VM_ID="9100"/VM_ID="9102"/' \
+    .env.pve12t > .env.pve13t
+chmod 600 .env.pve12t .env.pve13m .env.pve13t
 
 # 3. Initialize the Proxmox plugin (one-time)
 packer init .
 
 # 4. Build (pass the node name)
-./build.sh pve12t             # or: ./build.sh pve13t
+./build-pve.sh pve12t         # VM 9100 on pve12t
+./build-pve.sh pve13m         # VM 9101 on pve13m
+./build-pve.sh pve13t         # VM 9102 on pve13t
 ```
 
 The build takes ~20-30 minutes on an NUC12. When it's done you have a
@@ -64,7 +73,7 @@ Proxmox template at VM ID `9100` named `ubuntu-24-04-base`.
 - `http/user-data` — Ubuntu autoinstall (subiquity) config
 - `http/meta-data` — minimal cloud-init meta-data
 - `provision/*.sh` — shell provisioner scripts run in numbered order
-- `build.sh` — convenience wrapper (sources `.env.<node>`, runs `packer validate` + `packer build`)
+- `build-pve.sh` — convenience wrapper (sources `.env.<node>`, runs `packer validate` + `packer build`)
 - `.env.example` — template for local credentials (do NOT commit a filled-in `.env.<node>`)
 
 ## After a successful build
@@ -174,7 +183,7 @@ roles which need to stay quiet can.
    `.env.<node>` to the newer point release (24.04.2, .3, etc.).
 2. Verify the SHA256 against
    <https://releases.ubuntu.com/24.04/SHA256SUMS>.
-3. Re-run `./build.sh <node>` for each Proxmox host. Packer creates a fresh
+3. Re-run `./build-pve.sh <node>` for each Proxmox host. Packer creates a fresh
    template; if the VM ID is unchanged you'll need to delete the old
    template first.
 
