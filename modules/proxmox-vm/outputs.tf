@@ -19,9 +19,14 @@ output "ipv4" {
   value       = try(proxmox_virtual_environment_vm.this.ipv4_addresses[1][0], null)
 }
 
+// MAC of the first non-loopback NIC. The bpg/proxmox provider's
+// `mac_addresses` is indexed in the same order as the agent's interface
+// list: index 0 is always `lo` (MAC 00:00:00:00:00:00), index 1 is the
+// first real ethernet. Matches the `ipv4_addresses[1][0]` pattern above.
+// Useful for setting a DHCP reservation on the router.
 output "mac" {
-  description = "MAC address of the first network interface. Useful for setting a DHCP reservation on the router."
-  value       = try(proxmox_virtual_environment_vm.this.mac_addresses[0], null)
+  description = "MAC address of the first non-loopback network interface. May be null until the agent has checked in."
+  value       = try(proxmox_virtual_environment_vm.this.mac_addresses[1], null)
 }
 
 output "snippet_file_id" {

@@ -11,26 +11,17 @@ once landed.
 
 ## Open
 
-### Module output `mac` returns loopback `00:00:00:00:00:00`
-
-The shared module's
-[`outputs.tf`](modules/proxmox-vm/outputs.tf) (or wherever
-`mac_addresses[0]` is being indexed) returns the first MAC the agent
-reports — which is always `lo` (the loopback interface, MAC
-`00:00:00:00:00:00`). Should filter out loopback before picking the
-first. Caught in the 2026-05-15 amp-game apply: `mac = "00:00:00:00:00:00"`
-in tofu output, which is useless for pinning a DHCP reservation.
-
-**Fix:** in
-[`modules/proxmox-vm/main.tf`](modules/proxmox-vm/main.tf)/`outputs.tf`,
-use `try(...)` + a filter expression on `network_interface_names` or
-similar to skip `lo` and return the first ethernet MAC.
-
-**Trigger:** low priority — only matters when you want to pin a DHCP
-reservation by MAC from tofu output. Workaround: `qm config 110 | grep ^net0`
-on the Proxmox host gets the real MAC.
+(none)
 
 ## Done
+
+### ~~Module output `mac` returns loopback `00:00:00:00:00:00`~~
+
+Was indexing `mac_addresses[0]` which is always `lo`. Fixed by
+mirroring the existing `ipv4` output pattern — `mac_addresses[1]`
+under a `try(...)` (the bpg/proxmox provider's `mac_addresses` is
+ordered the same as the agent's interface list: index 0 = `lo`,
+index 1 = first real ethernet).
 
 ### ~~Cloud-init datasource bug — every role deploy failed to bring up the network~~
 
