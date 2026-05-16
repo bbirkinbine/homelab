@@ -113,8 +113,8 @@ pbs-hosts:
 pbs-hosts-check:
     cd pbs-hosts/ansible && ansible-playbook -i inventory.yml site.yml --check --diff
 
-# Apply against a single PBS host — handy when pbs02 first arrives at IL.
-#   just pbs-hosts-one pbs02
+# Apply against a single PBS host (useful when more than one PBS host exists).
+#   just pbs-hosts-one pbs01
 pbs-hosts-one host:
     cd pbs-hosts/ansible && ansible-playbook -i inventory.yml site.yml --limit {{host}}
 

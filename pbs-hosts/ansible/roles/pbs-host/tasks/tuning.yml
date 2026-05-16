@@ -1,10 +1,10 @@
 ---
 # sysctl tuning for PBS. The defaults Debian ships with are tuned for
 # a generalist workload; PBS pushes a lot of small-file IO during GC
-# and verify and a lot of network throughput during backup ingest and
-# sync. Bump TCP buffer ceilings (kernel autotunes within them) and
-# widen the local port range so push-sync parallel workers don't run
-# out of ephemerals.
+# and verify and a lot of network throughput during backup ingest.
+# Bump TCP buffer ceilings (kernel autotunes within them) and widen
+# the local port range so parallel ingest streams from the PVE
+# cluster don't run out of ephemerals.
 
 - name: Template /etc/sysctl.d/99-pbs-host.conf
   ansible.builtin.template:

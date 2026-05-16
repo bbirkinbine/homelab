@@ -1,7 +1,6 @@
 # /etc/sysctl.d/99-pbs-host.conf — managed by Ansible (pbs-host role).
 # Network buffer ceilings tuned for PBS workloads:
 #   - Backup ingest from the PVE cluster (parallel TCP streams)
-#   - Sync push to a remote PBS (worker-threads multi-connection)
 #   - Chunk reads/writes against the NFS bulk datastore
 # The kernel autotunes within these ceilings; we're not committing
 # 128 MiB per socket, only allowing it as a ceiling under load.
@@ -11,8 +10,8 @@ net.core.wmem_max = 134217728
 net.ipv4.tcp_rmem = 4096 87380 134217728
 net.ipv4.tcp_wmem = 4096 65536 134217728
 
-# Widen the local port range so push-sync jobs with high
-# `worker-threads` values don't run out of ephemerals during the burst.
+# Widen the local port range so parallel ingest streams from the PVE
+# cluster don't run out of ephemerals during the nightly backup burst.
 # Default Debian range is 32768-60999 (~28k ports); 10000-65535 gives
 # ~55k.
 net.ipv4.ip_local_port_range = 10000 65535

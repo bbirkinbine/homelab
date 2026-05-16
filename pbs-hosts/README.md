@@ -22,7 +22,6 @@ Brings a freshly-installed Proxmox Backup Server 4.x host (Debian 13 / trixie ba
 - Creates datastores via `proxmox-backup-manager` and applies per-datastore prune policy.
 - Creates an API user + token for PVE backup ingress; surfaces the token secret once for the operator to paste into KeePassXC.
 - Schedules verify + GC jobs per datastore.
-- Stubs the remotes + sync jobs needed for FL → IL push replication (gated off until `pbs02` exists).
 - Drops a baseline `ufw` config and enables the firewall.
 - Installs the operator's SSH public key for `root`.
 - Tunes sysctl for high-throughput chunk transfers.
@@ -65,8 +64,7 @@ pbs-hosts/
             │   ├── users.yml
             │   ├── pbs_datastore.yml
             │   ├── pbs_users.yml
-            │   ├── pbs_jobs.yml
-            │   └── pbs_sync.yml
+            │   └── pbs_jobs.yml
             ├── handlers/main.yml
             ├── templates/
             └── meta/main.yml
@@ -101,13 +99,11 @@ pbs-hosts/
 
 3. **TLS cert migration (future).** PBS ships a self-signed cert; PVE pins it by fingerprint. Migration to a cert from the offline Root CA (`[[CardLogix as Offline Root CA]]`) is a separate task.
 
-4. **IL site sync (future).** Once `pbs02` exists, flip `pbs_sync_enabled: true` in inventory and re-run. See vault `[[Proxmox Backup Server — Capabilities and Tiered Storage]]` for the sync topology.
-
 ## When to run this role
 
 - **First time on a fresh PBS install.** Brings the host to baseline.
 - **After a host reinstall** (disaster recovery). Same flow.
-- **When `inventory.yml` changes** (new datastore, new sync remote, new SSH key). Re-running is idempotent.
+- **When `inventory.yml` changes** (new datastore, new SSH key). Re-running is idempotent.
 
 ## When NOT to run this role
 
@@ -116,10 +112,9 @@ pbs-hosts/
 
 ## Per-host specifics
 
-| Host | Hardware | Role | Site |
-|---|---|---|---|
-| `pbs01` | GMKtec G3 Pro Mini PC — Intel Core i3-10110U, 16 GB DDR4, 512 GB NVMe, 2.5GbE | Primary backup target for the FL cluster | FL |
-| `pbs02` (future) | TBD — same class (small fanned mini-PC, ≥16 GB RAM, NVMe, 2.5GbE) | Push-sync target from `pbs01`; offsite copy | IL |
+| Host | Hardware | Role |
+|---|---|---|
+| `pbs01` | GMKtec G3 Pro Mini PC — Intel Core i3-10110U, 16 GB DDR4, 512 GB NVMe, 2.5GbE | Primary backup target for the PVE cluster |
 
 Hardware selection rationale lives in the vault doc `[[Proxmox Backup Server — Capabilities and Tiered Storage]]` § "PBS host hardware".
 

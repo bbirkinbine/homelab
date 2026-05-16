@@ -6,7 +6,7 @@
 #
 # See pbs-hosts/CLAUDE.md for the role's full intent and the vault doc
 # [[Proxmox Backup Server — Capabilities and Tiered Storage]] for the
-# authoritative architecture (datastore tiering, FL → IL sync topology).
+# authoritative architecture (datastore tiering, retention policy).
 
 # ----- packages -------------------------------------------------------
 # Baseline package set installed by tasks/packages.yml. Aim small: only
@@ -76,12 +76,6 @@ pbs_gc_schedule: "sun 02:00"
 # Skip re-verifying snapshots whose last successful verify was within
 # this many days. Reduces unnecessary IO on healthy datastores.
 pbs_verify_outdated_after_days: 7
-
-# ----- sync -----------------------------------------------------------
-# Default off. tasks/pbs_sync.yml wraps everything in this gate.
-pbs_sync_enabled: false
-pbs_sync_remotes: []
-pbs_sync_jobs: []
 
 # API user for the PVE cluster to authenticate as when pushing backups.
 # Service identity, not a human. The role creates this user and a token

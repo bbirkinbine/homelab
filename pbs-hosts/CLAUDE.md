@@ -10,7 +10,7 @@ Read the sibling `pve-hosts/CLAUDE.md` for context on the layer-0 pattern this r
 
 ## Why this folder exists, in one paragraph
 
-`pve-hosts/` configures the Proxmox VE hypervisors; `pbs-host` is the parallel role for Proxmox Backup Server. It configures the dedicated bare-metal PBS host whose only job is to receive backups from the PVE cluster and (eventually) push-sync to an IL second-site PBS. PBS runs on its own hardware rather than as a VM on the cluster — running the backup-of-record on the thing it's backing up is a circular-dependency that defeats the point. The config surface (datastores, sync jobs, API tokens, GC schedules; no bridges, no cluster, no TB fabric) also diverges from PVE enough that bolting it onto `pve-host` would obscure both. Authoritative architecture lives in the design vault under `[[Proxmox Backup Server — Capabilities and Tiered Storage]]`; this role implements it.
+`pve-hosts/` configures the Proxmox VE hypervisors; `pbs-host` is the parallel role for Proxmox Backup Server. It configures the dedicated bare-metal PBS host whose only job is to receive backups from the PVE cluster. PBS runs on its own hardware rather than as a VM on the cluster — running the backup-of-record on the thing it's backing up is a circular-dependency that defeats the point. The config surface (datastores, API tokens, GC schedules; no bridges, no cluster, no TB fabric) also diverges from PVE enough that bolting it onto `pve-host` would obscure both. Authoritative architecture lives in the design vault under `[[Proxmox Backup Server — Capabilities and Tiered Storage]]`; this role implements it.
 
 ---
 
@@ -31,19 +31,18 @@ Order of operations: instrument the first backup with `mpstat -P ALL 5` + `nfsio
 
 ## Host context
 
-One PBS host today (FL primary), one planned (IL replica). Both are dedicated x86 mini-PCs running stock Proxmox Backup Server 4.x from ISO.
+One PBS host. Dedicated x86 mini-PC running stock Proxmox Backup Server 4.x from ISO.
 
-| Host | Hardware shape | Site | Role |
-|---|---|---|---|
-| `pbs01` | GMKtec G3 Pro Mini PC — Intel Core i3-10110U (2C/4T, Comet Lake-U), 16 GB DDR4, 512 GB NVMe, 1× 2.5GbE | FL | Primary backup target. Receives PVE backups. Pushes encrypted snapshots to `pbs02` once IL exists. |
-| `pbs02` (planned) | TBD — same class (small fanned mini-PC, ≥16 GB RAM, NVMe, 2.5GbE). Doesn't have to match `pbs01` exactly. | IL | Sync replica from `pbs01`. Cold tier — restores are rare; existence is the offsite-copy story. |
+| Host | Hardware | Role |
+|---|---|---|
+| `pbs01` | GMKtec G3 Pro Mini PC — Intel Core i3-10110U (2C/4T, Comet Lake-U), 16 GB DDR4, 512 GB NVMe, 1× 2.5GbE | Primary backup target. Receives PVE-cluster backups. |
 
 Network: single 2.5GbE LAN port (vlan-untagged) on the same switched LAN as the Asustor and the PVE cluster. No TB fabric; no bridges; no VLANs at this layer.
 
 Storage:
 
 - **Bulk datastore (default, required):** NFS mount from the Asustor's RAID6 + NVMe-R/W-cache volume. PBS's metadata-heavy workload (GC, verify) is helped by the NAS-side R/W cache; expected datastore size in the low-double-digit TB range. NFS path stays under `/mnt/pbs-bulk`.
-- **Fast datastore (optional, off by default):** local NVMe on the PBS host. Use case is a hot-retention window with sub-second restore startup. On `pbs01`'s 512 GB NVMe this would carve out a small directory (≤200 GB) alongside the OS install. Gated by `pbs_local_fast_datastore_enabled` in inventory.
+- **Fast datastore (optional, off by default):** local NVMe on the PBS host. Use case is a hot-retention window with sub-second restore startup. On the 512 GB NVMe this would carve out a small directory (≤200 GB) alongside the OS install. Gated by `pbs_local_fast_datastore_enabled` in inventory.
 
 NFS-backed datastores are slower than local for metadata-heavy operations (GC, verify); the NAS-side R/W cache mitigates the worst of it at the lab's expected scale (single- to low-double-digit TB). Escape hatch if GC ever spills past the backup window: move the volume to iSCSI + local ZFS-with-special-vdev. Out of scope for this role.
 
@@ -82,11 +81,6 @@ The role brings a freshly-installed PBS 4.x host to a baseline ready for normal 
     - A garbage-collection job (default: weekly at a different day from verify).
     - Prune is per-datastore policy (set during datastore create in step 9); no separate "prune job" needed unless namespaces are in use, in which case namespace-level prune jobs are created here.
     Use `proxmox-backup-manager <job-type>` CLI; same idempotency pattern as datastores (list → diff → create/update).
-
-12. **`pbs_sync.yml` — remotes + sync jobs (gated).** Wrapped in `when: pbs_sync_enabled | bool`, default false. When enabled:
-    - For each entry in `pbs_sync_remotes`, ensure a remote definition exists (`proxmox-backup-manager remote create <name> --host <host> --auth-id <user> --password <secret>`). Secret read from a var (operator hydrates from OpenBao at apply time; never committed).
-    - For each entry in `pbs_sync_jobs`, ensure a sync job exists. Push direction by default (FL → IL is push), `encrypt: true` (4.2's on-the-fly encryption), `worker-threads` set from var (default 4).
-    - Skip cleanly with a `debug` notice if `pbs_sync_enabled` is true but `pbs_sync_remotes` is empty.
 
 Wire all of these into `tasks/main.yml` in order via `ansible.builtin.import_tasks:` (static composition so syntax errors surface during `--syntax-check`).
 
@@ -130,8 +124,7 @@ pbs-hosts/ansible/roles/pbs-host/
 │   ├── users.yml
 │   ├── pbs_datastore.yml
 │   ├── pbs_users.yml
-│   ├── pbs_jobs.yml
-│   └── pbs_sync.yml
+│   └── pbs_jobs.yml
 ├── handlers/
 │   └── main.yml                         # restart chrony, sysctl, apt-update, ufw-reload
 ├── templates/
@@ -158,9 +151,9 @@ Mirror `/etc/` substructure inside `templates/` so the relationship between temp
 
 The template inventory is at `pbs-hosts/ansible/inventory.yml.example`. It defines:
 
-- One host (`pbs01`) in the `pbs_hosts` group, with `pbs02` commented out as a future placeholder.
+- One host (`pbs01`) in the `pbs_hosts` group.
 - A `pve_hosts` group (mirror of `pve-hosts/ansible/inventory.yml`'s structure) so the `/etc/hosts` template can resolve PVE node names. Do not run the play against `pve_hosts` — that's `pve-host`'s job. The mirror is for resolution only.
-- Per-host vars: `pbs_lan_ip`, `pbs_datastores` (list of dicts with `name`, `path`, `prune_keep_*`), `pbs_local_fast_datastore_enabled` (bool), `pbs_sync_enabled` (bool), `pbs_sync_remotes`, `pbs_sync_jobs`.
+- Per-host vars: `pbs_lan_ip`, `pbs_datastores` (list of dicts with `name`, `path`, `prune_keep_*`), `pbs_local_fast_datastore_enabled` (bool).
 - Group-level vars: `pbs_lan_subnet`, `nas_*`, `pbs_repo_distribution` (fixed: `trixie`), `chrony_servers`, `admin_ssh_pubkey`.
 
 ---
@@ -208,8 +201,8 @@ net.core.rmem_max = 134217728
 net.core.wmem_max = 134217728
 net.ipv4.tcp_rmem = 4096 87380 134217728
 net.ipv4.tcp_wmem = 4096 65536 134217728
-# Increase the local port range so push-sync jobs to the IL site don't run out
-# of ephemeral ports during parallel worker-thread bursts.
+# Increase the local port range so parallel ingest streams from the PVE
+# cluster don't run out of ephemeral ports during the nightly backup burst.
 net.ipv4.ip_local_port_range = 10000 65535
 ```
 
@@ -288,4 +281,4 @@ The four `pbs-hosts*` recipes (`pbs-hosts-deps`, `pbs-hosts`, `pbs-hosts-check`,
 
 ## Design vault (operator-only)
 
-The authoritative architecture lives in the project's private design vault under `[[Proxmox Backup Server — Capabilities and Tiered Storage]]`. The four-way comparison of tiering options, the dedicated-vs-VM decision rationale, the FL → IL sync topology, and the future TLS-from-Root-CA plan all live there. If something in this CLAUDE.md is ambiguous and the rationale matters, ask the maintainer for vault access rather than guessing.
+The authoritative architecture lives in the project's private design vault under `[[Proxmox Backup Server — Capabilities and Tiered Storage]]`. The four-way comparison of tiering options, the dedicated-vs-VM decision rationale, and the future TLS-from-Root-CA plan all live there. If something in this CLAUDE.md is ambiguous and the rationale matters, ask the maintainer for vault access rather than guessing.

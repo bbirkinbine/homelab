@@ -2,7 +2,7 @@
 
 The install-time procedure for bringing a fresh PBS host up to a state where the [`pbs-host` Ansible role](../pbs-hosts/) can take over. This is **layer 0a** for PBS — what the operator does sitting in front of the box with a USB stick. Everything declarative is layer 0b ([pbs-hosts/](../pbs-hosts/)) and later.
 
-The lab runs one PBS host today (`pbs01`, FL primary) with one planned (`pbs02`, IL replica). The steps are identical across them except where called out. Parallel doc for the PVE cluster: [docs/proxmox-install.md](proxmox-install.md).
+The lab runs one PBS host (`pbs01`). Parallel doc for the PVE cluster: [docs/proxmox-install.md](proxmox-install.md).
 
 ## What this doc covers
 
@@ -35,7 +35,7 @@ Before booting the installer, know the values for:
 | LAN IP (`/24`) | [pbs-hosts/ansible/inventory.yml.example](../pbs-hosts/ansible/inventory.yml.example) — `pbs_lan_ip` per host |
 | LAN gateway | router LAN address |
 | DNS server | router LAN address |
-| Hostname (FQDN) | `pbs01.local` (or `pbs02.local` for the IL replica) |
+| Hostname (FQDN) | `pbs01.local` |
 
 ### NAS-side NFS export (can run in parallel)
 
@@ -43,7 +43,7 @@ The [`pbs-host` Ansible role](../pbs-hosts/) mounts a **dedicated** Asustor NFS 
 
 ### Root password
 
-Generate before the install. Stored in KeePassXC (unlocked with YubiKey HMAC per repo convention) as `pbs01-root` (and later `pbs02-root`). The installer asks once; if you lose it, the only recovery is single-user boot. Do not type a memorable password — generate a long one and copy it across when prompted.
+Generate before the install. Stored in KeePassXC (unlocked with YubiKey HMAC per repo convention) as `pbs01-root`. The installer asks once; if you lose it, the only recovery is single-user boot. Do not type a memorable password — generate a long one and copy it across when prompted.
 
 ### BIOS access
 
@@ -86,7 +86,7 @@ The PBS installer is a 6–8 step GUI, near-identical to the PVE installer. Defa
 
 6. **Management Network Configuration.**
    - **Management Interface:** the single 2.5GbE port. The PBS installer doesn't rename it the way the PVE installer does (PVE 9.x writes `50-pmx-nic0.link`; PBS leaves systemd's predictable name like `enp1s0`).
-   - **Hostname (FQDN):** `pbs01.local` (or `pbs02.local`).
+   - **Hostname (FQDN):** `pbs01.local`.
    - **IP Address / CIDR / Gateway / DNS Server:** from the network plan above.
 
 7. **Summary.** Verify hostname, IP, disk, filesystem. **Tick "Reboot after install"** before clicking Install.
@@ -136,12 +136,11 @@ Everything beyond that — `pbs-host` Ansible baseline (`just pbs-hosts`), API t
 
 ## Per-host specifics
 
-| Host | Hardware | Site | Notes |
-|---|---|---|---|
-| `pbs01` | GMKtec G3 Pro Mini PC — Intel Core i3-10110U (2C/4T, Comet Lake-U), 16 GB DDR4, 512 GB NVMe, 1× 2.5GbE | FL | Primary backup target for the FL cluster. Bulk datastore on Asustor NFS. |
-| `pbs02` (future) | TBD — small fanned mini-PC, ≥16 GB RAM, NVMe, 2.5GbE | IL | Push-sync target from `pbs01`; offsite copy. |
+| Host | Hardware | Notes |
+|---|---|---|
+| `pbs01` | GMKtec G3 Pro Mini PC — Intel Core i3-10110U (2C/4T, Comet Lake-U), 16 GB DDR4, 512 GB NVMe, 1× 2.5GbE | Primary backup target for the PVE cluster. Bulk datastore on Asustor NFS. |
 
-The i3-10110U is a 2-core / 4-thread Comet Lake-U at ~2.1 GHz base. PBS's hot path (chunk hashing, GC, verify) is single-threaded per worker, so core count matters less than IPC + I/O. The 2.5GbE LAN port is the throughput ceiling for backup ingest from the PVE cluster; the NUC's CPU is comfortably ahead of the network.
+The i3-10110U is a 2-core / 4-thread Comet Lake-U at ~2.1 GHz base. PBS's hot path (chunk hashing, GC, verify) is single-threaded per worker, so core count matters less than IPC + I/O. The 2.5GbE LAN port is the throughput ceiling for backup ingest from the PVE cluster; the CPU is comfortably ahead of the network.
 
 ---
 
@@ -152,4 +151,4 @@ The i3-10110U is a 2-core / 4-thread Comet Lake-U at ~2.1 GHz base. PBS's hot pa
 - [docs/asustor-nas-setup.md § Export for the PBS bulk datastore](asustor-nas-setup.md#export-for-the-pbs-bulk-datastore) — the NAS-side NFS export this install assumes will be ready before the role's first apply.
 - [docs/proxmox-install.md](proxmox-install.md) — parallel doc for the PVE cluster. Many of the same patterns (KeePassXC, SSH pubkey, ext4-on-LVM) apply.
 - [docs/0-scratch-build-order.md](0-scratch-build-order.md) — master index for the whole-lab build sequence. PBS is its own phase between cluster bring-up and per-role deploys.
-- Vault: `Projects/Homelab/Proxmox Backup Server — Capabilities and Tiered Storage.md` — authoritative architecture (tiering, FL → IL sync, future Root-CA-signed TLS).
+- Vault: `Projects/Homelab/Proxmox Backup Server — Capabilities and Tiered Storage.md` — authoritative architecture (tiering, future Root-CA-signed TLS).

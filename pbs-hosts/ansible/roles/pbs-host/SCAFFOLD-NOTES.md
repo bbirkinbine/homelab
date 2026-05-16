@@ -26,8 +26,7 @@ roles/pbs-host/
 │   ├── users.yml                           # operator SSH pubkey for root@<host>
 │   ├── pbs_datastore.yml                   # create datastores via proxmox-backup-manager + apply prune policy
 │   ├── pbs_users.yml                       # PVE-ingress service user + API token + DatastoreBackup ACL
-│   ├── pbs_jobs.yml                        # per-datastore verify-job + GC schedule
-│   └── pbs_sync.yml                        # remotes + sync jobs (gated by pbs_sync_enabled, push direction)
+│   └── pbs_jobs.yml                        # per-datastore verify-job + GC schedule
 └── templates/etc/
     ├── apt/sources.list.d/pbs-no-subscription.sources.j2
     ├── chrony/chrony.conf.j2
@@ -54,10 +53,6 @@ These are choices made where `CLAUDE.md` left a gap or the spec offered a sketch
 - **8007 stays LAN-wide, not PVE-cluster-only.** The CLAUDE.md spec originally had a contradictory pair of bullets ("allow LAN" vs "PVE-only"). Resolved to LAN-wide because the PBS web UI is a humans-from-workstation surface as well as a PVE backup target — restricting to PVE cluster IPs would force tunneling for UI access without meaningfully shrinking the attack surface (LAN is the trust boundary anyway). If the posture ever tightens, add a `pbs_api_admin_src` var rather than hard-coding PVE IPs.
 - **`loop_var: tcp_port`** in `firewall.yml`, not `port`. The community.general.ufw module has its own `port:` keyword; using `port` as the loop_var shadows the module's keyword via Jinja resolution order — works today by coincidence but is brittle. Renaming to `tcp_port` is the canonical fix.
 - **Token secrets read from PBS via `--output-format json` then jq-extracted from `.value`.** PBS's `proxmox-backup-manager user generate-token --output-format json` returns `{"value": "<secret>", "tokenid": "<user>!<name>"}`. We extract `.value` once at create time and print to the operator with `no_log: true` on the create task plus an explicit unmask in the "surface secret" debug. If PBS upstream ever changes the JSON shape, the play fails noisily at `(stdout | from_json).value` — that's the right failure mode (loud, immediate).
-- **Sync remote passwords passed via `stdin` (not `--password <secret>` on argv).** Argv leaks to `/proc/<pid>/cmdline` for the lifetime of the call; stdin doesn't. PBS 4.x's CLI accepts `--password -` for stdin. The Ansible `command` module's `stdin:` keyword wires the env-resolved secret straight through.
-- **`pbs_sync.yml` validates password-env-var presence BEFORE the `remote create` task**, not after. The original draft validated after-the-fact, which meant the create could fire with an empty password before the validation task ever ran. Loud `fail` up front is the right shape.
-- **Sync-job `j.encrypt` field becomes documentation-only.** PBS 4.x encryption-at-rest for offsite copies is configured on the destination datastore (`datastore create --encryption-key`), not on the sync job. The inventory field stays as a forward-marker; when `pbs02` lands, we'll surface a `proxmox-backup-manager datastore update <name> --encryption-key <key>` step in the IL bring-up runbook.
-- **No `--encrypted-only` or `--max-worker-tasks` flags on `sync-job create`.** Neither exists in PBS 4.x upstream. The original draft of `pbs_sync.yml` had both and they would have failed at first apply.
 - **`verify-job create` uses positional ID (not `--id`).** PBS's CLI for verify-job takes the ID as `command verify-job create <ID> [options]`. The original draft had `--id verify-<datastore>` which is wrong shape.
 - **`--ignore-verified` is passed as a bare boolean flag** (not `--ignore-verified true`). PBS treats presence as true, absence as false. The "true"-as-explicit-value form is harmless but verbose.
 - **GC schedule lives on the datastore object** (`datastore update --gc-schedule`), not as a separate job type. PBS 4.x consolidated GC scheduling onto the datastore in a previous release. Verify jobs are still their own object type with their own CLI surface.
@@ -66,7 +61,7 @@ These are choices made where `CLAUDE.md` left a gap or the spec offered a sketch
 - **`pbs_users.yml` grants the role on the token (not the user)** via `acl update --auth-id <user>!<token> DatastoreBackup`. Granting on the token means rotating the token rotates the trust scope; granting on the user would leak the role to any future token under that user. The narrower posture is intentional.
 - **Dedicated PBS↔NAS backup network (USB 2.5GbE + jumbo) deferred 2026-05-16.** Evaluated as a throughput-shortcut lever and skipped — `pbs01`'s i3-10110U (2C/4T Comet Lake-U) saturates CPU on the chunk-ingest pipeline (SHA-256 hash + dedupe lookup + AES encrypt + NFS write) at ~100–200 MB/s, well below the single 2.5GbE link's 312 MB/s ceiling. Dedupe further shrinks the PBS↔NAS leg once the warm chunk pool is built, so the link-sharing concern is largely first-backup-only. Adding a second NIC parallelizes a stage that isn't saturated, and a USB NIC adds a failure mode in the backup hot path. Authoritative record + the four real levers (local fast datastore, PVE-side parallelism, iSCSI+ZFS escape hatch, hardware-refresh re-eval) live in [`pbs-hosts/CLAUDE.md` § "Network shape"](../../../CLAUDE.md). Re-evaluate after measuring the first backup with `mpstat -P ALL` + `nfsiostat` + `journalctl -u proxmox-backup-proxy`.
 - **`Restart proxmox-backup-proxy` handler was removed.** The original draft defined it but no task notified it. Repo convention (root CLAUDE.md) is to not design for hypothetical future requirements. The `Reload ufw` handler stays as a target for a future hand-written `before.rules` template, which is a plausible near-term need.
-- **`serial: 1` on the play** even though only one PBS host exists today. Forward-looking: when `pbs02` lands at IL, applying both hosts in parallel could race on firewall + NFS-mount + ACL changes if those ever cross-talk. Cheap insurance now; meaningless when host count is 1.
+- **Sync feature (pbs_sync.yml + `pbs_sync_*` vars) removed.** Earlier drafts included scaffolding for a future FL→IL push-sync to a second PBS host (`pbs02`). With no second host on the roadmap, the scaffolding was deferred-via-deletion rather than carried as dead code with self-flagged "verify against PBS 4.x" TODOs. When/if a second host arrives, sync gets re-introduced against running hardware where the CLI flags can actually be tested.
 
 ---
 
@@ -92,17 +87,9 @@ Mirrors `pbs-hosts/CLAUDE.md` § "Things to leave for the operator" — restated
 
 Each deviation has a one-paragraph rationale.
 
-### Removed `--encrypted-only` and `--max-worker-tasks` from `sync-job create`
-
-The CLAUDE.md spec sketched these flags; PBS 4.x doesn't implement either. The original draft would have failed at first sync-job create. Encryption is configured on the destination datastore (out of scope for this role until `pbs02` exists); worker parallelism is implicit in PBS's sync engine. Documented as a comment in `pbs_sync.yml` so future-Brian doesn't try to re-add them.
-
 ### Verify-job ID is positional, not `--id`-prefixed
 
 CLAUDE.md sketched the command as `verify-job create --id verify-{{ ds.name }} --store {{ ds.name }} ...`. Actual PBS 4.x CLI is `verify-job create <ID> --store <STORE> ...`. Wrong-shape draft would have failed on first invocation.
-
-### Sync-remote password passed via stdin, not argv
-
-CLAUDE.md sketched `--password {{ lookup('env', '...') }}` on the command line. That leaks the secret to `/proc/<pid>/cmdline` for the duration of the call. Switched to `--password -` plus `stdin:` keyword on the Ansible `command` module. The validation-precedes-create reorder fell out of the same review pass.
 
 ### `--ignore-verified` as bare flag
 
@@ -154,4 +141,4 @@ Acceptance results from the pre-hardware pass (recorded 2026-05-16):
 
 ## Design vault
 
-The authoritative PBS architecture lives in the project's private Obsidian vault under `[[Proxmox Backup Server — Capabilities and Tiered Storage]]`. Tiering decisions, dedicated-vs-VM rationale, FL → IL sync topology, and the future TLS-from-Root-CA plan all live there.
+The authoritative PBS architecture lives in the project's private Obsidian vault under `[[Proxmox Backup Server — Capabilities and Tiered Storage]]`. Tiering decisions, dedicated-vs-VM rationale, and the future TLS-from-Root-CA plan all live there.

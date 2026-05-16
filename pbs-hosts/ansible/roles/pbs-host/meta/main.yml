@@ -10,9 +10,8 @@ galaxy_info:
     Layer-0 bootstrap for Proxmox Backup Server 4.x hosts (Debian 13 /
     trixie). Configures APT, packages, chrony, /etc/hosts, sysctl
     tuning, NFS mount for the bulk datastore, ufw, datastores, API
-    user + token for PVE ingress, verify/GC schedules, and optional
-    push-sync to a remote PBS. Stops short of PVE-side storage
-    registration.
+    user + token for PVE ingress, and verify/GC schedules. Stops short
+    of PVE-side storage registration.
   license: MIT
   min_ansible_version: "2.15"
   platforms:

@@ -2,9 +2,8 @@
 # pbs-hosts/ansible/inventory.yml.example
 #
 # Copy to inventory.yml (gitignored) and fill in the placeholder values
-# marked with `# TODO`. One PBS host today (`pbs01`, FL primary), one
-# planned (`pbs02`, IL replica — commented out below; uncomment when the
-# IL hardware lands).
+# marked with `# TODO`. One PBS host (`pbs01`) — add more under
+# `hosts:` if/when the lab grows.
 #
 # A `pve_hosts` mirror group is included for /etc/hosts resolution only.
 # The play targets `pbs_hosts`; pve_hosts entries here are for var
@@ -43,7 +42,7 @@ pbs_hosts:
     ansible_python_interpreter: /usr/bin/python3
 
   hosts:
-    # ---- pbs01 (FL primary backup target) ----
+    # ---- pbs01 (primary backup target) ----
     pbs01:
       ansible_host: 192.0.2.20              # replace with real LAN IP
       pbs_lan_ip: "192.0.2.20"              # replace with real LAN IP
@@ -73,53 +72,6 @@ pbs_hosts:
       # pbs_datastores pointing at a pre-existing directory on the
       # NVMe (typically under /var/lib/proxmox-backup/fast/).
       pbs_local_fast_datastore_enabled: false
-
-      # ---- Sync (FL → IL push). Off until pbs02 exists. ----
-      pbs_sync_enabled: false
-
-      # Remotes the role manages. Each one becomes a PBS Remote object.
-      # Used only when pbs_sync_enabled is true.
-      pbs_sync_remotes: []
-      # Example shape (uncomment + populate when pbs02 lands):
-      # pbs_sync_remotes:
-      #   - name: "pbs02-il"
-      #     host: "pbs02.il.lan"             # reachable via Tailscale or direct WG tunnel
-      #     auth_id: "syncpush@pbs!fl-source"
-      #     password_var: "pbs02_il_token"   # operator hydrates from OpenBao at apply time
-
-      # Sync jobs the role manages. Push direction by default — FL is
-      # the source, IL is the destination.
-      pbs_sync_jobs: []
-      # Example shape:
-      # pbs_sync_jobs:
-      #   - id: "bulk-to-il"
-      #     source_datastore: "bulk"
-      #     remote: "pbs02-il"
-      #     remote_datastore: "bulk"
-      #     direction: "push"
-      #     encrypt: true
-      #     worker_threads: 4
-      #     schedule: "daily 03:00"
-
-    # ---- pbs02 (IL replica, future) ----
-    # Uncomment when the IL hardware lands. The same role applies; the
-    # only delta on the IL side is that pbs_sync_enabled stays false
-    # (FL pushes to IL, not the other way around).
-    #
-    # pbs02:
-    #   ansible_host: 198.51.100.20         # IL LAN IP (TODO)
-    #   pbs_lan_ip: "198.51.100.20"
-    #   pbs_datastores:
-    #     - name: "bulk"
-    #       path: "/mnt/pbs-bulk/datastore"
-    #       # Longer retention at IL — this is the offsite copy.
-    #       prune_keep_last: 3
-    #       prune_keep_daily: 14
-    #       prune_keep_weekly: 8
-    #       prune_keep_monthly: 12
-    #       prune_keep_yearly: 3
-    #   pbs_local_fast_datastore_enabled: false
-    #   pbs_sync_enabled: false             # IL receives, doesn't push
 
 # Mirror of the PVE cluster's inventory for /etc/hosts resolution.
 # Keep synchronized with pve-hosts/ansible/inventory.yml — when a PVE
