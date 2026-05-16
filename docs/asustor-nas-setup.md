@@ -26,9 +26,14 @@ vault doc `Projects/Homelab/VM Mobility — 3-Node Cluster on
 - btrfs pool / RAID configuration on the NAS — ADM handles that at
   initial setup; <!-- TODO: record the actual pool layout (RAID level,
   drives, capacity) so a rebuild from scratch has the numbers. -->
-- NAS-side network bond / 10GbE setup — <!-- TODO: AS6706T has a
-  10GbE port; record whether it's bonded with the 2.5GbE ports, what
-  IP it uses, and which port is connected to which LAN switch. -->
+- NAS-side network setup — one 2.5GbE port carries everything (main
+  LAN; `nas_ip` in inventory). The second 2.5GbE port and the 10GbE
+  port are **unallocated** as of 2026-05-16, available for a future
+  dedicated backup link or LAG bond if/when the throughput case
+  materializes. The PBS↔NAS dedicated-network option was evaluated
+  and deferred — rationale lives in
+  [`pbs-hosts/CLAUDE.md` § "Network shape"](../pbs-hosts/CLAUDE.md).
+  No VLAN tagging on the active port.
 
 ## Hardware
 
@@ -181,16 +186,60 @@ on. Go back to step 3, fix it, `exportfs -ra` on the NAS, retry.
 If the mount itself hangs, NFS server isn't running (step 1) or the
 firewall on the NAS is blocking the LAN subnet.
 
-## 5. (Optional, deferred) Additional shares
+## 5. Export for the PBS bulk datastore
+
+A **second** NFS export, dedicated to the Proxmox Backup Server host
+([pbs-hosts/](../pbs-hosts/)). Separate from `proxmox-vms` because the
+two workloads have different IO profiles: PVE VM disks are large
+sequential reads/writes, the PBS chunk store is millions of small
+files with metadata-heavy GC and verify passes. Mixing them on one
+export ACL means one workload's burst can starve the other's cache;
+the NAS-side R/W cache is also tuned per share.
+
+The PBS host mounts this export at `/mnt/pbs-bulk` and creates its
+datastore at `/mnt/pbs-bulk/datastore`. The PVE cluster does NOT
+mount this share — backups flow PVE → PBS API → NFS, not PVE → NFS
+directly.
+
+Repeat steps 2 + 3 with:
+
+| Field | Value |
+|---|---|
+| **Volume** | `volume1` (same as `proxmox-vms` — the underlying btrfs pool with R/W cache) |
+| **Folder name** | `proxmox-backups` (matches `nas_pbs_nfs_export` in [pbs-hosts/ansible/inventory.yml.example](../pbs-hosts/ansible/inventory.yml.example) — change both if you pick a different name) |
+| **NFS allowed host** | the PBS host's single LAN IP (NOT the whole `pbs_lan_subnet` — tighter ACL because there's exactly one consumer); use `/32` form, e.g. `192.0.2.20/32` |
+| **Privilege** | Read/Write |
+| **Squash** | **No root squash** — PBS's chunk store is owned by the `backup` daemon user (uid 34 on PBS 4.x), and the role's `pbs_datastore.yml` chowns the datastore directory to `backup:backup` as part of creation. With root-squash on, the chown gets remapped and fails. |
+| **Sync mode** | **Sync** — same reasoning as the `proxmox-vms` export: `async` risks corrupting the chunk store on NAS power loss. PBS recomputes hashes during verify, so corruption would surface, but it'd cost a full GC + re-backup to recover. |
+| **Insecure ports** | Enabled |
+| **Subtree check** | Disabled |
+
+After **Apply**, verify from the workstation:
+
+```bash
+showmount -e <nas_ip> | grep proxmox-backups
+# Expected: /volume1/proxmox-backups  <pbs01_ip>/32
+
+# Mount test (only run from the PBS host's LAN IP, or temporarily widen
+# the ACL to your workstation IP for the test):
+sudo mkdir -p /mnt/pbs-test
+sudo mount -t nfs4 -o vers=4.2 <nas_ip>:/volume1/proxmox-backups /mnt/pbs-test
+sudo touch /mnt/pbs-test/probe && sudo ls -la /mnt/pbs-test/probe   # owner root:root
+sudo rm /mnt/pbs-test/probe
+sudo umount /mnt/pbs-test
+sudo rmdir /mnt/pbs-test
+```
+
+If the chown step later fails during `just pbs-hosts`, root-squash is
+on. Go back here, fix it, `exportfs -ra` on the NAS, retry.
+
+## 6. (Optional, deferred) Additional shares
 
 Likely future shares; not required for the cluster's current scope:
 
 - **`proxmox-iso`** — `/volume1/proxmox-iso`, mounted on all nodes,
   registered in Proxmox as `nas-iso` content type `iso,vztmpl`. Lets
   the per-node ISO libraries (currently `local`) go away.
-- **`proxmox-backup`** — `/volume1/proxmox-backup`, registered with
-  content type `backup`. Pairs with a `vzdump` schedule. Cluster-wide
-  backup target.
 - **`obsidian-vault-mirror`** — read-only mirror of the workstation's
   Obsidian vault; not a homelab-cluster concern.
 
@@ -198,6 +247,13 @@ Each one is repeat the steps 2 + 3 above with a different folder
 name. Add the corresponding `nas_*_export` fields to inventory and a
 follow-on `pvesm add nfs` invocation. Don't pre-create empty shares
 "in case I need them later" — wait for a concrete consumer.
+
+> **Note on legacy `proxmox-backup` share:** earlier drafts of this
+> doc listed a `proxmox-backup` share registered as PVE storage with
+> content type `backup` (the `vzdump`-to-NFS path). That's a different
+> mechanism from the PBS host above and is no longer the lab's
+> backup-of-record. `proxmox-backups` (the export in § 5) is the
+> active design.
 
 ## Related docs
 

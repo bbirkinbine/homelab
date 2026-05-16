@@ -1,0 +1,32 @@
+---
+# pbs-hosts/ansible/site.yml
+#
+# Top-level play for the pbs-host role. Runs the role against all hosts
+# in the `pbs_hosts` inventory group. The role is layer 0: it brings a
+# freshly-installed PBS 4.x host to a known-good baseline (repos,
+# packages, time sync, /etc/hosts, NFS mount, ufw, datastores, API
+# tokens, schedules). It deliberately does NOT register the PBS server
+# as a backup target on the PVE cluster — that's a manual step against
+# /etc/pve/storage.cfg from a PVE node, owned by the operator. See
+# CLAUDE.md in this folder for the full rationale.
+#
+# Usage from repo root:
+#   just pbs-hosts                         # full apply across the group
+#   just pbs-hosts-check                   # --check --diff (dry run)
+# Or directly:
+#   cd pbs-hosts/ansible
+#   ansible-playbook -i inventory.yml site.yml
+#
+# Single-host bring-up (e.g. when pbs02 first arrives at IL):
+#   ansible-playbook -i inventory.yml site.yml --limit pbs02
+
+- name: Bootstrap Proxmox Backup Server hosts (layer 0)
+  hosts: pbs_hosts
+  become: true
+  gather_facts: true
+  # serial: 1 forces one host at a time. Important for ops sanity once
+  # there's more than one PBS host (FL + IL) and the play touches the
+  # firewall or NFS mount.
+  serial: 1
+  roles:
+    - role: pbs-host

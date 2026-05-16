@@ -1,0 +1,14 @@
+---
+# Render /etc/hosts from inventory. Lists the PBS host(s), all PVE
+# cluster members (from the mirror `pve_hosts` group — see
+# inventory.yml.example for why), and the NAS. This lets PBS resolve
+# `pve12t` / `pve13m` / `pve13t` for sync-source operations and
+# logging without leaning on DNS.
+
+- name: Template /etc/hosts
+  ansible.builtin.template:
+    src: etc/hosts.j2
+    dest: /etc/hosts
+    owner: root
+    group: root
+    mode: "0644"

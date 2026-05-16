@@ -1,0 +1,25 @@
+# /etc/hosts — managed by Ansible (pbs-host role).
+# Resolves the PBS host(s), all PVE cluster members (so sync sources
+# and operator scripts don't need DNS), and the NAS. The PVE entries
+# come from the mirror `pve_hosts` inventory group — see the comment
+# in inventory.yml.example for why we mirror instead of importing.
+
+127.0.0.1   localhost
+::1         localhost ip6-localhost ip6-loopback
+
+# PBS host(s)
+{% for h in groups['pbs_hosts'] | sort %}
+{{ hostvars[h].pbs_lan_ip }}   {{ h }}.local {{ h }}
+{% endfor %}
+
+# PVE cluster members (resolution only — this play does NOT target them)
+{% if groups['pve_hosts'] is defined %}
+{% for h in groups['pve_hosts'] | sort %}
+{{ hostvars[h].pve_lan_ip }}   {{ h }}.local {{ h }}
+{% endfor %}
+{% endif %}
+
+{% if nas_ip is defined and nas_hostname is defined %}
+# NAS (Asustor AS6706T — NFS source for the PBS bulk datastore)
+{{ nas_ip }}   {{ nas_hostname }}
+{% endif %}

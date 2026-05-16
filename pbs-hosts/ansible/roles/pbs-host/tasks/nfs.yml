@@ -1,0 +1,41 @@
+---
+# Mount the Asustor NFS export carrying the bulk datastore at
+# /mnt/pbs-bulk with NFSv4.2. The task manages /etc/fstab and the live
+# mount; it does NOT create the PBS datastore inside the mount —
+# that's tasks/pbs_datastore.yml's job, running after this one.
+#
+# nfs-common is in pbs_host_packages so it's installed by the time
+# this runs.
+#
+# This export is intentionally separate from the `proxmox-vms` export
+# used by pve-hosts/. PBS's chunk-store IO profile (millions of small
+# files, metadata-heavy) is different enough from PVE's VM-disk profile
+# (large sequential reads/writes) that mixing them on one export ACL
+# would be lazy. Operator-side: confirm the new export was created on
+# the Asustor with no_root_squash + sync + restricted to the PBS host's
+# LAN IP. See docs/asustor-nas-setup.md.
+#
+# Idempotency: ansible.posix.mount reports `changed` only when the
+# fstab line differs OR the current mount state differs from `state`.
+
+- name: Ensure PBS bulk NFS mount point exists
+  ansible.builtin.file:
+    path: "{{ nas_pbs_mount_point }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Mount the Asustor PBS NFS export and persist in fstab
+  ansible.posix.mount:
+    path: "{{ nas_pbs_mount_point }}"
+    src: "{{ nas_ip }}:{{ nas_pbs_nfs_export }}"
+    fstype: nfs4
+    opts: "{{ pbs_host_nfs_options }}"
+    state: mounted
+
+# PBS datastore lives at <mount_point>/datastore (subdir, not the
+# mount root) so the datastore's chunks/ and .chunks/ trees don't
+# collide with anything else the operator might drop into the export.
+# tasks/pbs_datastore.yml creates the subdir before calling
+# `proxmox-backup-manager datastore create` against it.

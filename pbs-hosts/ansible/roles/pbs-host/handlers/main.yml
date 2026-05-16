@@ -1,0 +1,35 @@
+---
+# Handlers run once per play after all notifying tasks complete. Keep
+# them minimal and side-effect-explicit — handlers that surprise an
+# operator are the worst kind.
+#
+# Note: there is no `Reload networking` handler. PBS network config is
+# set at install time and the role doesn't manage /etc/network/interfaces.
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Apt update
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 0
+
+- name: Restart chrony
+  ansible.builtin.systemd:
+    name: chrony
+    state: restarted
+
+# Re-applies every sysctl drop-in. Used by tuning.yml.
+- name: Apply sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: false
+
+# Reload ufw without dropping established connections. Currently
+# unused — community.general.ufw applies rule changes immediately, so
+# no rule task in firewall.yml needs to notify this. Kept defined so a
+# future hand-written /etc/ufw/before.rules template (which doesn't
+# apply on its own) has a notify target.
+- name: Reload ufw
+  community.general.ufw:
+    state: reloaded

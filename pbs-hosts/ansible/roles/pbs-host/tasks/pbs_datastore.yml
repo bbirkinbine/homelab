@@ -1,0 +1,79 @@
+---
+# Create + maintain PBS datastores listed in `pbs_datastores`. Uses the
+# `proxmox-backup-manager` CLI (one binary, talks to the running PBS
+# proxy over a local Unix socket — no API auth plumbing needed from
+# inside the host).
+#
+# Per datastore:
+#   1. Ensure the on-disk directory exists at `<path>`.
+#   2. Check if PBS already knows about a datastore by that name.
+#   3. If not, create it.
+#   4. Apply per-datastore prune policy (idempotent update).
+#
+# Idempotency comes from the existence check before create + the fact
+# that `datastore update` is a no-op when values match.
+#
+# References:
+#   - `proxmox-backup-manager help datastore`
+#   - https://pbs.proxmox.com/docs/managing-datastores.html
+
+- name: Ensure datastore filesystem directories exist
+  ansible.builtin.file:
+    path: "{{ ds.path }}"
+    state: directory
+    owner: backup
+    group: backup
+    mode: "0755"
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    loop_var: ds
+    label: "{{ ds.name }} -> {{ ds.path }}"
+
+# Snapshot the current set of datastores. Used by the next task to
+# decide create-vs-skip without parsing CLI free text — JSON output
+# is stable across PBS versions.
+- name: Query existing PBS datastores
+  ansible.builtin.command: "{{ pbs_mgr_bin }} datastore list --output-format json"
+  register: pbs_existing_datastores
+  changed_when: false
+
+- name: Parse existing datastore names
+  ansible.builtin.set_fact:
+    pbs_existing_datastore_names: >-
+      {{ (pbs_existing_datastores.stdout | from_json)
+         | map(attribute='name') | list }}
+
+- name: Create missing PBS datastores
+  ansible.builtin.command: >-
+    {{ pbs_mgr_bin }} datastore create {{ ds.name }} {{ ds.path }}
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    loop_var: ds
+    label: "{{ ds.name }}"
+  when: ds.name not in pbs_existing_datastore_names
+  register: pbs_datastore_create
+  changed_when: pbs_datastore_create.rc == 0
+
+# Apply prune retention policy to each datastore. The update call is
+# idempotent: PBS no-ops when the requested values match the current
+# state. We do this every run to keep the configured policy enforced
+# even if someone edited it via the UI.
+- name: Apply prune policy per datastore
+  ansible.builtin.command: >-
+    {{ pbs_mgr_bin }} datastore update {{ ds.name }}
+    --keep-last {{ ds.prune_keep_last | default(pbs_default_prune_keep_last) }}
+    --keep-daily {{ ds.prune_keep_daily | default(pbs_default_prune_keep_daily) }}
+    --keep-weekly {{ ds.prune_keep_weekly | default(pbs_default_prune_keep_weekly) }}
+    --keep-monthly {{ ds.prune_keep_monthly | default(pbs_default_prune_keep_monthly) }}
+    --keep-yearly {{ ds.prune_keep_yearly | default(pbs_default_prune_keep_yearly) }}
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    loop_var: ds
+    label: "{{ ds.name }}"
+  # `datastore update` writes the same bytes back when nothing changed.
+  # We mark this not-changed always; the audit trail lives in the
+  # config file's mtime if Brian ever needs to diff.
+  # TODO (vs-code-claude): if PBS 4.2 introduces an --output-format
+  # json on `datastore update` that surfaces a diff, switch to
+  # parsing that and set changed_when based on real change.
+  changed_when: false

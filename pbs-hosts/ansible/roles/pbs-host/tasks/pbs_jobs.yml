@@ -1,0 +1,87 @@
+---
+# Schedule the per-datastore verify and GC jobs. Prune is configured
+# as datastore policy in tasks/pbs_datastore.yml (PBS runs it on a
+# default cadence tied to the datastore); separate prune *jobs* are
+# only needed for namespace-scoped retention, which we don't use yet.
+#
+# Verify jobs: walk the chunk store of a datastore, re-read chunks,
+# compare against stored hashes. Catches bitrot. Schedule weekly,
+# skipping snapshots whose last successful verify was within
+# `pbs_verify_outdated_after_days` days (default 7).
+#
+# GC: phase-1 enumerates referenced chunks, phase-2 deletes
+# unreferenced. Heavy on metadata IO — schedule for off-peak. In PBS
+# 4.x the GC schedule lives on the datastore object itself (set via
+# `datastore update --gc-schedule`), not as a separate job type.
+#
+# CLI surface verified against PBS 4.x upstream `proxmox-backup-manager`
+# man pages. If a future PBS major version changes flag names, the
+# acceptance-gate "second run reports changed=0" step in
+# pbs-hosts/CLAUDE.md will surface the drift on the next apply.
+#
+# Schedule strings use systemd `OnCalendar` syntax. PBS accepts the
+# shortcut forms (`sat 02:00`, `daily`, `weekly`) as well as the full
+# canonical form (`Sat *-*-* 02:00:00`). We keep the shortcut.
+
+# ---- Verify jobs ----------------------------------------------------
+
+- name: Query existing PBS verify jobs
+  ansible.builtin.command: "{{ pbs_mgr_bin }} verify-job list --output-format json"
+  register: pbs_existing_verify_jobs
+  changed_when: false
+
+- name: Parse existing verify-job IDs
+  ansible.builtin.set_fact:
+    pbs_existing_verify_job_ids: >-
+      {{ (pbs_existing_verify_jobs.stdout | from_json) | map(attribute='id') | list }}
+
+# `verify-job create` takes the ID as a positional argument (not --id).
+# `--ignore-verified` is a boolean flag; PBS treats its presence as
+# true and its absence as false. We always pass it because the default
+# verify run otherwise re-checks every snapshot every time and that's
+# wasteful at scale.
+- name: Create missing verify jobs (one per datastore)
+  ansible.builtin.command: >-
+    {{ pbs_mgr_bin }} verify-job create verify-{{ ds.name }}
+    --store {{ ds.name }}
+    --schedule "{{ pbs_verify_schedule }}"
+    --outdated-after {{ pbs_verify_outdated_after_days }}
+    --ignore-verified
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    loop_var: ds
+    label: "verify-{{ ds.name }}"
+  when: ('verify-' + ds.name) not in pbs_existing_verify_job_ids
+  register: pbs_verify_job_create
+  changed_when: pbs_verify_job_create.rc == 0
+
+# Re-apply the schedule on every run. `verify-job update` is idempotent
+# in PBS (server diffs config and no-ops when nothing changed), so this
+# both bootstraps the new job's schedule after create and keeps an
+# existing job's schedule from drifting if someone edited it in the UI.
+# `changed_when: false` because we can't cheaply detect server-side
+# diffs; the audit trail lives in the daemon log if a real change fires.
+- name: Apply schedule to verify jobs
+  ansible.builtin.command: >-
+    {{ pbs_mgr_bin }} verify-job update verify-{{ ds.name }}
+    --schedule "{{ pbs_verify_schedule }}"
+    --outdated-after {{ pbs_verify_outdated_after_days }}
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    loop_var: ds
+    label: "verify-{{ ds.name }}"
+  changed_when: false
+
+# ---- GC schedules ---------------------------------------------------
+# Set on the datastore object itself via `datastore update`. PBS runs
+# GC on the schedule automatically once set; no separate job object.
+
+- name: Set GC schedule per datastore
+  ansible.builtin.command: >-
+    {{ pbs_mgr_bin }} datastore update {{ ds.name }}
+    --gc-schedule "{{ pbs_gc_schedule }}"
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    loop_var: ds
+    label: "{{ ds.name }}"
+  changed_when: false

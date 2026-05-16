@@ -1,0 +1,115 @@
+---
+# Create the PVE-ingress service user and API token. The PVE cluster
+# authenticates to PBS using this token when pushing backups.
+#
+# Idempotency model:
+#   - User: list -> diff -> create if missing. update is for password
+#     changes which we don't manage from here.
+#   - Token: list -> diff -> create if missing. PBS prints the secret
+#     ONCE at create time and never again. We capture it via stdout
+#     and print to the operator with `no_log: false` so they can copy
+#     to KeePassXC. On re-run, the existence check skips creation and
+#     the secret is not surfaced (correctly — there is no way to
+#     retrieve it after the fact).
+#   - ACL: every run, idempotent — PBS does diff-and-merge on
+#     `acl update`, so re-applying is safe.
+#
+# CLAUDE.md "What this role MUST NOT do" forbids persisting the token
+# secret to disk. The print-once flow is the documented path; operator
+# saves to KeePassXC under: `pbs01 / {{ pbs_pve_ingress_user }}!{{
+# pbs_pve_ingress_token_name }}`.
+
+- name: Query existing PBS users
+  ansible.builtin.command: "{{ pbs_mgr_bin }} user list --output-format json"
+  register: pbs_existing_users
+  changed_when: false
+
+- name: Parse existing user IDs
+  ansible.builtin.set_fact:
+    pbs_existing_user_ids: >-
+      {{ (pbs_existing_users.stdout | from_json) | map(attribute='userid') | list }}
+
+- name: Create PVE-ingress user if missing
+  ansible.builtin.command: >-
+    {{ pbs_mgr_bin }} user create {{ pbs_pve_ingress_user }}
+    --comment "Service user for PVE cluster backup ingress (managed by pbs-host role)"
+  when: pbs_pve_ingress_user not in pbs_existing_user_ids
+  register: pbs_user_create
+  changed_when: pbs_user_create.rc == 0
+
+# Token enumeration. JSON output of `user list-tokens` gives token names
+# without the secret. The token full ID is `<user>!<tokenname>`.
+- name: Query existing tokens for the PVE-ingress user
+  ansible.builtin.command: >-
+    {{ pbs_mgr_bin }} user list-tokens {{ pbs_pve_ingress_user }} --output-format json
+  register: pbs_existing_tokens
+  changed_when: false
+
+- name: Parse existing token names
+  ansible.builtin.set_fact:
+    pbs_existing_token_names: >-
+      {{ (pbs_existing_tokens.stdout | from_json)
+         | map(attribute='tokenid')
+         | map('regex_replace', '^.+!', '')
+         | list }}
+
+- name: Create PVE-ingress API token if missing
+  ansible.builtin.command: >-
+    {{ pbs_mgr_bin }} user generate-token {{ pbs_pve_ingress_user }}
+    {{ pbs_pve_ingress_token_name }}
+    --output-format json
+  when: pbs_pve_ingress_token_name not in pbs_existing_token_names
+  register: pbs_token_create
+  changed_when: pbs_token_create.rc == 0
+  # The secret in the JSON output is sensitive; suppress automatic
+  # logging. We surface it explicitly in the next task so the operator
+  # can copy it once.
+  no_log: true
+
+# CRITICAL: this is the only chance to read the token secret. PBS does
+# not store the secret in cleartext after creation. Operator must copy
+# to KeePassXC NOW. If the value is missed, regenerate the token via
+# `proxmox-backup-manager user delete-token ... && ... generate-token ...`
+# and rerun the play.
+# Intentionally inline (not a handler). The operator must see the
+# cleartext secret IMMEDIATELY after creation so they can paste it into
+# KeePassXC; handlers fire at end-of-play, by which point a scrolling
+# tail or a terminal multiplexer scroll-back could hide the message.
+# Inline + `when: ... is changed` is the right shape.
+- name: Surface freshly-created token secret to operator  # noqa: no-handler
+  ansible.builtin.debug:
+    msg: |-
+      ============================================================
+      NEW PBS API TOKEN CREATED — SAVE NOW
+      ============================================================
+      User:    {{ pbs_pve_ingress_user }}
+      Token:   {{ pbs_pve_ingress_token_name }}
+      Full ID: {{ pbs_pve_ingress_user }}!{{ pbs_pve_ingress_token_name }}
+      Secret:  {{ (pbs_token_create.stdout | from_json).value }}
+
+      Copy to KeePassXC under
+      `{{ inventory_hostname }} / {{ pbs_pve_ingress_user }}!{{ pbs_pve_ingress_token_name }}`.
+      This is the only chance — PBS does not store the cleartext
+      secret. If missed, delete + regenerate the token and re-run.
+      ============================================================
+  when: pbs_token_create is changed
+
+# ACL: grant the token (and only the token, not the parent user) the
+# DatastoreBackup role on each datastore's namespace. Granting at the
+# token level — not the user level — keeps the user from being able to
+# do anything the token can't, and the token can be rotated without
+# touching the user.
+- name: Grant DatastoreBackup role to the PVE-ingress token on each datastore
+  ansible.builtin.command: >-
+    {{ pbs_mgr_bin }} acl update
+    /datastore/{{ ds.name }}
+    {{ pbs_pve_ingress_role }}
+    --auth-id {{ pbs_pve_ingress_user }}!{{ pbs_pve_ingress_token_name }}
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    loop_var: ds
+    label: "{{ ds.name }}"
+  # `acl update` is idempotent server-side; we always run it but don't
+  # report changed unless we can detect drift. Setting changed_when:
+  # false keeps re-runs clean.
+  changed_when: false

@@ -1,0 +1,10 @@
+---
+# Galaxy collections the pbs-host role pulls. Install with:
+#   ansible-galaxy collection install -r requirements.yml
+# Or (once the recipe lands):
+#   just pbs-hosts-deps
+collections:
+  - name: community.general
+    version: ">=8.0.0"
+  - name: ansible.posix
+    version: ">=1.5.0"

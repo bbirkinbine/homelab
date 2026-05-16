@@ -8,10 +8,11 @@
 
 Read top-to-bottom if you're standing up the homelab from scratch (or rebuilding the whole cluster). Each step points at the authoritative doc — this file is an **index**, not a runbook duplicate. Skip ahead if you're only doing a partial rebuild (single-node reinstall, inventory tweak, etc.); the "Partial rebuilds" section near the bottom calls out the common shortcuts.
 
-The full sequence is four phases:
+The full sequence is five phases:
 
 - **Phase 1 — Substrate** (per-node, before clustering): NAS, BIOS, install, role baseline.
 - **Phase 2 — Cluster bring-up**: `pvecm`, cluster-wide policy + storage.
+- **Phase 2.5 — Backup target**: PBS host install + baseline + PVE-side storage registration. Sequenced before IaC enablement so VMs created in Phase 4 have a backup target from day one.
 - **Phase 3 — IaC enablement**: API users, workstation, base templates.
 - **Phase 4 — Per-role deploys**: VMs, eGPU passthrough when needed.
 
@@ -42,6 +43,24 @@ Per-node prep. Steps 1 + 2 can run in parallel (NAS-side prep doesn't depend on 
 **This entire phase has a dedicated runbook: [docs/cluster-bring-up.md](cluster-bring-up.md).** Don't try to execute Phase 2 from this index — drop into the runbook and follow it end-to-end. It covers the prerequisite checks, `pvecm create` on the creator, the two `pvecm add` invocations on the joiners, corosync ring1 over the TB fabric, migration-network setting, cluster-firewall enablement, `snippets` content type on `local`, NFS storage registration as `nas-vms`, verification at each step, and recovery from common failures.
 
 7. **Cluster bring-up + post-formation storage/policy** — follow [docs/cluster-bring-up.md](cluster-bring-up.md). Quorum-aware; never automated. Architecture rationale in the vault: `Projects/Homelab/VM Mobility — 3-Node Cluster on 2.5GbE.md`.
+
+---
+
+## Phase 2.5 — Backup target (PBS)
+
+Stand up the Proxmox Backup Server host between cluster bring-up and IaC enablement so the first VMs in Phase 4 can be backed up immediately. PBS lives on dedicated hardware (not as a VM on the cluster) per the circular-dependency reasoning in the vault doc `Projects/Homelab/Proxmox Backup Server — Capabilities and Tiered Storage.md`.
+
+7a. **NAS-side PBS export ready** — [docs/asustor-nas-setup.md § Export for the PBS bulk datastore](asustor-nas-setup.md#export-for-the-pbs-bulk-datastore). Create the second NFS export (`/volume1/proxmox-backups`), distinct from `proxmox-vms`, with `no_root_squash` + `sync` restricted to the PBS host's `/32`. Can run in parallel with step 7b.
+
+7b. **Bare-metal PBS 4.x install on `pbs01`** — [docs/pbs-install.md](pbs-install.md). USB media, BIOS prereqs (UEFI, Secure Boot off), installer click-through, per-host root password from KeePassXC, hostname `pbs01.local`. Single 2.5GbE port; no TB. Outputs one PBS 4.x host reachable on the LAN.
+
+7c. **Fill in PBS `inventory.yml`** — [pbs-hosts/ansible/inventory.yml.example](../pbs-hosts/ansible/inventory.yml.example) → `inventory.yml`. Replace TODOs: LAN IP, NAS IP, your SSH pubkey, datastore name. Keep the `pve_hosts` mirror block synchronized with the PVE-side inventory's LAN IPs.
+
+7d. **Apply the `pbs-host` baseline** — [pbs-hosts/README.md](../pbs-hosts/README.md). From the workstation: `just pbs-hosts-deps` (collections, one-time), `just pbs-hosts-check` (dry-run), `just pbs-hosts` (apply). Configures APT, packages, chrony, NFS mount, ufw, datastore creation, API token for PVE ingress, verify + GC schedules.
+
+7e. **Capture the API token secret** printed by step 7d's `pbs_users.yml` task into KeePassXC under `pbs01 / pveingress@pbs!cluster`. This is the only chance — PBS never re-emits the cleartext secret.
+
+7f. **Register PBS as a PVE storage target** — from any PVE cluster member, run `pvesm add pbs <storage-name> --server <pbs01_ip> --datastore bulk --username pveingress@pbs --password <token-secret> --fingerprint <pbs-cert-fingerprint>`. Cluster-replicated via pmxcfs; scope to one node. Detailed step in [docs/cluster-bring-up.md](cluster-bring-up.md) (post-Phase-2 follow-up).
 
 ---
 
@@ -125,6 +144,7 @@ Neither of these blocks any role. Captured here so the manual-step inventory is 
 Common shortcuts when you don't need the whole sequence:
 
 - **Single-node reinstall** (DR or hardware swap): repeat steps 2, 4 (just that host's entries), 5, 6 against the one node. Then `pvecm add` to rejoin per `docs/cluster-bring-up.md`. Don't re-run `pvecm create`. Re-run step 11 (and step 12 if you use Windows roles) against the rebuilt node so its local `local-lvm` regains the 9100/9101 templates at the cluster-standard VMIDs.
+- **PBS host reinstall** (DR or hardware swap): repeat steps 7a-7d for the rebuilt host. The API token from 7e is *not* recoverable — delete the stale token on the PVE side, regenerate via the role on first apply, and re-paste into KeePassXC. The on-NFS chunk store survives the OS reinstall; `proxmox-backup-manager datastore create` is idempotent and will re-attach to existing on-disk content.
 - **Inventory change only** (new SSH key, added DNS entry, NAS-IP rotation): re-run step 5. The role is idempotent on healthy nodes.
 - **NAS export reconfigured** (path change, ACL tweak): re-run step 1, then update `inventory.yml`'s `nas_*` vars, re-run step 5. If the storage path changed, also update Proxmox's NFS storage def (`docs/cluster-bring-up.md` Step 8).
 - **New role on existing cluster**: skip Phase 1-2. Start at step 14.

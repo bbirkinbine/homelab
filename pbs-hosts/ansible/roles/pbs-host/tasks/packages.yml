@@ -1,0 +1,12 @@
+---
+# Install the baseline operator package set defined in
+# defaults/main.yml:pbs_host_packages. state=present (not latest) — see
+# CLAUDE.md "What this role MUST NOT do" on apt upgrade. Override the
+# package list via inventory if a host has different needs (rare).
+
+- name: Install baseline packages
+  ansible.builtin.apt:
+    name: "{{ pbs_host_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600

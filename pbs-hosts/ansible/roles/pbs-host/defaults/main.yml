@@ -1,0 +1,93 @@
+---
+# Defaults for the pbs-host role. Override anything here in inventory
+# (group_vars / host_vars / inline `vars:` blocks). Inventory wins; this
+# file is the fallback so a fresh `inventory.yml` doesn't need to list
+# every knob.
+#
+# See pbs-hosts/CLAUDE.md for the role's full intent and the vault doc
+# [[Proxmox Backup Server — Capabilities and Tiered Storage]] for the
+# authoritative architecture (datastore tiering, FL → IL sync topology).
+
+# ----- packages -------------------------------------------------------
+# Baseline package set installed by tasks/packages.yml. Aim small: only
+# things useful on every PBS host. state: present, not latest — upgrades
+# are a separate operator decision (see "What this role MUST NOT do" in
+# CLAUDE.md).
+pbs_host_packages:
+  - vim
+  - htop
+  - iperf3             # used for ad-hoc throughput tests against the NAS
+  - ethtool
+  - chrony             # NTP, replaces systemd-timesyncd (see tasks/time.yml)
+  - tmux
+  - curl
+  - jq                 # JSON parsing in pbs_datastore.yml / pbs_users.yml CLI loops
+  - dnsutils
+  - tcpdump
+  - pciutils
+  - usbutils
+  - ufw                # host firewall — PBS does not ship pve-firewall
+  - nfs-common         # NFS client for the bulk datastore mount
+  - at                 # safety net for risky changes over SSH (see pve-host parallel)
+
+# ----- apt repos ------------------------------------------------------
+# Where the .sources file lands. trixie + pbs-no-subscription, deb822
+# format. See templates/etc/apt/sources.list.d/pbs-no-subscription.sources.j2.
+pbs_host_sources_file: /etc/apt/sources.list.d/pbs-no-subscription.sources
+
+# Legacy enterprise repo paths dropped by the PBS installer (one of
+# these is present depending on installer vintage; tasks/repo.yml
+# removes both).
+pbs_host_enterprise_list: /etc/apt/sources.list.d/pbs-enterprise.list
+pbs_host_enterprise_sources: /etc/apt/sources.list.d/pbs-enterprise.sources
+
+# ----- NFS ------------------------------------------------------------
+# Mount options for the Asustor NFS share carrying the bulk datastore.
+# vers=4.2 picks up file-locking + delegations. _netdev keeps the mount
+# from blocking boot if the NAS is offline. noatime cuts spurious
+# writebacks during chunk reads. Large rsize/wsize match PVE's mount.
+pbs_host_nfs_options: "vers=4.2,_netdev,noatime,rsize=1048576,wsize=1048576"
+
+# ----- firewall -------------------------------------------------------
+# Whether to enable ufw at the end of tasks/firewall.yml. Default on.
+# Set to false during initial bring-up if you want to validate
+# connectivity first without firewall confusion.
+pbs_host_firewall_enabled: true
+
+# Allowed inbound from the LAN subnet (besides ICMP). The PBS web UI
+# and API both listen on 8007.
+pbs_host_firewall_allowed_tcp_ports:
+  - 22                 # SSH
+  - 8007               # PBS web UI + API
+
+# ----- datastores -----------------------------------------------------
+# Per-host pbs_datastores in inventory is the source of truth. These
+# defaults apply when inventory doesn't override.
+pbs_default_prune_keep_last: 3
+pbs_default_prune_keep_daily: 7
+pbs_default_prune_keep_weekly: 4
+pbs_default_prune_keep_monthly: 6
+pbs_default_prune_keep_yearly: 1
+
+# Default schedules for verify + GC jobs created by tasks/pbs_jobs.yml.
+# PBS uses systemd-calendar-event syntax for schedules.
+pbs_verify_schedule: "sat 02:00"
+pbs_gc_schedule: "sun 02:00"
+# Skip re-verifying snapshots whose last successful verify was within
+# this many days. Reduces unnecessary IO on healthy datastores.
+pbs_verify_outdated_after_days: 7
+
+# ----- sync -----------------------------------------------------------
+# Default off. tasks/pbs_sync.yml wraps everything in this gate.
+pbs_sync_enabled: false
+pbs_sync_remotes: []
+pbs_sync_jobs: []
+
+# API user for the PVE cluster to authenticate as when pushing backups.
+# Service identity, not a human. The role creates this user and a token
+# under it on first apply.
+pbs_pve_ingress_user: "pveingress@pbs"
+pbs_pve_ingress_token_name: "cluster"
+# Role granted on each datastore namespace. DatastoreBackup is the
+# narrowest role that allows writing backups; tighter than Admin.
+pbs_pve_ingress_role: "DatastoreBackup"
