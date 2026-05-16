@@ -148,7 +148,7 @@ Acceptance results from the pre-hardware pass (recorded 2026-05-16):
   - `community.general.ufw` does not accept `proto: icmp` (module enum is AH/ANY/ESP/IPv6/TCP/UDP/GRE/IGMP/VRRP). Debian's stock `/etc/ufw/before.rules` already accepts ICMP echo-request on INPUT before the user-rule chain, so the explicit rule was removed with a comment explaining the path forward (templated `before.rules`) if LAN-scoped restriction is ever needed.
   - `no-handler` lint on the "Surface freshly-created token secret to operator" debug task. Annotated `# noqa: no-handler` with a comment explaining that the operator must see the cleartext secret inline — handlers fire at end-of-play, which could hide the message in scroll-back.
 - **Gate 3 — template render dry-run:** deferred. Requires either a reachable PBS host or a molecule scenario; running it now against `--connection=local` produces a noisy log of "host is not localhost" errors that don't validate template logic.
-- **Gate 4 — first-apply + second-apply idempotency:** fires when `pbs01` arrives 2026-05-18.
+- **Gate 4 — first-apply + second-apply idempotency:** fires when `pbs01` is online and the role can be applied against real hardware.
 
 ---
 

@@ -188,9 +188,8 @@ firewall on the NAS is blocking the LAN subnet.
 
 ## 5. Export for the PBS bulk datastore
 
-PBS lives on dedicated hardware (`pbs01`, arriving 2026-05-18) and
-needs its **own** NFS export — separate from the `proxmox-vms` share
-above. The two workloads have different IO profiles: PVE VM disks
+PBS lives on dedicated hardware (`pbs01`) and needs its **own** NFS
+export — separate from the `proxmox-vms` share above. The two workloads have different IO profiles: PVE VM disks
 are large sequential reads/writes; the PBS chunk store is millions
 of small files (deduplicated chunks under `.chunks/0000/` …
 `.chunks/ffff/`) with metadata-heavy GC and verify passes. Mixing

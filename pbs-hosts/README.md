@@ -118,7 +118,7 @@ pbs-hosts/
 
 | Host | Hardware | Role | Site |
 |---|---|---|---|
-| `pbs01` | GMKtec G3 Pro Mini PC — Intel Core i3-10110U, 16 GB DDR4, 512 GB NVMe, 2.5GbE. Arriving 2026-05-18. | Primary backup target for the FL cluster | FL |
+| `pbs01` | GMKtec G3 Pro Mini PC — Intel Core i3-10110U, 16 GB DDR4, 512 GB NVMe, 2.5GbE | Primary backup target for the FL cluster | FL |
 | `pbs02` (future) | TBD — same class (small fanned mini-PC, ≥16 GB RAM, NVMe, 2.5GbE) | Push-sync target from `pbs01`; offsite copy | IL |
 
 Hardware selection rationale lives in the vault doc `[[Proxmox Backup Server — Capabilities and Tiered Storage]]` § "PBS host hardware".

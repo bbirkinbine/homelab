@@ -35,7 +35,7 @@ One PBS host today (FL primary), one planned (IL replica). Both are dedicated x8
 
 | Host | Hardware shape | Site | Role |
 |---|---|---|---|
-| `pbs01` | GMKtec G3 Pro Mini PC — Intel Core i3-10110U (2C/4T, Comet Lake-U), 16 GB DDR4, 512 GB NVMe, 1× 2.5GbE. Arriving 2026-05-18. | FL | Primary backup target. Receives PVE backups. Pushes encrypted snapshots to `pbs02` once IL exists. |
+| `pbs01` | GMKtec G3 Pro Mini PC — Intel Core i3-10110U (2C/4T, Comet Lake-U), 16 GB DDR4, 512 GB NVMe, 1× 2.5GbE | FL | Primary backup target. Receives PVE backups. Pushes encrypted snapshots to `pbs02` once IL exists. |
 | `pbs02` (planned) | TBD — same class (small fanned mini-PC, ≥16 GB RAM, NVMe, 2.5GbE). Doesn't have to match `pbs01` exactly. | IL | Sync replica from `pbs01`. Cold tier — restores are rare; existence is the offsite-copy story. |
 
 Network: single 2.5GbE LAN port (vlan-untagged) on the same switched LAN as the Asustor and the PVE cluster. No TB fabric; no bridges; no VLANs at this layer.
