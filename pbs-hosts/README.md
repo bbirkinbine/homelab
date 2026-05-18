@@ -110,11 +110,11 @@ pbs-hosts/
 
 ## Per-host specifics
 
-| Host | Hardware | Role |
-|---|---|---|
-| `pbs01` | GMKtec G3 Pro Mini PC — Intel Core i3-10110U, 16 GB DDR4, 512 GB NVMe, 2.5GbE | Primary backup target for the PVE cluster |
+| Host | Role |
+|---|---|
+| `pbs01` | Primary backup target for the PVE cluster |
 
-Hardware selection rationale lives in the vault doc `[[Proxmox Backup Server — Capabilities and Tiered Storage]]` § "PBS host hardware".
+Hardware specs: [`docs/pbs-install.md` § Per-host specifics](../docs/pbs-install.md#per-host-specifics). Selection rationale: vault doc `[[Proxmox Backup Server — Capabilities and Tiered Storage]]` § "PBS host hardware".
 
 ## Related
 

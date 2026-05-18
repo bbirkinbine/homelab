@@ -49,6 +49,8 @@ Generate before the install. Stored in KeePassXC (unlocked with YubiKey HMAC per
 
 GMKtec G3 Pro: **DEL or F7 at the boot logo** (DEL drops you into AMI BIOS setup; F7 is the one-time boot menu). If you miss the prompt, hold DEL from the moment you press power.
 
+Once in BIOS, check the firmware version against GMKtec's support page and flash an update if one is newer than what's running. A fresh install is the cleanest moment for it — vendor BIOS pushes commonly carry microcode, fan-curve, and USB-stability fixes, and the settings table below will be re-applied afterward anyway.
+
 ---
 
 ## BIOS / UEFI prerequisites
@@ -115,8 +117,6 @@ ssh-copy-id root@pbs01.local
 ```
 
 That's the only manual post-install step. PBS doesn't need the equivalent of `pve12t`'s `nuc12-fast` carve-out — the bulk datastore lives on the NAS NFS mount, and the local NVMe is the OS-only filesystem.
-
-(Optional, off by default: if you ever want a *local-fast* datastore on the NVMe alongside the bulk-NFS one — e.g. for a hot retention window with sub-second restore startup — flip `pbs_local_fast_datastore_enabled: true` in inventory and add a second `pbs_datastores` entry with a path under `/var/lib/proxmox-backup/local-fast/` or similar. The role's [`pbs_datastore.yml`](../pbs-hosts/ansible/roles/pbs-host/tasks/pbs_datastore.yml) creates the directory + datastore; the underlying filesystem has to already exist on the NVMe.)
 
 ---
 
