@@ -59,29 +59,113 @@ NOT run `bao operator init`; that's the operator's ceremony, below.
 
 ## First-init ceremony (operator-driven, one-time)
 
-Per [[OpenBao Homelab Setup]] Phase 3 (in the vault). Run from the VM:
+Per [[OpenBao Homelab Setup]] Phase 3 (in the vault). The init command's
+output is the only time the unseal shares are visible — stage every
+custody destination *before* running it.
+
+### Stage custody destinations (do this first)
+
+**KeePassXC (workstation).** Unlock the homelab DB and pre-create five
+empty entries under group `Homelab/OpenBao/`:
+
+| Entry title | Secret field | What it will hold |
+| --- | --- | --- |
+| `unseal-1` | password | Shamir share 1 (full string from init output) |
+| `unseal-2` | password | Shamir share 2 |
+| `unseal-3` | password | Shamir share 3 |
+| `initial-root` | password | initial root token — revoke after admin policy lands |
+| `share-fingerprints` | notes | last-4 of SHA-256 for each of the 5 shares (non-secret; for DR-drill verification without retyping the share) |
+
+**Paper cards (shares 4 and 5).** Have ready: two standard letter-size
+sheets, two envelopes that can be sealed and signed across the flap,
+and a pen. Letter-size on purpose — a card-sized share is easy to
+misplace in a drawer or mistake for a receipt; an 8.5×11 sheet folded
+into a labelled envelope is not.
+
+**Session hygiene.** The init output prints all 5 shares + the root
+token in plaintext. Before running it, confirm no terminal logger is
+active (no `script(1)` session, no tmux `pipe-pane`, no IDE remote
+terminal that persists scrollback to disk). After distribution, run
+`history -c` and close the SSH session.
+
+### Run init
+
+Run from the VM:
 
 ```bash
 ssh bao-admin@<vm-ip>
 export BAO_ADDR=http://127.0.0.1:8200
 
 # 5 shares total, any 3 unseal. Output is the only time these values
-# are visible — capture immediately.
+# are visible — capture immediately into the destinations staged above.
 bao operator init -key-shares=5 -key-threshold=3
 ```
 
-Share custody (3-of-5 means you can lose any 2 shares and still recover):
+3-of-5 means you can lose any 2 shares and still recover. The
+home/offsite paper split keeps any single physical loss event from
+taking 3.
+
+### Distribute the output
+
+Paste each item into its staged destination:
 
 | Item | Where |
 | --- | --- |
-| Unseal Share 1 | KeePassXC entry `Homelab/OpenBao/unseal-1` |
+| Unseal Share 1 | KeePassXC entry `Homelab/OpenBao/unseal-1` (password field) |
 | Unseal Share 2 | KeePassXC entry `Homelab/OpenBao/unseal-2` |
 | Unseal Share 3 | KeePassXC entry `Homelab/OpenBao/unseal-3` |
-| Unseal Share 4 | Sealed paper envelope, fire safe (home) |
-| Unseal Share 5 | Sealed paper envelope, offsite (in-laws') |
+| Unseal Share 4 | Paper card, sealed envelope, fire safe (home) |
+| Unseal Share 5 | Paper card, sealed envelope, offsite (in-laws') |
 | Initial Root Token | KeePassXC entry `Homelab/OpenBao/initial-root` — **revoke after first admin policy** |
+| Share fingerprints | KeePassXC entry `Homelab/OpenBao/share-fingerprints` (notes field) — see fingerprint step below |
 
-Unseal:
+**Paper card template.** Fill in one sheet per share before sealing:
+
+```text
+OpenBao Shamir Share — Homelab
+==============================
+Share index:        __ of 5
+Threshold:          3 of 5 shares unseal
+
+Share string:
+  _________________________________________________________________
+  _________________________________________________________________
+
+Last 4 of SHA-256:  ____
+Generated:          YYYY-MM-DD
+VM:                 openbao (homelab)
+
+To unseal: ssh bao-admin@<vm-ip>, then run `bao operator unseal` and
+paste this share when prompted. Repeat with two other shares to
+fully unseal.
+```
+
+Sign and date across the envelope flap so any later tampering is
+visible.
+
+**Compute fingerprints.** For each share, last-4 of its SHA-256:
+
+```bash
+# In the same terminal that has the init output, for each share string:
+printf '%s' '<share-string>' | sha256sum | cut -c1-4
+```
+
+Record the five values in the `share-fingerprints` entry's notes:
+
+```text
+share-1: ab12
+share-2: cd34
+share-3: ef56
+share-4: 7890
+share-5: 1a2b
+```
+
+These let the quarterly DR drill confirm a paper card survived legibly
+by recomputing the fingerprint of what's written and matching it
+against the recorded value — without anyone having to type the full
+share back into a shell.
+
+### Unseal
 
 ```bash
 bao operator unseal   # paste share 1

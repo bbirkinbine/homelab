@@ -196,6 +196,20 @@ Defaults in [`terraform/variables.tf`](terraform/variables.tf):
 
 Override per deploy in `terraform.tfvars` (uncomment the sizing lines).
 
+### Current running state (max-gaming on pve13t)
+
+The overrides committed to [`terraform/terraform.tfvars.tpl`](terraform/terraform.tfvars.tpl)
+push this VM near the host ceiling — pve13t is an i7-13620H (16
+threads) with 64 GiB of RAM, and amp-game claims most of it. The
+remaining budget is deliberate headroom for Proxmox itself plus qemu
+overhead:
+
+| Resource | Running value | Headroom left on pve13t | Notes |
+| --- | --- | --- | --- |
+| vCPU | 12 | 4 threads (of 16) | Enough for the PVE kernel, pveproxy, qemu-server's own scheduling, and any small co-tenant VM under load. |
+| RAM | 49152 MB (48 GiB) | 16 GiB | PVE idles ~1-2 GiB; the rest absorbs page cache and any small co-tenant VM working set. balloon stays 0. |
+| Disk | 500 GiB on `local-lvm` | varies — check `pvesm status` on pve13t for free LVM-thin space | Steam game installs balloon (ARK alone is ~120 GiB); 500 GiB fits several titles without churn. |
+
 ## Ports
 
 | Port | Protocol | Source | Purpose |
