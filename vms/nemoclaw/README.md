@@ -12,8 +12,8 @@ as `vms/openclaw/` (cluster-mobile service VM) but sized heavier
 because the runtime stack adds Docker + k3s + OpenShell on top of
 OpenClaw.
 
-> **Alpha software.** NemoClaw is in early preview as of 2026-03-16
-> per [NVIDIA's own README](https://github.com/NVIDIA/NemoClaw/blob/main/README.md).
+> **Alpha software.** NemoClaw is in early preview per
+> [NVIDIA's own README](https://github.com/NVIDIA/NemoClaw/blob/main/README.md).
 > Interfaces and behavior may change without notice. This role
 > targets the alpha state; bump `nemoclaw_npm_version` in inventory
 > to a pinned tag once upstream stabilizes.
@@ -59,7 +59,7 @@ Trade-offs:
 | Inbound port | 18789 (gateway HTTP) | None by default |
 | Inference | Any OpenClaw-supported provider | NVIDIA Endpoints by default + optional routed pool |
 | Onboard time | One-step (`openclaw onboard`) | One-step (`nemoclaw onboard`), creates sandbox + onboards OpenClaw |
-| Maturity | OpenClaw is stable | NemoClaw is alpha (2026-03-16) |
+| Maturity | OpenClaw is stable | NemoClaw is alpha |
 
 The two roles are not mutually exclusive — keep both for the
 "compare deployment models" lab pattern.
