@@ -9,15 +9,6 @@ This is the first VM in the repo to migrate off the legacy shell
 the structure here. See [`docs/opentofu-setup.md`](../../docs/opentofu-setup.md)
 for the cross-cutting workflow.
 
-> **What changed (2026-05-10):** The original design auto-unsealed
-> OpenBao with a CardLogix SmartCard-HSM 4K via PKCS#11. That doesn't
-> work — OpenBao's stock seal only accepts AES-GCM / RSA-OAEP and the
-> SC-HSM 4K implements neither. The HSM moved to the future offline
-> Root CA VM (its purpose-built role). OpenBao now uses Shamir, with
-> share custody split between KeePassXC and paper envelopes. See
-> [`legacy/README.md`](legacy/README.md) for the full superseded
-> shape.
-
 ## Layout
 
 ```text
@@ -233,7 +224,7 @@ unless you front it with mTLS at a reverse proxy.
 - `terraform/terraform.tfvars.example` — committed, manual-fill alternative.
 - `cloud-init/user-data.yaml.tftpl` — identity only.
 - `ansible/site.yml` + `roles/openbao/` — install + config.
-- `legacy/` — pre-2026-05-10 HSM-era artifacts; see [`legacy/README.md`](legacy/README.md).
+- `legacy/` — HSM-era artifacts predating the Shamir-seal switch; see [`legacy/README.md`](legacy/README.md).
 
 ## Related
 
