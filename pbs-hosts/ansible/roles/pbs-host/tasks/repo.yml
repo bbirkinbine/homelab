@@ -14,11 +14,35 @@
 # Idempotency: file module reports `changed` only when the .sources
 # template renders different bytes. `apt update` fires via handler ONLY
 # when the source list changes, so re-runs on a healthy host are silent.
+#
+# WHY every mutating task in this file carries `check_mode: false`:
+# -----------------------------------------------------------------
+# On a freshly-installed PBS host the only apt source is
+# enterprise.proxmox.com, which 401s without a subscription. With a
+# pure --check run, ansible.builtin.file / template are side-effect-
+# free, so the enterprise sources stay in place and the no-subscription
+# sources are never written. The Apt update handler then runs against
+# the broken enterprise repo and produces an empty/stale cache. The
+# downstream packages.yml task fails with "No package matching <foo>
+# is available", because the cache has no usable index.
+#
+# Annotating these tasks with `check_mode: false` lets them run in any
+# mode, including --check. The trade-off: --check is no longer purely
+# side-effect-free for the repo swap and apt cache refresh. Everything
+# those tasks mutate is either the desired end state (no-sub sources
+# written, enterprise sources removed) or trivially recoverable (apt
+# cache regenerated on the next `apt update`). The mutations --check
+# *protects against* — package installs, firewall rules, NFS mounts,
+# datastore creation, API user/token writes — all still simulate
+# normally. Only the repo bootstrap leaks through, which is the
+# precondition that makes the rest of --check meaningful on a cold
+# host.
 
 - name: Remove legacy enterprise PBS repo (single-line format)
   ansible.builtin.file:
     path: "{{ pbs_host_enterprise_list }}"
     state: absent
+  check_mode: false
   notify: Apt update
 
 # Newer PBS installers ship deb822-format enterprise sources alongside
@@ -29,6 +53,7 @@
   ansible.builtin.file:
     path: "{{ pbs_host_enterprise_sources }}"
     state: absent
+  check_mode: false
   notify: Apt update
 
 # Proxmox's archive key ships with the proxmox-archive-keyring package
@@ -39,6 +64,7 @@
     name: proxmox-archive-keyring
     state: present
     update_cache: false
+  check_mode: false
 
 - name: Write PBS + Debian no-subscription sources (deb822)
   ansible.builtin.template:
@@ -47,9 +73,12 @@
     owner: root
     group: root
     mode: "0644"
+  check_mode: false
   notify: Apt update
 
 # Force the update before downstream tasks (packages.yml) try to install
-# anything. The handler-flush guarantees the cache is fresh.
+# anything. The handler-flush guarantees the cache is fresh. The
+# `Apt update` handler (handlers/main.yml) also carries `check_mode:
+# false` so the cache refresh actually runs during --check.
 - name: Flush handlers (refresh apt cache before package installs)
   ansible.builtin.meta: flush_handlers

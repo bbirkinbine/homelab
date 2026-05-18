@@ -13,13 +13,13 @@ Before the first apply the NAS-side NFS export for the bulk datastore has to exi
 Brings a freshly-installed Proxmox Backup Server 4.x host (Debian 13 / trixie base) to a configured baseline:
 
 - Switches APT from the enterprise repo to no-subscription (deb822 format).
-- Installs a baseline package set useful for a PBS operator (`chrony`, `htop`, `iperf3`, `tmux`, `ufw`, `nfs-common`, etc.).
+- Installs the minimum package set required by downstream tasks in this role: `chrony`, `ufw`, `nfs-common`. Operator debugging tools (`htop`, `iperf3`, `tmux`, `dnsutils`, `tcpdump`, etc.) are deliberately not installed — `apt install <foo>` on demand if needed on a specific host.
 - Configures `chrony` against the same NTP targets as the PVE cluster; disables `systemd-timesyncd`.
 - Templates `/etc/hosts` with the PBS host(s), the PVE cluster, and the NAS.
 - Mounts the Asustor NFS export at `/mnt/pbs-bulk` for the bulk datastore.
-- Creates datastores via `proxmox-backup-manager` and applies per-datastore prune policy.
-- Creates an API user + token for PVE backup ingress; surfaces the token secret once for the operator to paste into KeePassXC.
-- Schedules verify + GC jobs per datastore.
+- Creates datastores via `proxmox-backup-manager`.
+- Asserts the operator-created `pveingress@pbs!cluster` API token exists, and grants it the `DatastoreAdmin` role on each datastore (the role does NOT create the user or token — see Quick start). `DatastoreAdmin` not the narrower `DatastoreBackup` because PVE's `pvesm add pbs` validation requires `Datastore.Audit`; see [`ansible/roles/pbs-host/defaults/main.yml`](ansible/roles/pbs-host/defaults/main.yml) for the full rationale.
+- Schedules verify + prune + GC jobs per datastore.
 - Drops a baseline `ufw` config and enables the firewall.
 - Installs the operator's SSH public key for `root`.
 - Tunes sysctl for high-throughput chunk transfers.
@@ -81,17 +81,50 @@ pbs-hosts/
    just pbs-hosts-deps
    ```
 
-3. Dry-run, then apply:
+3. **Manual prereq before first apply — create the PVE-ingress API user + token in the PBS web UI, then store the secret in KeePassXC.** The role asserts both exist and fails loudly with a runbook pointer if not. Convention matches the PVE-side `tofu@pve` / `packer@pve` tokens: operator-created, KeePassXC-stored, never read by the create-time tool.
+
+   **Three names you'll see in this step — they look alike, but each lives in a different namespace. Keep them straight:**
+
+   - **PBS User ID** = `pveingress` (bare, no suffix). With the `@pbs` realm appended, PBS internally identifies it as `pveingress@pbs`. This is what you type in step 3b's User Management → Add → User ID field.
+   - **PBS Token Name** = `cluster`. The full PBS auth-id becomes `pveingress@pbs!cluster`. This is what you type in step 3c's API Tokens → Add → Token Name field.
+   - **KeePassXC entry title** = `pveingress-cluster`. The hyphenated form is purely a label on your side — PBS doesn't know or care about it. It hyphenates User ID + Token Name only because that's a useful organizational handle for *you*.
+
+   Most common failure mode: typing the hyphenated form (`pveingress-cluster`) into PBS's User Management → User ID field. PBS then has a user named `pveingress-cluster@pbs` instead of `pveingress@pbs`, the role's assert fails with `Required PBS user pveingress@pbs not found`, and you have to delete + recreate the user (which also wipes its tokens).
+
+   a. PBS web UI: `https://pbs01:8007` (login `root@pam` with the install password).
+   b. **Configuration → Access Control → User Management → Add**
+      - User ID: `pveingress`
+      - Realm: `Proxmox Backup authentication server` (`@pbs`)
+      - Password / Confirm: PBS 4.x's UI **requires** a password here even for service identities. In KeePassXC, create a new entry first at `Homelab/PBS/pveingress-cluster` and use its dice icon to generate a random 32-char password — that becomes the entry's **Password** field. Paste the same value into both PBS form fields. The PVE cluster authenticates via the *token* (separate code path), so this password is never used at runtime, but you keep it in KP for completeness and future rotation. Leave the user **Enabled** — disabling the parent user also disables its tokens on PBS, so the belt-and-suspenders pattern from other systems doesn't apply here.
+      - Email: leave blank.
+   c. **Configuration → Access Control → API Tokens → Add**
+      - User: `pveingress@pbs`
+      - Token Name: `cluster`
+      - Privilege Separation: **keep checked**. The role grants the configured role on both the parent user and the token — PBS 4.x privsep is intersection-based (token effective perms = user ∩ token), so a token-only grant gives zero effective perms. Granting both keeps a token-scoped ACL entry that can be revoked separately from the user.
+   d. PBS shows the secret value ONCE in a modal. Open the existing KeePassXC entry `Homelab/PBS/pveingress-cluster` (created in step 3b) and paste the **full token string** `pveingress@pbs!cluster=<secret>` into its **Notes** field — matching the `tofu@pve!apply=<secret>` format documented in [`docs/opentofu-setup.md` § 3](../docs/opentofu-setup.md#3-keepassxc--hydrate). You construct the full string yourself by concatenating the auth-id (User + `!` + Token Name from the form you just filled) with `=` and the secret PBS displays.
+
+      Two fields end up on the same entry:
+
+      - `Homelab/PBS/pveingress-cluster` →
+        - **Password** field: the random PBS UI password from step 3b. Kept for completeness/rotation; never read at runtime.
+        - **Notes** field: the full `pveingress@pbs!cluster=<secret>` string. Same format the openbao/rootca flow uses for `Homelab/Tofu/proxmox-api-token` (Password field there, since that entry has no UI-password to coexist with). For PBS the value lives in Notes because the entry's Password is already claimed by the UI password.
+
+   No password-quality choice for the secret: PBS generated it server-side (≈32 random bytes), same as Proxmox API tokens. The KP entry will be consumed by the future PVE-side `pvesm add pbs ...` play via [scripts/hydrate.sh](../scripts/hydrate.sh) using `kp://Homelab/PBS/pveingress-cluster#Notes`; that play splits the `<tokenid>=<secret>` at `=` to feed `pvesm`'s `--username` and `--password` flags. The `pbs-host` role itself never reads the secret — only the auth-id, which is non-secret.
+
+4. **Check, apply, re-check.** The role's `tasks/repo.yml` carries `check_mode: false` on the four bootstrap tasks, so `--check` actually performs the repo swap and refreshes the apt cache before dry-running everything downstream. That means the first check on a fresh host produces a meaningful diff for every change the role would make, instead of failing at `Install baseline packages`.
    ```bash
-   just pbs-hosts-check
-   just pbs-hosts
+   just pbs-hosts-check    # cold host: real diff for every change downstream of repo.yml
+   just pbs-hosts          # apply
+   just pbs-hosts-check    # idempotency probe (changed=0 on a healthy host)
    ```
 
-4. Capture the API token secret printed by the play into KeePassXC under `pbs01 / pveingress@pbs!cluster`. PBS never re-emits the cleartext secret — if you miss it, regenerate via `proxmox-backup-manager user delete-token` + re-run.
+   On a host that's already been bootstrapped, the first `pbs-hosts-check` returns `changed=0` and you skip the middle step. If step 3 wasn't completed, the play fails at the user/token assert with a clear pointer back to it.
+
+5. **Next — register PBS as a PVE storage target.** The role bootstrapped `pbs01`'s host config + datastore, but the PVE cluster doesn't know about it yet. Return to [`docs/0-scratch-build-order.md` step 7f](../docs/0-scratch-build-order.md#phase-25--backup-target-pbs) for the full `pvesm add pbs ...` runbook (manual, one-time per cluster — there's no automation for it, deliberately). Until that's done, PVE backup jobs can't target this PBS host.
 
 ## Post-baseline manual steps
 
-1. **PVE-side storage registration.** Datacenter → Storage → Add → Proxmox Backup Server (or one-time `pvesh` from any cluster member). Uses the token from `pbs_users.yml`. Stored in `/etc/pve/storage.cfg`, pmxcfs-replicated — scope to one node.
+1. **PVE-side storage registration.** See [`docs/0-scratch-build-order.md` step 7f](../docs/0-scratch-build-order.md#phase-25--backup-target-pbs) for the canonical `pvesm add pbs ...` invocation + where to source the token secret and cert fingerprint. Stored in `/etc/pve/storage.cfg`, pmxcfs-replicated — scope to one node. (Web-UI equivalent: Datacenter → Storage → Add → Proxmox Backup Server.)
 
 2. **Schedule a PVE backup job.** Datacenter → Backup → Add. Pick VMs, set retention, optionally encrypt with a key from OpenBao.
 

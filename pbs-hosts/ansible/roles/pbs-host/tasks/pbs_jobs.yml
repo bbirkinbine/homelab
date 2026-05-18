@@ -1,8 +1,12 @@
 ---
-# Schedule the per-datastore verify and GC jobs. Prune is configured
-# as datastore policy in tasks/pbs_datastore.yml (PBS runs it on a
-# default cadence tied to the datastore); separate prune *jobs* are
-# only needed for namespace-scoped retention, which we don't use yet.
+# Schedule the per-datastore verify, prune, and GC jobs. PBS 4.x moved
+# prune from per-datastore policy to its own job type (running PBS 4.x
+# rejects `datastore update --keep-*` with "datastore prune settings
+# have been replaced by prune jobs"). Each datastore therefore gets:
+#   - one verify-job (`verify-<ds>`)
+#   - one prune-job (`prune-<ds>`)
+#   - GC schedule set on the datastore object itself (still a datastore
+#     field in PBS 4.x, NOT a separate job type at the time of writing)
 #
 # Verify jobs: walk the chunk store of a datastore, re-read chunks,
 # compare against stored hashes. Catches bitrot. Schedule weekly,
@@ -29,6 +33,7 @@
   ansible.builtin.command: "{{ pbs_mgr_bin }} verify-job list --output-format json"
   register: pbs_existing_verify_jobs
   changed_when: false
+  check_mode: false   # pure read; needed so --check produces a real diff
 
 - name: Parse existing verify-job IDs
   ansible.builtin.set_fact:
@@ -36,17 +41,17 @@
       {{ (pbs_existing_verify_jobs.stdout | from_json) | map(attribute='id') | list }}
 
 # `verify-job create` takes the ID as a positional argument (not --id).
-# `--ignore-verified` is a boolean flag; PBS treats its presence as
-# true and its absence as false. We always pass it because the default
-# verify run otherwise re-checks every snapshot every time and that's
-# wasteful at scale.
+# `--ignore-verified` is intentionally NOT passed: PBS 4.x rejects bare
+# boolean flags ("missing boolean value"), and the schema's default is
+# already `true` — which is what we want (skip already-verified
+# snapshots until `--outdated-after` days). Re-introduce as
+# `--ignore-verified true` if a future PBS major flips the default.
 - name: Create missing verify jobs (one per datastore)
   ansible.builtin.command: >-
     {{ pbs_mgr_bin }} verify-job create verify-{{ ds.name }}
     --store {{ ds.name }}
     --schedule "{{ pbs_verify_schedule }}"
     --outdated-after {{ pbs_verify_outdated_after_days }}
-    --ignore-verified
   loop: "{{ pbs_datastores }}"
   loop_control:
     loop_var: ds
@@ -70,6 +75,60 @@
   loop_control:
     loop_var: ds
     label: "verify-{{ ds.name }}"
+  changed_when: false
+
+# ---- Prune jobs -----------------------------------------------------
+# PBS 4.x: prune is its own job type with the same `--keep-*` flags
+# that used to live on `datastore update`. Same query → create-if-
+# missing → re-apply pattern as verify jobs above. Per-datastore
+# overrides in `pbs_datastores[*].prune_keep_*` win over the role
+# defaults from `defaults/main.yml`.
+
+- name: Query existing PBS prune jobs
+  ansible.builtin.command: "{{ pbs_mgr_bin }} prune-job list --output-format json"
+  register: pbs_existing_prune_jobs
+  changed_when: false
+  check_mode: false   # pure read; needed so --check produces a real diff
+
+- name: Parse existing prune-job IDs
+  ansible.builtin.set_fact:
+    pbs_existing_prune_job_ids: >-
+      {{ (pbs_existing_prune_jobs.stdout | from_json) | map(attribute='id') | list }}
+
+- name: Create missing prune jobs (one per datastore)
+  ansible.builtin.command: >-
+    {{ pbs_mgr_bin }} prune-job create prune-{{ ds.name }}
+    --store {{ ds.name }}
+    --schedule "{{ pbs_prune_schedule }}"
+    --keep-last {{ ds.prune_keep_last | default(pbs_default_prune_keep_last) }}
+    --keep-daily {{ ds.prune_keep_daily | default(pbs_default_prune_keep_daily) }}
+    --keep-weekly {{ ds.prune_keep_weekly | default(pbs_default_prune_keep_weekly) }}
+    --keep-monthly {{ ds.prune_keep_monthly | default(pbs_default_prune_keep_monthly) }}
+    --keep-yearly {{ ds.prune_keep_yearly | default(pbs_default_prune_keep_yearly) }}
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    loop_var: ds
+    label: "prune-{{ ds.name }}"
+  when: ('prune-' + ds.name) not in pbs_existing_prune_job_ids
+  register: pbs_prune_job_create
+  changed_when: pbs_prune_job_create.rc == 0
+
+# Re-apply schedule + retention on every run so UI edits don't drift
+# the configured state. `prune-job update` is server-side idempotent
+# (no-op when values match).
+- name: Apply schedule + retention to prune jobs
+  ansible.builtin.command: >-
+    {{ pbs_mgr_bin }} prune-job update prune-{{ ds.name }}
+    --schedule "{{ pbs_prune_schedule }}"
+    --keep-last {{ ds.prune_keep_last | default(pbs_default_prune_keep_last) }}
+    --keep-daily {{ ds.prune_keep_daily | default(pbs_default_prune_keep_daily) }}
+    --keep-weekly {{ ds.prune_keep_weekly | default(pbs_default_prune_keep_weekly) }}
+    --keep-monthly {{ ds.prune_keep_monthly | default(pbs_default_prune_keep_monthly) }}
+    --keep-yearly {{ ds.prune_keep_yearly | default(pbs_default_prune_keep_yearly) }}
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    loop_var: ds
+    label: "prune-{{ ds.name }}"
   changed_when: false
 
 # ---- GC schedules ---------------------------------------------------

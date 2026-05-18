@@ -56,11 +56,26 @@ Stand up the Proxmox Backup Server host between cluster bring-up and IaC enablem
 
 7c. **Fill in PBS `inventory.yml`** — [pbs-hosts/ansible/inventory.yml.example](../pbs-hosts/ansible/inventory.yml.example) → `inventory.yml`. Replace TODOs: LAN IP, NAS IP, your SSH pubkey, datastore name. Keep the `pve_hosts` mirror block synchronized with the PVE-side inventory's LAN IPs.
 
-7d. **Apply the `pbs-host` baseline** — [pbs-hosts/README.md](../pbs-hosts/README.md). From the workstation: `just pbs-hosts-deps` (collections, one-time), `just pbs-hosts-check` (dry-run), `just pbs-hosts` (apply). Configures APT, packages, chrony, NFS mount, ufw, datastore creation, API token for PVE ingress, verify + GC schedules.
+7d. **PBS UI prereq — create the `pveingress` user + `cluster` API token, store the secret in KeePassXC.** Operator-managed (PBS generates the secret on creation; same convention as `tofu@pve` / `packer@pve`). The full walkthrough — including the three-names disambiguation (User ID `pveingress` vs Token Name `cluster` vs KP entry title `pveingress-cluster`) and the field layout (KP `Password` field for the random UI password, `Notes` field for `pveingress@pbs!cluster=<secret>`) — lives in [pbs-hosts/README.md](../pbs-hosts/README.md) "Quick start" step 3. Done before step 7e; step 7e's asserts fail loudly without it.
 
-7e. **Capture the API token secret** printed by step 7d's `pbs_users.yml` task into KeePassXC under `pbs01 / pveingress@pbs!cluster`. This is the only chance — PBS never re-emits the cleartext secret.
+7e. **Apply the `pbs-host` baseline** — [pbs-hosts/README.md](../pbs-hosts/README.md). From the workstation: `just pbs-hosts-deps` (collections, one-time), `just pbs-hosts-check` (dry-run), `just pbs-hosts` (apply). Configures APT, packages, chrony, NFS mount, ufw, datastore creation, verify + prune + GC schedules. Asserts the `pveingress@pbs!cluster` token from step 7d exists and grants it `DatastoreAdmin` on each datastore (the role never reads the cleartext secret — only the auth-id). `DatastoreAdmin` is used rather than `DatastoreBackup` because PVE's storage-registration handshake in step 7f needs `Datastore.Audit`, which `DatastoreBackup` doesn't include — see `pbs-hosts/ansible/roles/pbs-host/defaults/main.yml` for the rationale.
 
-7f. **Register PBS as a PVE storage target** — from any PVE cluster member, run `pvesm add pbs <storage-name> --server <pbs01_ip> --datastore bulk --username pveingress@pbs --password <token-secret> --fingerprint <pbs-cert-fingerprint>`. Cluster-replicated via pmxcfs; scope to one node. Detailed step in [docs/cluster-bring-up.md](cluster-bring-up.md) (post-Phase-2 follow-up).
+7f. **Register PBS as a PVE storage target — manual, one-time per cluster.** Deliberately unautomated: one `pvesm add pbs ...` call lands the storage entry in `/etc/pve/storage.cfg`, pmxcfs replicates it to every node, and it stays for the life of the cluster.
+
+   > **Run this from any PVE cluster node — NOT from `pbs01`.** `pvesm` is a Proxmox VE command (not PBS) and the storage entry has to land in `/etc/pve/storage.cfg`, which only exists on the PVE cluster's pmxcfs. Running it on `pbs01` would fail with command-not-found, and even if you reached for the PBS CLI you'd be editing the wrong system. Pick any one of `pve12t`, `pve13m`, `pve13t`; pmxcfs replicates the result to all three.
+
+   ```bash
+   pvesm add pbs pbs01-bulk \
+     --server <pbs01_ip> \
+     --datastore bulk \
+     --username 'pveingress@pbs!cluster' \
+     --password '<token-secret>' \
+     --fingerprint '<pbs-cert-sha256-fingerprint>'
+   ```
+
+   Single-quote `--username` (and `--password`) — the `!` in the auth-id is bash/zsh history-expansion in interactive shells, and double quotes do *not* suppress it. Single quotes pass it literally.
+
+   `<token-secret>` comes from KeePassXC `Homelab/PBS/pveingress-cluster`'s Notes field — the stored value has shape `pveingress@pbs!cluster=<secret>`, paste only the portion *after* `=` into `--password`. `<pbs-cert-sha256-fingerprint>` comes from the PBS web UI's certificate (browser lock icon → "View certificate" → SHA-256 fingerprint), or on pbs01 via `openssl x509 -in /etc/proxmox-backup/proxy.pem -fingerprint -sha256 -noout`. Verify in the PVE web UI → Datacenter → Storage: `pbs01-bulk` should appear with type PBS, available on every node.
 
 ---
 

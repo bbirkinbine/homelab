@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# scripts/hydrate.sh — render terraform.tfvars from terraform.tfvars.tpl.
+# scripts/hydrate.sh — render a config file from a kp://-templated source.
 #
 # Usage:
-#   scripts/hydrate.sh <role> [--force]
+#   scripts/hydrate.sh <role> [--force]                    # vms/<role>/terraform/ shorthand
+#   scripts/hydrate.sh <path-to-foo.tpl> [--force]         # explicit template path
 #
-# Replaces kp:// placeholders in vms/<role>/terraform/terraform.tfvars.tpl
-# with values pulled from KeePassXC via `keepassxc-cli show`. Writes
-# the result to terraform.tfvars (gitignored, chmod 600).
+# The first form keeps the legacy shorthand: resolves to
+# vms/<role>/terraform/terraform.tfvars{.tpl}. The second form accepts
+# any file ending in `.tpl` and writes the rendered output to the same
+# path with `.tpl` stripped.
+#
+# Replaces kp:// placeholders with values pulled from KeePassXC via
+# `keepassxc-cli show`. Writes the result with mode 0600 (gitignored
+# is the caller's responsibility — keep `.tpl` out of the placeholder
+# value, keep the rendered output in `.gitignore`).
 #
 # Placeholder grammar:
 #   kp://<group-path>/<entry-name>[#<field>]
@@ -40,7 +47,7 @@
 
 set -euo pipefail
 
-ROLE="${1:-}"
+ARG="${1:-}"
 FORCE=0
 shift || true
 for arg in "$@"; do
@@ -50,20 +57,38 @@ for arg in "$@"; do
   esac
 done
 
-if [[ -z "$ROLE" ]]; then
-  echo "Usage: $0 <role> [--force]" >&2
+if [[ -z "$ARG" ]]; then
+  echo "Usage: $0 <role>|<path-to-foo.tpl> [--force]" >&2
   exit 64
 fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ROLE_TF_DIR="$REPO_ROOT/vms/$ROLE/terraform"
-TPL="$ROLE_TF_DIR/terraform.tfvars.tpl"
-OUT="$ROLE_TF_DIR/terraform.tfvars"
+
+# Two input forms:
+#   - explicit path ending in `.tpl` (anywhere under the repo)
+#   - shorthand <role>, resolves to vms/<role>/terraform/terraform.tfvars.tpl
+# The output path is always the input path with `.tpl` stripped.
+if [[ "$ARG" == *.tpl ]]; then
+  # Absolute path passed through; relative path resolved against PWD.
+  if [[ "$ARG" = /* ]]; then
+    TPL="$ARG"
+  else
+    TPL="$(cd "$(dirname "$ARG")" 2>/dev/null && pwd)/$(basename "$ARG")"
+    if [[ -z "$TPL" || ! -e "$(dirname "$TPL")" ]]; then
+      echo "ERROR: cannot resolve directory for $ARG" >&2
+      exit 65
+    fi
+  fi
+  OUT="${TPL%.tpl}"
+else
+  TPL="$REPO_ROOT/vms/$ARG/terraform/terraform.tfvars.tpl"
+  OUT="$REPO_ROOT/vms/$ARG/terraform/terraform.tfvars"
+fi
 
 if [[ ! -f "$TPL" ]]; then
   echo "ERROR: $TPL not found." >&2
   echo "       Either create one with kp:// placeholders, or skip hydrate" >&2
-  echo "       and create $OUT manually from terraform.tfvars.example." >&2
+  echo "       and create $OUT manually from the .example sibling file." >&2
   exit 65
 fi
 

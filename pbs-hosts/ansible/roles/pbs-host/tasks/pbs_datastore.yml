@@ -8,13 +8,19 @@
 #   1. Ensure the on-disk directory exists at `<path>`.
 #   2. Check if PBS already knows about a datastore by that name.
 #   3. If not, create it.
-#   4. Apply per-datastore prune policy (idempotent update).
 #
-# Idempotency comes from the existence check before create + the fact
-# that `datastore update` is a no-op when values match.
+# Prune retention is NOT configured here. PBS 4.x removed per-datastore
+# prune settings ("datastore prune settings have been replaced by prune
+# jobs") — prune is now a separate job type, created in tasks/pbs_jobs.yml
+# alongside verify jobs. The retention values in inventory's
+# `pbs_datastores[].prune_keep_*` are consumed by pbs_jobs.yml when it
+# creates the per-datastore prune-job.
+#
+# Idempotency comes from the existence check before create.
 #
 # References:
 #   - `proxmox-backup-manager help datastore`
+#   - `proxmox-backup-manager help prune-job`
 #   - https://pbs.proxmox.com/docs/managing-datastores.html
 
 - name: Ensure datastore filesystem directories exist
@@ -36,6 +42,11 @@
   ansible.builtin.command: "{{ pbs_mgr_bin }} datastore list --output-format json"
   register: pbs_existing_datastores
   changed_when: false
+  # Pure read. ansible.builtin.command is skipped in check mode by
+  # default; without the override, the parse task below would receive
+  # an empty stdout and `from_json` would fail with "Expecting value:
+  # line 1 column 1 (char 0)".
+  check_mode: false
 
 - name: Parse existing datastore names
   ansible.builtin.set_fact:
@@ -54,26 +65,4 @@
   register: pbs_datastore_create
   changed_when: pbs_datastore_create.rc == 0
 
-# Apply prune retention policy to each datastore. The update call is
-# idempotent: PBS no-ops when the requested values match the current
-# state. We do this every run to keep the configured policy enforced
-# even if someone edited it via the UI.
-- name: Apply prune policy per datastore
-  ansible.builtin.command: >-
-    {{ pbs_mgr_bin }} datastore update {{ ds.name }}
-    --keep-last {{ ds.prune_keep_last | default(pbs_default_prune_keep_last) }}
-    --keep-daily {{ ds.prune_keep_daily | default(pbs_default_prune_keep_daily) }}
-    --keep-weekly {{ ds.prune_keep_weekly | default(pbs_default_prune_keep_weekly) }}
-    --keep-monthly {{ ds.prune_keep_monthly | default(pbs_default_prune_keep_monthly) }}
-    --keep-yearly {{ ds.prune_keep_yearly | default(pbs_default_prune_keep_yearly) }}
-  loop: "{{ pbs_datastores }}"
-  loop_control:
-    loop_var: ds
-    label: "{{ ds.name }}"
-  # `datastore update` writes the same bytes back when nothing changed.
-  # We mark this not-changed always; the audit trail lives in the
-  # config file's mtime if Brian ever needs to diff.
-  # TODO (vs-code-claude): if PBS 4.2 introduces an --output-format
-  # json on `datastore update` that surfaces a diff, switch to
-  # parsing that and set changed_when based on real change.
-  changed_when: false
+# Prune retention is handled by tasks/pbs_jobs.yml — see header.

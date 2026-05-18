@@ -10,10 +10,19 @@
   ansible.builtin.systemd:
     daemon_reload: true
 
+# `check_mode: false` is required here. tasks/repo.yml flushes this
+# handler immediately after writing the no-subscription sources file,
+# and the four notifying tasks in repo.yml all carry `check_mode:
+# false` so they run during --check. The handler must do the same;
+# otherwise the cache refresh would skip in check mode, downstream
+# package lookups would hit a stale cache, and packages.yml would
+# fail with "No package matching <foo> is available". See the header
+# comment in tasks/repo.yml for the full rationale.
 - name: Apt update
   ansible.builtin.apt:
     update_cache: true
     cache_valid_time: 0
+  check_mode: false
 
 - name: Restart chrony
   ansible.builtin.systemd:
