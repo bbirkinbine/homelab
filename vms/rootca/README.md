@@ -66,7 +66,7 @@ vms/rootca/
    ssh root@pve12t 'systemctl disable --now pcscd 2>/dev/null || true'
    ```
 
-## The full deploy flow
+## Deploy
 
 This role has a **two-phase lifecycle** that's not present in openbao:
 
@@ -205,6 +205,7 @@ just apply rootca                       # NIC re-attached
 #      sudo rootca-unlock                # paste LUKS passphrase
 # 4. SSH in, verify reachability.
 # 5. just ansible rootca                 # idempotent re-bootstrap
+#    (preview first: just ansible-check rootca   # --check --diff)
 # 6. Verify (pkcs11-tool --list-slots + lsblk | grep rootca-encrypted).
 # 7. In the VM: sudo rootca-lock         # close + umount the partition
 # 8. In terraform.tfvars: enable_network = false
