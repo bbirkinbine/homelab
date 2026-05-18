@@ -3,7 +3,7 @@
 Builds a Windows 11 Pro x64 VM template for two targets in one Packer config:
 
 - **`proxmox-iso`** — Per-node Proxmox templates: VMIDs `9200`/`9201`/`9202` for `pve12t`/`pve13m`/`pve13t` (parallel to `ubuntu-24-04-base` at `9100`/`9101`/`9102` — see [ADR-0006](../../docs/decisions/0006-packer-templates-per-node.md)). **Validated, shipping.**
-- **`virtualbox-iso`** — VMware-style OVF + VMDK + NVRAM in `output-vbox/`. Local builds on a Linux host with VirtualBox 7.0+; the VMDK converts to qcow2 in ~5 minutes for use in virt-manager / libvirt. **Validated end-to-end 2026-05-08** — full Win11 24H2 install + sysprep in ~44 minutes.
+- **`virtualbox-iso`** — VMware-style OVF + VMDK + NVRAM in `output-vbox/`. Local builds on a Linux host with VirtualBox 7.0+; the VMDK converts to qcow2 in ~5 minutes for use in virt-manager / libvirt. **Validated end-to-end** — full Win11 24H2 install + sysprep in ~44 minutes.
 
 Both share the same `Autounattend.xml` and the same PowerShell provisioner pipeline, ending at the same sysprep'd state.
 
@@ -26,7 +26,7 @@ The two builders have different build-host needs and are intentionally run from 
 
 The virtualbox-iso source runs the Windows install in VirtualBox locally and writes VMDK + OVF + NVRAM to `output-vbox/`. The disk converts to qcow2 with `qemu-img convert` for use in virt-manager / libvirt.
 
-- Ubuntu 24.04 with VirtualBox **>= 7.0** (Win11 needs UEFI + TPM 2.0 + Secure Boot, all introduced in 7.0). Ubuntu 24.04 universe currently ships VBox 7.2.x, which is fine:
+- Ubuntu 24.04 with VirtualBox **>= 7.0** (Win11 needs UEFI + TPM 2.0 + Secure Boot, all introduced in 7.0). Ubuntu 24.04 universe ships VBox 7.x, which is fine:
 
   ```bash
   sudo apt install -y virtualbox

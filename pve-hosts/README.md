@@ -2,9 +2,7 @@
 
 Ansible role that configures the three NUCs running Proxmox VE to a known-good baseline. This is **layer 0**: it runs against the hypervisor hosts themselves, not against any VM. The VM provisioning under `vms/<role>/` sits on top of this layer.
 
-## Status
-
-Role implemented — first run pending against real hardware. See [`CLAUDE.md`](CLAUDE.md) for the original spec and [`ansible/roles/pve-host/SCAFFOLD-NOTES.md`](ansible/roles/pve-host/SCAFFOLD-NOTES.md) for what was generated, the assumptions baked in, and the items Brian still needs to fill into `inventory.yml` before applying.
+See [`CLAUDE.md`](CLAUDE.md) for the design spec and [`ansible/roles/pve-host/SCAFFOLD-NOTES.md`](ansible/roles/pve-host/SCAFFOLD-NOTES.md) for what was generated, the assumptions baked in, and the items to fill into `inventory.yml` before a first apply.
 
 The install-time procedure that produces "a freshly-installed PVE 9.x host" — USB media prep, BIOS prerequisites, installer click-through, the `nuc12-fast` LVM-thin carve-out on `pve12t`, and TB4 cabling — lives in [`docs/proxmox-install.md`](../docs/proxmox-install.md). Read that first if you're rebuilding from scratch.
 
@@ -69,7 +67,7 @@ pve-hosts/
             └── meta/main.yml
 ```
 
-## Quick start (once the role is implemented)
+## Quick start
 
 1. Copy the inventory template and fill in real values:
    ```bash
