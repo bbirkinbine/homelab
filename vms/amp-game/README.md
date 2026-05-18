@@ -34,7 +34,9 @@ just hydrate amp-game
 
 # Per session/reboot: load your homelab SSH key into the agent if it
 # isn't already. (preflight fails with "ssh-agent has no keys loaded"
-# otherwise.) Skip if macOS keychain integration is set up.
+# otherwise.) Skip if macOS keychain integration is set up — see
+# docs/opentofu-setup.md section (d) "Load the private key into
+# ssh-agent" for the once-per-machine Keychain auto-load pattern.
 ssh-add -l >/dev/null 2>&1 || ssh-add ~/.ssh/id_ed25519_homelab
 
 # Verify ssh/Proxmox/template/snippets prerequisites.

@@ -49,9 +49,19 @@ vms/rootca/
    without also compromising the running guest.
 5. **`tofu@pve` API token** (same one as openbao — `Homelab/Tofu/proxmox-api-token`
    in KeePassXC). See [`docs/proxmox-tofu-permissions.md`](../../docs/proxmox-tofu-permissions.md).
-6. **Host-side `pcscd` is NOT running on pve12t.** USB passthrough
+6. **SSH access to pve12t + key loaded into `ssh-agent`.**
+   `ssh-copy-id root@pve12t`, then `ssh-add ~/.ssh/id_ed25519` once
+   per shell session. The `bpg/proxmox` provider uploads cloud-init
+   snippets over SSH (not the HTTP API) and shells out non-
+   interactively, so the key must already be in the agent before
+   `tofu apply`. Preflight verifies both. See
+   [`docs/opentofu-setup.md`](../../docs/opentofu-setup.md) section
+   **(d) Load the private key into `ssh-agent`** for the macOS
+   Keychain auto-load pattern that survives reboot.
+7. **Host-side `pcscd` is NOT running on pve12t.** USB passthrough
    does not unbind the host driver the way `vfio-pci` does; a running
    host-side pcscd would hold the device open and starve the guest:
+
    ```bash
    ssh root@pve12t 'systemctl disable --now pcscd 2>/dev/null || true'
    ```
