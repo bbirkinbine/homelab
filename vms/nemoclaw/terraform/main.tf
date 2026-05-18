@@ -64,11 +64,14 @@ module "nemoclaw" {
   //     gateway + k3s + Docker combine to push past 8 GiB during
   //     image push (per upstream's OOM warning). 16 GiB is upstream's
   //     "Recommended" tier; 8 GiB is the documented minimum if RAM
-  //     becomes the gating constraint on the cluster.
-  //   * 64 GiB disk — upstream's 40 GiB-free recommendation refers to
-  //     free space after the OS + container runtime are installed.
-  //     With Ubuntu base + Docker + k3s + the sandbox image cache,
-  //     64 GiB total leaves ~50 GiB free, which fits comfortably.
+  //     becomes the gating constraint.
+  //   * 64 GiB disk — upstream's "40 GiB free" recommendation refers
+  //     to free space after the OS + container runtime install. On
+  //     the VM, Ubuntu base + Docker + k3s + sandbox image cache eat
+  //     ~20-25 GiB; 64 GiB total leaves ~40 GiB free at idle, matching
+  //     upstream's "free" tier in practice. Cluster has plenty of
+  //     spare disk so the extra headroom is free insurance against
+  //     heavy image push or additional sandbox images.
   //   * balloon=0 — Docker + k3s + Node behave badly under host
   //     memory pressure; the gateway needs predictable headroom for
   //     sandbox spawns and image pulls.

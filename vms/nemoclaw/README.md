@@ -54,7 +54,7 @@ Trade-offs:
 | | `vms/openclaw/` | `vms/nemoclaw/` |
 | --- | --- | --- |
 | Runtime layer | Node + openclaw bin | Docker + k3s + OpenShell + sandbox(OpenClaw) |
-| Sizing | 2 vCPU / 4 GiB / 32 GiB | 4 vCPU / 16 GiB / 64 GiB |
+| Sizing | 4 vCPU / 16 GiB / 64 GiB | 4 vCPU / 16 GiB / 64 GiB |
 | Tool sandbox | Operator-opt-in (`agents.defaults.sandbox`) | Default |
 | Inbound port | 18789 (gateway HTTP) | None by default |
 | Inference | Any OpenClaw-supported provider | NVIDIA Endpoints by default + optional routed pool |
@@ -72,8 +72,17 @@ The two roles are not mutually exclusive — keep both for the
    (VMIDs `9100`/`9101`/`9102` per [ADR-0006](../../docs/decisions/0006-packer-templates-per-node.md)).
 3. **`tofu@pve` API token.** See [`docs/proxmox-tofu-permissions.md`](../../docs/proxmox-tofu-permissions.md).
    Stash in KeePassXC at `Homelab/Tofu/proxmox-api-token`.
-4. **SSH access to the node.** `ssh-copy-id root@pve12t`. Snippets
-   storage enabled (preflight reports the cure command if missing).
+4. **SSH access to the node + key loaded into `ssh-agent`.**
+   `ssh-copy-id root@pve12t` (or whichever node `proxmox_node` points
+   at), then `ssh-add ~/.ssh/id_ed25519` once per shell session. The
+   `bpg/proxmox` provider uploads cloud-init snippets over SSH (not
+   the HTTP API) and shells out non-interactively, so the key must
+   already be in the agent before `tofu apply`. Preflight verifies
+   both. See [`docs/opentofu-setup.md`](../../docs/opentofu-setup.md)
+   section **(d) Load the private key into `ssh-agent`** for the
+   macOS Keychain auto-load pattern that survives reboot. Snippets
+   storage must also be enabled on `local` (preflight reports the
+   cure command if missing).
 5. **An NVIDIA API key OR a non-NVIDIA inference provider.** NemoClaw
    defaults to NVIDIA Endpoints. You'll provide the key during the
    onboard ceremony, not at deploy time — but have it ready.
@@ -266,7 +275,7 @@ just ansible nemoclaw
 | --- | --- | --- |
 | vCPU | 4 | Docker + k3s + OpenShell gateway + sandbox container share the box |
 | RAM | 16 GiB | Upstream "Recommended"; 8 GiB is the minimum but risks OOM during image push (per upstream OOM warning) |
-| Disk | 64 GiB | Upstream wants 40 GiB free; 64 GiB total covers Ubuntu base + Docker + k3s + sandbox image cache |
+| Disk | 64 GiB | Upstream wants 40 GiB free; 64 GiB total leaves ~40 GiB free after Ubuntu base + Docker + k3s + sandbox image cache settle in |
 | Balloon | 0 | Docker + k3s + Node behave badly under host memory pressure |
 | Machine | q35 | Matches the rest of the homelab |
 | CPU type | x86-64-v3 | Cluster-mobile baseline |
@@ -314,6 +323,7 @@ Trade-offs:
 - **Escape hatch.** If a release ships the kind of setup-script
   changes that defeat the manual replication, switch to the
   upstream installer in this role's tasks:
+
   ```yaml
   - name: Run upstream NemoClaw installer (fallback path)
     ansible.builtin.shell:
@@ -323,6 +333,7 @@ Trade-offs:
       creates: "{{ nemoclaw_service_home }}/.nvm/versions/node"
     become_user: "{{ nemoclaw_service_user }}"
   ```
+
   ... and remove the NodeSource + npm-install tasks. We have not
   done this preemptively because the apt-driven path is materially
   cleaner today.

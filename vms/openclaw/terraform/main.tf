@@ -57,26 +57,29 @@ module "openclaw" {
   template_id = local.ubuntu_template_ids[var.proxmox_node]
   vm_id       = 8032 // Service VMID range — see ADR-0008 (8030=openbao, 8031=rootca)
 
-  // Sizing rationale:
-  //   * 2 vCPU — gateway is mostly an event loop + IPC; LLM compute
-  //     is offloaded to the provider (OpenAI/Anthropic/etc.) via OAuth,
-  //     so local CPU stays modest. Bump if you turn on local sandboxed
-  //     tools (browser, headless chromium) that actually spawn work.
-  //   * 4 GiB RAM — Node 24 base + room for a chromium child process
-  //     if the browser tool gets enabled. OpenBao is 2 GiB; openclaw
-  //     gets a bump because Node + tool subprocesses are heavier than
-  //     OpenBao's static Go binary.
-  //   * 32 GiB disk — matches openbao; mostly for the workspace
-  //     (conversation history, skill bundles, plus any cached
-  //     downloads). Grow with `tofu apply` after `growpart` + `resize2fs`
-  //     inside the guest if the workspace gets fat.
+  // Sizing rationale (matches upstream NemoClaw README "Recommended"
+  // tier — 4+ vCPU / 16 GiB / 40 GiB free — applied uniformly to
+  // both claw VMs so they compare cleanly against the same baseline.
+  // Upstream OpenClaw doesn't publish a sizing matrix; borrowing
+  // NemoClaw's is the closest documented anchor):
+  //   * 4 vCPU — gateway is mostly an event loop, but headroom for
+  //     concurrent agent sessions + sandboxed tool subprocesses
+  //     (browser, headless chromium) is cheap. Drop to 2 if RAM/CPU
+  //     is the gating constraint and you're not using local tools.
+  //   * 16 GiB RAM — generous for a Node 24 daemon; tracks nemoclaw
+  //     for symmetry rather than because upstream demands it.
+  //   * 64 GiB disk — generous for the workspace (conversation
+  //     history, skill bundles, downloads cache); 24 GiB over
+  //     upstream NemoClaw's "40 GiB free" anchor leaves predictable
+  //     headroom even if a future browser tool starts cacheing
+  //     pages locally. Grow with `tofu apply` + `growpart` +
+  //     `resize2fs` if it ever fills.
   //   * balloon=0 — Node's V8 heap responds poorly to memory pressure
-  //     from the host (GC behavior diverges), and the gateway needs
-  //     predictable headroom for sandbox spawns. Cheap insurance.
-  cores        = 2
-  memory_mb    = 4096
+  //     from the host (GC behavior diverges). Cheap insurance.
+  cores        = 4
+  memory_mb    = 16384
   balloon_mb   = 0
-  disk_size_gb = 32
+  disk_size_gb = 64
 
   tags = ["openclaw", "tofu"]
 

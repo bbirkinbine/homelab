@@ -36,9 +36,15 @@ vms/openclaw/
    If not: `packer/ubuntu-24-04-base/build-pve.sh <node>`.
 3. **`tofu@pve` API token.** See [`docs/proxmox-tofu-permissions.md`](../../docs/proxmox-tofu-permissions.md).
    Stash the token in KeePassXC at `Homelab/Tofu/proxmox-api-token`.
-4. **SSH access to the node.** `ssh-copy-id root@pve12t`. The
-   `bpg/proxmox` provider uploads cloud-init snippets over SSH, not
-   the HTTP API — preflight verifies this.
+4. **SSH access to the node + key loaded into `ssh-agent`.**
+   `ssh-copy-id root@pve12t` (or whichever node `proxmox_node` points
+   at), then `ssh-add ~/.ssh/id_ed25519` once per shell session. The
+   `bpg/proxmox` provider uploads cloud-init snippets over SSH (not
+   the HTTP API) and shells out non-interactively, so the key must
+   already be in the agent before `tofu apply`. Preflight verifies
+   both. See [`docs/opentofu-setup.md`](../../docs/opentofu-setup.md)
+   section **(d) Load the private key into `ssh-agent`** for the
+   macOS Keychain auto-load pattern that survives reboot.
 5. **Snippets storage enabled.** Datacenter → Storage → `local` →
    Edit → tick **Snippets**. Preflight reports a cure command if not.
 6. **A model provider account.** You'll authorize this during the
@@ -203,9 +209,9 @@ just ansible openclaw
 
 | Resource | Value | Why |
 | --- | --- | --- |
-| vCPU | 2 | Gateway is mostly an event loop; LLM compute is offloaded to the provider via OAuth |
-| RAM | 4 GiB | Node 24 base + headroom for a chromium child if the browser tool gets enabled |
-| Disk | 32 GiB | Workspace + skill bundles + downloads cache; grow with `tofu apply` + in-guest `growpart` |
+| vCPU | 4 | Matches NemoClaw's "Recommended" tier — upstream OpenClaw publishes no sizing matrix, so this borrows NemoClaw's anchor and keeps the two claw roles comparable |
+| RAM | 16 GiB | Same anchor; generous for a Node 24 daemon. Drop to 4 GiB if RAM is gating and you're not running the browser tool |
+| Disk | 64 GiB | Generous for workspace + skill bundles + downloads cache; cluster has spare disk so headroom is free insurance |
 | Balloon | 0 | Node's V8 heap is unhappy under host pressure; sandbox spawns need predictable headroom |
 | Machine | q35 | Matches the rest of the homelab |
 | CPU type | x86-64-v3 | Common baseline across the cluster's NUCs — supports live migration |
@@ -235,7 +241,7 @@ it with mTLS at a reverse proxy or restrict access via Tailscale.
   `main` session (the operator's own conversations). For group /
   shared sessions, set `agents.defaults.sandbox.mode: "non-main"`
   in `~/.openclaw/openclaw.json` (Docker is the default backend; SSH
-  + OpenShell also work). Confirm `docker info` works for the
+  and OpenShell also work). Confirm `docker info` works for the
   `openclaw` user if you enable this — the role does NOT install
   Docker today.
 - **Provider tokens.** Live under `~/.openclaw/` on the VM, owned by
