@@ -117,6 +117,32 @@ Avoid emojis in repo files. Avoid the words *genuinely*, *straightforward*, *act
 
 ---
 
+## Prose hygiene for public-facing files
+
+This repo is public on GitHub. READMEs and `docs/` are read by strangers who clone the repo with no context about when things shipped — so the prose should be timeless.
+
+**Don't time-anchor project state in user-facing prose:**
+
+- No "Role applied 2026-05-13" / "first run pending" / "What changed (2026-05-10)" callouts in README bodies.
+- No `## Status` sections that just record when something was implemented — the existence of working code is evidence enough.
+- No "currently ships X.Y.z" — use "ships X.x" or omit.
+
+**Time-anchored content belongs in:**
+
+- `CLAUDE.md` "Active context (as of X)" sections — explicitly maintainer-facing and snapshot-marked.
+- `SCAFFOLD-NOTES.md` files alongside roles.
+- ADRs (`docs/decisions/`) — the date IS the artifact.
+- Commit messages — `git log` is the right place for "what changed when".
+
+**Exceptions worth keeping:**
+
+- ADR index dates in `docs/decisions/README.md`.
+- Sample-output snapshots tagged with a build date (e.g. `packer/ubuntu-24-04-base/README.md` "Reference output from a clean build (YYYY-MM-DD)") — functional anchor for "is this still current?".
+
+If a violation recurs across several commits, a pre-commit hook scanning README files for date strings + specific patterns ("Role applied", "first run pending", "What changed (") is the next step. Don't build it speculatively.
+
+---
+
 ## Where component-level context lives
 
 When a task touches one of these areas, read the local doc first before suggesting structural changes — they're authoritative for their component.
