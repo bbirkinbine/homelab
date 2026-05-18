@@ -37,9 +37,15 @@ vms/openbao/
    on the target node. If not: `packer/ubuntu-24-04-base/build-pve.sh <node>`.
 3. **`tofu@pve` API token.** See [`docs/proxmox-tofu-permissions.md`](../../docs/proxmox-tofu-permissions.md).
    Stash the token string in KeePassXC at `Homelab/Tofu/proxmox-api-token`.
-4. **SSH access to the node.** `ssh-copy-id root@pve12t`. The
-   `bpg/proxmox` provider uploads cloud-init snippets over SSH, not
-   the HTTP API — preflight verifies this.
+4. **SSH access to the node + key loaded into `ssh-agent`.**
+   `ssh-copy-id root@pve12t` (or whichever node `proxmox_node` points
+   at), then `ssh-add ~/.ssh/id_ed25519` once per shell session. The
+   `bpg/proxmox` provider uploads cloud-init snippets over SSH (not
+   the HTTP API) and shells out non-interactively, so the key must
+   already be in the agent before `tofu apply`. Preflight verifies
+   both. See [`docs/opentofu-setup.md`](../../docs/opentofu-setup.md)
+   section **(d) Load the private key into `ssh-agent`** for the
+   macOS Keychain auto-load pattern that survives reboot.
 5. **Snippets storage enabled.** Datacenter → Storage → `local` →
    Edit → tick **Snippets**. Preflight reports a cure command if not.
 

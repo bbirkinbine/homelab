@@ -1,4 +1,4 @@
-# amp-game
+# vms/amp-game
 
 VM running [CubeCoders AMP](https://cubecoders.com/AMP) for hosting game
 servers (Minecraft Java + Bedrock by default, ARK/Rust/7DTD and other
@@ -21,7 +21,38 @@ live in the 8000-8099 range, kept distinct from workloads.
 The legacy shell-script + cloud-init shape is preserved under
 [`legacy/`](legacy/README.md) for reference.
 
-## Deployment flow
+## Layout
+
+```text
+vms/amp-game/
+├── README.md                  this file
+├── terraform/                 VM provisioning (clone, size, cloud-init)
+├── ansible/                   role config (apt deps + ufw + unattended-upgrades)
+├── cloud-init/                first-boot identity (hostname, user, SSH key)
+└── legacy/                    shell-script + cloud-init predecessor
+```
+
+## Prerequisites
+
+1. **Workstation tooling.** `brew install opentofu just keepassxc ansible`.
+   First-time setup steps in [`docs/opentofu-setup.md`](../../docs/opentofu-setup.md).
+2. **Packer base template.** VM `9100` (ubuntu-24-04-base) must exist
+   on the target node. If not: `packer/ubuntu-24-04-base/build-pve.sh <node>`.
+3. **`tofu@pve` API token.** See [`docs/proxmox-tofu-permissions.md`](../../docs/proxmox-tofu-permissions.md).
+   Stash the token string in KeePassXC at `Homelab/Tofu/proxmox-api-token`.
+4. **SSH access to the node + key loaded into `ssh-agent`.**
+   `ssh-copy-id root@pve12t` (or whichever node `proxmox_node` points
+   at), then `ssh-add ~/.ssh/id_ed25519` once per shell session. The
+   `bpg/proxmox` provider uploads cloud-init snippets over SSH (not
+   the HTTP API) and shells out non-interactively, so the key must
+   already be in the agent before `tofu apply`. Preflight verifies
+   both. See [`docs/opentofu-setup.md`](../../docs/opentofu-setup.md)
+   section **(d) Load the private key into `ssh-agent`** for the
+   macOS Keychain auto-load pattern that survives reboot.
+5. **Snippets storage enabled.** Datacenter → Storage → `local` →
+   Edit → tick **Snippets**. Preflight reports a cure command if not.
+
+## Deploy
 
 The Justfile recipes are parameterized by role name. From repo root:
 
@@ -34,7 +65,9 @@ just hydrate amp-game
 
 # Per session/reboot: load your homelab SSH key into the agent if it
 # isn't already. (preflight fails with "ssh-agent has no keys loaded"
-# otherwise.) Skip if macOS keychain integration is set up.
+# otherwise.) Skip if macOS keychain integration is set up — see
+# docs/opentofu-setup.md section (d) "Load the private key into
+# ssh-agent" for the once-per-machine Keychain auto-load pattern.
 ssh-add -l >/dev/null 2>&1 || ssh-add ~/.ssh/id_ed25519_homelab
 
 # Verify ssh/Proxmox/template/snippets prerequisites.
@@ -95,6 +128,60 @@ Operator runs the ceremony manually:
 After this, day-to-day admin is via the AMP web UI — no Linux access
 required for game-server management.
 
+## Operations
+
+### Find the VM's IP
+
+DHCP lease, so the IP can change. Three lookups:
+
+1. **`tofu output ipv4`** in `vms/amp-game/terraform/` — what qemu-guest-agent
+   reports, scraped by the provider. Usually the easiest.
+2. **Proxmox Web UI** → VM 110 → Summary tab → "IPs" row.
+3. **Router DHCP lease table** by hostname `amp-game` or by MAC (from
+   `tofu output mac`).
+
+For stability, pin a DHCP reservation on the router using the MAC.
+
+### Re-run a single Ansible task
+
+```bash
+cd vms/amp-game/ansible
+ansible-playbook -i inventory.yml site.yml --tags <tag>   # if you've added tags
+# or, run the whole playbook idempotently:
+just ansible-check amp-game   # --check --diff (no changes)
+just ansible amp-game
+```
+
+### Resize a running VM
+
+Edit `terraform.tfvars` to bump sizing, then `just apply amp-game`. The
+provider's clone block reconciles in place:
+
+```bash
+# Edit terraform.tfvars: uncomment + raise vm_memory_mb / vm_cores
+just plan amp-game        # confirm only memory/cores change
+just apply amp-game
+```
+
+Memory grows live (no reboot needed when balloon=0). Cores require a
+VM reboot to take effect — the provider triggers it automatically.
+
+### Recovery
+
+- **Take a Proxmox snapshot** before risky changes (UI: VM 110 → Snapshots).
+- **Roll back**: `qm rollback 110 <snapshot-name>` on the node.
+- **Game-server-level backups**: AMP has its own backup feature in the
+  web UI. Configure scheduled backups under each instance's Schedule tab.
+
+## Destroy and rebuild
+
+```bash
+just destroy amp-game     # or: tofu destroy in vms/amp-game/terraform/
+just apply amp-game       # re-creates the VM; cloud-init re-runs identity
+just ansible amp-game     # re-applies prereqs + ufw + unattended-upgrades
+# Then re-run the AMP installer ceremony (Post-deploy ceremony above).
+```
+
 ## Sizing
 
 Defaults in [`terraform/variables.tf`](terraform/variables.tf):
@@ -122,49 +209,16 @@ ufw is set inside the VM by Ansible. Perimeter firewall (router) is what
 gates external access — port-forward only when guests need to connect
 from outside the LAN.
 
-## Operations
+## Files
 
-### Find the VM's IP
-
-DHCP lease, so the IP can change. Three lookups:
-
-1. **`tofu output ipv4`** in `vms/amp-game/terraform/` — what qemu-guest-agent
-   reports, scraped by the provider. Usually the easiest.
-2. **Proxmox Web UI** → VM 110 → Summary tab → "IPs" row.
-3. **Router DHCP lease table** by hostname `amp-game` or by MAC (from
-   `tofu output mac`).
-
-For stability, pin a DHCP reservation on the router using the MAC.
-
-### Resize a running VM
-
-Edit `terraform.tfvars` to bump sizing, then `just apply amp-game`. The
-provider's clone block reconciles in place:
-
-```bash
-# Edit terraform.tfvars: uncomment + raise vm_memory_mb / vm_cores
-just plan amp-game        # confirm only memory/cores change
-just apply amp-game
-```
-
-Memory grows live (no reboot needed when balloon=0). Cores require a
-VM reboot to take effect — the provider triggers it automatically.
-
-### Recovery
-
-- **Take a Proxmox snapshot** before risky changes (UI: VM 110 → Snapshots).
-- **Roll back**: `qm rollback 110 <snapshot-name>` on the node.
-- **Game-server-level backups**: AMP has its own backup feature in the
-  web UI. Configure scheduled backups under each instance's Schedule tab.
-
-### Destroy and rebuild
-
-```bash
-just destroy amp-game     # or: tofu destroy in vms/amp-game/terraform/
-just apply amp-game       # re-creates the VM; cloud-init re-runs identity
-just ansible amp-game     # re-applies prereqs + ufw + unattended-upgrades
-# Then re-run the AMP installer ceremony (Post-deploy ceremony above).
-```
+- `terraform/main.tf` — provider + module call (sizing, cloud-init).
+- `terraform/variables.tf` — inputs (endpoint, token, node, user, key, sizing overrides).
+- `terraform/outputs.tf` — `ipv4`, `mac`, etc. consumed by `just inventory`.
+- `terraform/terraform.tfvars.tpl` — committed, kp:// placeholders.
+- `terraform/terraform.tfvars.example` — committed, manual-fill alternative.
+- `cloud-init/user-data.yaml.tftpl` — identity only.
+- `ansible/site.yml` + `roles/amp_game/` — apt deps + ufw + unattended-upgrades.
+- `legacy/` — pre-port shell `deploy.sh` + `cloud-init/user-data.yaml`; see [`legacy/README.md`](legacy/README.md).
 
 ## Legacy
 
