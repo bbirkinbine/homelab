@@ -256,6 +256,13 @@ For the alpha period, treat `nemoclaw onboard` as cheap enough to
 re-run instead of restoring a backup; channel re-pairings are the
 only painful step.
 
+### Re-run a single Ansible task
+
+```bash
+just ansible-check nemoclaw   # --check --diff (no changes)
+just ansible nemoclaw         # apply
+```
+
 ## Destroy and rebuild
 
 > **WARNING.** Destroying this VM loses the sandbox, its OpenClaw
