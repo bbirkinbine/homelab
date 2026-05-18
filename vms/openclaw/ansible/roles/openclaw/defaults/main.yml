@@ -1,0 +1,58 @@
+---
+# Defaults for the openclaw role. Override in inventory, group_vars, or
+# host_vars if a deployment diverges; the defaults match a single-host
+# Ubuntu 24.04 deployment running the gateway as a system service.
+
+# Node.js major version. Upstream recommends Node 24, accepts >= 22.16.
+# Pinning to 24 matches the README's first-line recommendation; bump
+# only when a future openclaw release requires it.
+openclaw_node_major: "24"
+
+# NodeSource apt-key landing site. Modern signed-by= keyring pattern
+# (replaces deprecated apt-key add).
+openclaw_nodesource_keyring: /etc/apt/keyrings/nodesource.asc
+openclaw_nodesource_key_url: "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
+
+# Linux/glibc target for the apt repo. NodeSource publishes for `nodistro`
+# (their distro-agnostic main pool); the apt path under that is
+# `/node_<major>.x/`. This stays stable across Ubuntu versions.
+openclaw_nodesource_repo: "deb [signed-by={{ openclaw_nodesource_keyring }}] https://deb.nodesource.com/node_{{ openclaw_node_major }}.x nodistro main"
+
+# Service user. NOT the admin user from cloud-init (that's claw-admin,
+# used only for ssh + sudo). The daemon runs as a dedicated unprivileged
+# system user so its workspace + secrets live under one home dir and the
+# daemon has no shell.
+openclaw_service_user: openclaw
+openclaw_service_group: openclaw
+openclaw_service_home: /home/openclaw
+
+# Gateway listen port. Default in the openclaw CLI; expose this in
+# defaults so a future multi-instance setup can run two daemons on the
+# same host with distinct ports if needed.
+openclaw_gateway_port: 18789
+
+# Whether to install/refresh the openclaw npm package. Set false in
+# inventory if you're managing the binary out-of-band (a checkout
+# install with `pnpm openclaw setup`, say).
+openclaw_install_npm_package: true
+
+# npm package + version spec. `latest` floats with upstream; pin to a
+# concrete release tag (e.g. "2026.5.13") when the lab wants
+# reproducible installs.
+openclaw_npm_package: openclaw
+openclaw_npm_version: latest
+
+# Whether to drop in a system-wide systemd unit and start it. The
+# upstream `openclaw onboard --install-daemon` writes a user-systemd
+# unit (under the operator's home) — we install a system unit
+# instead so the gateway runs whether or not anyone is logged in and
+# survives reboot without `loginctl enable-linger`. Set false to skip
+# the unit and run the gateway under the operator's shell (debugging).
+openclaw_install_systemd_unit: true
+openclaw_service_name: openclaw-gateway
+
+# Whether to open the gateway port through ufw. LAN-only by default —
+# the gateway has no auth at the HTTP layer beyond pairing, so don't
+# expose this to the internet without a Tailscale / reverse-proxy
+# perimeter.
+openclaw_ufw_allow_gateway: true

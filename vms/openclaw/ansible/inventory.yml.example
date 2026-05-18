@@ -1,0 +1,37 @@
+---
+# vms/openclaw/ansible/inventory.yml.example
+#
+# This file documents the inventory shape. The actual inventory.yml is
+# gitignored and is populated automatically by:
+#
+#   just inventory openclaw
+#
+# That recipe runs scripts/write-inventory.sh, which reads
+# `tofu output ansible_inventory_hint` and writes the result here as
+# vms/openclaw/ansible/inventory.yml. It refuses to write if the
+# qemu-guest-agent hasn't reported the VM's IP yet — wait ~30s after
+# `just apply openclaw` and retry.
+#
+# IP stability: pin a DHCP reservation per service VM on the router
+# (by MAC, visible via `tofu output mac`). Without that, the lease can
+# rotate and channel webhooks/QR pairings registered against the old
+# IP will silently break.
+#
+# Group `openclaw_servers` (plural) vs the host `openclaw` (singular)
+# avoids the Ansible 2.16+ "group and host share name" warning, same
+# convention as openbao_servers / rootca_servers.
+
+openclaw_servers:
+  hosts:
+    openclaw:
+      # Populated by `just inventory openclaw` from `tofu output ipv4`.
+      ansible_host: 10.0.0.X
+
+      # First-boot user created by cloud-init (matches the value of
+      # var.admin_username in terraform.tfvars).
+      ansible_user: claw-admin
+
+      # The Packer base image ships /usr/bin/python3 (cloud-init
+      # depends on it). Setting this explicitly skips Ansible's
+      # interpreter discovery and silences the matching warning.
+      ansible_python_interpreter: /usr/bin/python3

@@ -1,0 +1,7 @@
+---
+# Galaxy collections this role pulls. Install with:
+#   ansible-galaxy collection install -r requirements.yml
+# (or `just ansible-deps openclaw`).
+collections:
+  - name: community.general
+    version: ">=8.0.0"

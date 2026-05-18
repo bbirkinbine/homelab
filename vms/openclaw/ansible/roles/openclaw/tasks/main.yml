@@ -1,0 +1,215 @@
+---
+# Install the OpenClaw gateway from npm and run it as a system service.
+# Stops short of `openclaw onboard` — that's an operator ceremony
+# (interactive channel pairing + model-provider OAuth), see
+# vms/openclaw/README.md "First-onboard ceremony".
+#
+# Idempotency:
+#   * NodeSource keyring + repo: written via get_url + apt_repository
+#     (both idempotent).
+#   * Service user: ansible.builtin.user with system=true; no-op once
+#     present.
+#   * npm package: `npm install -g openclaw@latest` is run only when
+#     the binary is missing OR openclaw_npm_version is pinned and
+#     differs from the installed version. Floating `latest` is NOT
+#     re-checked on every run — pin a version to make installs
+#     deterministic.
+#   * systemd unit: managed via template; daemon-reload + restart on
+#     change via notify.
+
+- name: Ensure dependencies for the NodeSource apt repo are installed
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+    # No cache_valid_time — the Packer base wipes /var/lib/apt/lists/*
+    # but leaves /var/cache/apt/pkgcache.bin mtime recent, so
+    # cache_valid_time would mask the empty lists and `apt install`
+    # would fail on a fresh clone. Same pattern as amp_game / openbao.
+
+- name: Ensure /etc/apt/keyrings exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# NodeSource publishes their archive key as a binary OpenPGP key. Drop
+# it under keyrings as a stable filename and reference it from the
+# repo file's signed-by= attribute (modern apt pattern; replaces the
+# deprecated apt-key add).
+- name: Install NodeSource apt archive key
+  ansible.builtin.get_url:
+    url: "{{ openclaw_nodesource_key_url }}"
+    dest: "{{ openclaw_nodesource_keyring }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add NodeSource apt repository
+  ansible.builtin.apt_repository:
+    repo: "{{ openclaw_nodesource_repo }}"
+    filename: nodesource
+    state: present
+    update_cache: true
+
+- name: Install nodejs (brings npm)
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+
+- name: Capture installed node version
+  ansible.builtin.command: node --version
+  register: openclaw_node_version_raw
+  changed_when: false
+
+- name: Assert Node major >= openclaw_node_major
+  ansible.builtin.assert:
+    that:
+      - openclaw_node_version_raw.stdout is regex('^v(' ~ openclaw_node_major ~ '|[3-9][0-9])\\.')
+    fail_msg: >-
+      Installed Node {{ openclaw_node_version_raw.stdout | trim }} is older than v{{ openclaw_node_major }}.
+      Check that /etc/apt/sources.list.d/nodesource.list points at node_{{ openclaw_node_major }}.x, then re-run.
+
+- name: Create openclaw service group
+  ansible.builtin.group:
+    name: "{{ openclaw_service_group }}"
+    state: present
+    system: true
+
+# System user with a real home dir and `nologin` shell. Real home is
+# important — the openclaw CLI writes config + state under $HOME, and
+# we want that under /home/openclaw rather than /var/lib so the layout
+# matches what `openclaw onboard` documents (i.e. ~/.openclaw).
+- name: Create openclaw service user
+  ansible.builtin.user:
+    name: "{{ openclaw_service_user }}"
+    group: "{{ openclaw_service_group }}"
+    home: "{{ openclaw_service_home }}"
+    shell: /usr/sbin/nologin
+    create_home: true
+    system: true
+    state: present
+
+- name: Ensure service-user .openclaw workspace directory exists
+  ansible.builtin.file:
+    path: "{{ openclaw_service_home }}/.openclaw"
+    state: directory
+    owner: "{{ openclaw_service_user }}"
+    group: "{{ openclaw_service_group }}"
+    mode: "0750"
+
+# Global npm install. The openclaw README explicitly supports
+# `npm i -g openclaw@latest`. We use the global install (not a
+# per-user one) because the systemd unit runs as the openclaw service
+# user and the binary needs to live at a predictable system path
+# (/usr/bin/openclaw on the NodeSource node package).
+- name: Check whether openclaw is installed at the requested version
+  ansible.builtin.command: openclaw --version
+  register: openclaw_installed_version
+  changed_when: false
+  failed_when: false
+
+- name: Install or update openclaw npm package globally
+  community.general.npm:
+    name: "{{ openclaw_npm_package }}"
+    version: "{{ openclaw_npm_version if openclaw_npm_version != 'latest' else omit }}"
+    global: true
+    state: "{{ 'latest' if openclaw_npm_version == 'latest' else 'present' }}"
+  when:
+    - openclaw_install_npm_package
+    - openclaw_installed_version.rc != 0 or openclaw_npm_version != 'latest'
+  notify: Restart openclaw-gateway
+
+- name: Render openclaw-gateway systemd unit
+  ansible.builtin.template:
+    src: openclaw-gateway.service.j2
+    dest: "/etc/systemd/system/{{ openclaw_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  when: openclaw_install_systemd_unit
+  notify:
+    - Reload systemd
+    - Restart openclaw-gateway
+
+- name: Enable and start openclaw-gateway
+  ansible.builtin.systemd:
+    name: "{{ openclaw_service_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: openclaw_install_systemd_unit
+
+# Gateway HTTP port. The Packer base ships ufw with 22/tcp already
+# allowed; this opens 18789. Keep this LAN-only — the gateway has no
+# native HTTP auth beyond pairing, so don't proxy it to the internet
+# without an mTLS reverse proxy in front.
+- name: Allow openclaw gateway through ufw
+  community.general.ufw:
+    rule: allow
+    port: "{{ openclaw_gateway_port }}"
+    proto: tcp
+    comment: "OpenClaw gateway"
+  when: openclaw_ufw_allow_gateway
+
+# The Packer base masks apt-daily timers so locked-down roles can
+# stay frozen. openclaw is a long-running service and we want
+# security patches flowing — re-enable here (same pattern as openbao).
+- name: Unmask apt-daily timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    masked: false
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+- name: Enable unattended-upgrades config
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Start apt-daily timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+# Final state check. The gateway responds to /healthz on 18789 once
+# up; treat anything other than HTTP 200 as a failure. The uri module
+# returns non-2xx as a failed task with a clear message — preferable
+# to shelling out to curl per ansible-lint's command-instead-of-module
+# rule.
+- name: Confirm openclaw-gateway health endpoint returns 200
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ openclaw_gateway_port }}/healthz"
+    return_content: false
+    status_code: 200
+    timeout: 5
+  register: openclaw_health
+  retries: 6
+  delay: 5
+  until: openclaw_health.status == 200
+  when: openclaw_install_systemd_unit
+
+- name: Show next-steps reminder
+  ansible.builtin.debug:
+    msg: >-
+      Gateway is up on :{{ openclaw_gateway_port }} but NOT yet onboarded.
+      SSH to the VM as {{ openclaw_service_user }} (sudo -u {{ openclaw_service_user }})
+      and run `openclaw onboard` to pair channels + authorize a model provider.
+      See vms/openclaw/README.md "First-onboard ceremony".

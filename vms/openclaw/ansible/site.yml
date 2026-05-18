@@ -1,0 +1,20 @@
+---
+# vms/openclaw/ansible/site.yml
+#
+# Top-level play for the openclaw role. Runs the `openclaw` role
+# against the inventory's `openclaw_servers` host group. Single-host
+# today; if/when the day comes for a multi-instance setup (separate
+# personal workspaces), the same play scales out — drop a second host
+# into the group with a distinct `openclaw_service_user`.
+#
+# Usage from repo root:
+#   just ansible openclaw
+# Or directly:
+#   cd vms/openclaw/ansible && ansible-playbook -i inventory.yml site.yml
+
+- name: Install OpenClaw gateway (Node 24 + npm + systemd)
+  hosts: openclaw_servers
+  become: true
+  gather_facts: true
+  roles:
+    - role: openclaw

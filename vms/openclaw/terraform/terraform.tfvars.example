@@ -1,0 +1,29 @@
+# vms/openclaw/terraform/terraform.tfvars.example
+#
+# Copy to terraform.tfvars (gitignored) and fill in real values, OR
+# copy to terraform.tfvars.tpl with kp:// placeholders and use
+# `just hydrate openclaw` to resolve them against KeePassXC.
+#
+# See docs/opentofu-setup.md for the hydration workflow.
+
+# Proxmox API endpoint URL. Trailing slash is OK.
+proxmox_endpoint = "https://pve12t:8006/"
+
+# Full API token in `user@realm!tokenid=secret-uuid` form.
+# See docs/proxmox-tofu-permissions.md for how to mint one.
+#
+# When you switch to the .tpl + hydrate flow, this line becomes:
+#   proxmox_api_token = "{{ kp://Homelab/proxmox-tofu-token }}"
+proxmox_api_token = "tofu@pve!apply=00000000-0000-0000-0000-000000000000"
+
+# Proxmox node name to create the VM on. openclaw is cluster-mobile,
+# so any of pve12t / pve13m / pve13t is fine; co-locate based on the
+# host's spare RAM rather than any architectural pin.
+proxmox_node = "pve12t"
+
+# First-boot admin user. cloud-init creates this with sudo + the SSH
+# key below. Ansible runs against this user for all subsequent config.
+admin_username = "claw-admin"
+
+# Single-line authorized_key. ssh-ed25519 recommended.
+ssh_public_key = "ssh-ed25519 AAAA...your-pubkey... brianbirkinbine@workstation"
