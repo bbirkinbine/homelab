@@ -2,9 +2,7 @@
 
 Ansible role that configures the dedicated PBS host(s) to a known-good baseline. This is **layer 0** for the backup tier: it runs against the bare-metal PBS hardware, not against any VM. The PVE-side storage registration (`pvesm add pbs ...`) sits on top of this layer.
 
-## Status
-
-Role implemented — first run pending against `pbs01`. See [`CLAUDE.md`](CLAUDE.md) for the spec and [`ansible/roles/pbs-host/SCAFFOLD-NOTES.md`](ansible/roles/pbs-host/SCAFFOLD-NOTES.md) for what was generated, assumptions baked in, and what to fill into `inventory.yml` before the first apply.
+See [`CLAUDE.md`](CLAUDE.md) for the design spec and [`ansible/roles/pbs-host/SCAFFOLD-NOTES.md`](ansible/roles/pbs-host/SCAFFOLD-NOTES.md) for what was generated, the assumptions baked in, and what to fill into `inventory.yml` before a first apply.
 
 The install-time procedure that produces a "freshly-installed PBS 4.x host" — USB media, BIOS, installer click-through — lives in [`docs/pbs-install.md`](../docs/pbs-install.md). Read that first if you're rebuilding from scratch.
 

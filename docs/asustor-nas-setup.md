@@ -28,10 +28,10 @@ vault doc `Projects/Homelab/VM Mobility — 3-Node Cluster on
   drives, capacity) so a rebuild from scratch has the numbers. -->
 - NAS-side network setup — one 2.5GbE port carries everything (main
   LAN; `nas_ip` in inventory). The second 2.5GbE port and the 10GbE
-  port are **unallocated** as of 2026-05-16, available for a future
-  dedicated backup link or LAG bond if/when the throughput case
-  materializes. The PBS↔NAS dedicated-network option was evaluated
-  and deferred — rationale lives in
+  port are **unallocated**, available for a future dedicated backup
+  link or LAG bond if/when the throughput case materializes. The
+  PBS↔NAS dedicated-network option was evaluated and deferred —
+  rationale lives in
   [`pbs-hosts/CLAUDE.md` § "Network shape"](../pbs-hosts/CLAUDE.md).
   No VLAN tagging on the active port.
 
