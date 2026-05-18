@@ -1,0 +1,22 @@
+---
+galaxy_info:
+  role_name: nemoclaw
+  author: brian.birkinbine
+  description: >-
+    Install NemoClaw prerequisites (Docker + Node 22 + nemoclaw npm-global)
+    on Ubuntu 24.04 (Packer base). Leaves `nemoclaw onboard` as an operator
+    ceremony.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+
+dependencies: []
+
+collections:
+  # community.general for ufw + apt_key fallbacks the upstream
+  # collection's apt_repository module doesn't cover. Pinning the
+  # min version to 8.0.0 matches the openbao/openclaw roles.
+  - community.general

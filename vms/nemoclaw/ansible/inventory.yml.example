@@ -1,0 +1,35 @@
+---
+# vms/nemoclaw/ansible/inventory.yml.example
+#
+# This file documents the inventory shape. The actual inventory.yml is
+# gitignored and is populated automatically by:
+#
+#   just inventory nemoclaw
+#
+# That recipe runs scripts/write-inventory.sh, which reads
+# `tofu output ansible_inventory_hint` and writes the result here as
+# vms/nemoclaw/ansible/inventory.yml. It refuses to write if the
+# qemu-guest-agent hasn't reported the VM's IP yet — wait ~30s after
+# `just apply nemoclaw` and retry.
+#
+# IP stability: pin a DHCP reservation on the router (by MAC from
+# `tofu output mac`). NemoClaw doesn't expose channel webhooks the
+# way OpenClaw does on :18789 — the OpenShell gateway handles channel
+# routing internally — but anything you DO register against an IP
+# (Tailscale node, reverse proxy backend, future Model Router on
+# :4000) will benefit from a stable lease.
+
+nemoclaw_servers:
+  hosts:
+    nemoclaw:
+      # Populated by `just inventory nemoclaw` from `tofu output ipv4`.
+      ansible_host: 10.0.0.X
+
+      # First-boot user created by cloud-init (matches the value of
+      # var.admin_username in terraform.tfvars).
+      ansible_user: nemo-admin
+
+      # The Packer base image ships /usr/bin/python3 (cloud-init
+      # depends on it). Setting this explicitly skips Ansible's
+      # interpreter discovery and silences the matching warning.
+      ansible_python_interpreter: /usr/bin/python3

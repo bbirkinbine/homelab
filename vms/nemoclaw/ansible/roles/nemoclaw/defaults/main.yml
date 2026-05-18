@@ -1,0 +1,74 @@
+---
+# Defaults for the nemoclaw role. Override in inventory, group_vars,
+# or host_vars if a deployment diverges; the defaults match a single-
+# host Ubuntu 24.04 deployment with Docker + Node 22 + nemoclaw CLI
+# and the operator running `nemoclaw onboard` interactively.
+
+# --- Node ---
+# Upstream NemoClaw README requires Node.js 22.16 or later. Pin to 22
+# (NodeSource's stable LTS channel as of 2026-05) — Node 24 also works
+# and openclaw's role pins to that, but NemoClaw's docs explicitly
+# minimum at 22.16 and bumping past upstream's documented floor on a
+# whim is the kind of drift that breaks first-light.
+nemoclaw_node_major: "22"
+
+nemoclaw_nodesource_keyring: /etc/apt/keyrings/nodesource.asc
+nemoclaw_nodesource_key_url: "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
+nemoclaw_nodesource_repo: "deb [signed-by={{ nemoclaw_nodesource_keyring }}] https://deb.nodesource.com/node_{{ nemoclaw_node_major }}.x nodistro main"
+
+# --- Docker ---
+# Upstream's installer requires Docker pre-installed. We use Docker
+# Inc.'s own apt repo (not Ubuntu's `docker.io`) because the upstream
+# install instructions and the NemoClaw test matrix reference
+# "Docker" — the official package — and `docker.io` lags by several
+# minor versions on Noble. signed-by points at the binary GPG key
+# under /etc/apt/keyrings.
+nemoclaw_docker_keyring: /etc/apt/keyrings/docker.asc
+nemoclaw_docker_key_url: "https://download.docker.com/linux/ubuntu/gpg"
+nemoclaw_docker_arch: "{{ ansible_architecture | regex_replace('^x86_64$', 'amd64') | regex_replace('^aarch64$', 'arm64') }}"
+nemoclaw_docker_repo: >-
+  deb [arch={{ nemoclaw_docker_arch }} signed-by={{ nemoclaw_docker_keyring }}]
+  https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+nemoclaw_docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+
+# --- Service user ---
+# Real shell + docker-group membership + linger. Different from the
+# openclaw role's nologin pattern because:
+#   1. The `nemoclaw` CLI is user-mode and writes state under $HOME.
+#   2. The operator needs to `sudo -u nemoclaw -i` to run `nemoclaw
+#      onboard` (interactive) and later `nemoclaw <name> connect`.
+#   3. `loginctl enable-linger` keeps any user-systemd units the
+#      stack might add (currently none — Docker + k3s carry the
+#      restart-on-boot weight) alive across logout.
+nemoclaw_service_user: nemoclaw
+nemoclaw_service_group: nemoclaw
+nemoclaw_service_home: /home/nemoclaw
+nemoclaw_service_shell: /bin/bash
+nemoclaw_enable_linger: true
+
+# --- nemoclaw npm package ---
+# npm-global install. `latest` floats with upstream's main releases;
+# pin to a concrete version (e.g. "0.1.0") for reproducible installs.
+# NemoClaw is alpha (per upstream's own README banner), so `latest`
+# may break between runs — pinning is the safer default for any lab
+# that's been onboarded.
+nemoclaw_install_npm_package: true
+nemoclaw_npm_package: nemoclaw
+nemoclaw_npm_version: latest
+
+# --- UFW ---
+# By default, NO inbound port is opened beyond SSH. NemoClaw's
+# gateway listens internally; the sandbox container talks to the
+# gateway over a local socket; channel webhooks (if any) typically
+# route through the OpenShell channel manager rather than a direct
+# external listener. If you enable the optional Model Router (LiteLLM
+# proxy on :4000) and want to expose it for debugging, flip
+# nemoclaw_ufw_allow_router=true — but :4000 is reachable from inside
+# the sandbox via the gateway, so external access is rarely needed.
+nemoclaw_ufw_allow_router: false
+nemoclaw_router_port: 4000
