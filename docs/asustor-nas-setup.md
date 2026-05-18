@@ -26,9 +26,14 @@ vault doc `Projects/Homelab/VM Mobility — 3-Node Cluster on
 - btrfs pool / RAID configuration on the NAS — ADM handles that at
   initial setup; <!-- TODO: record the actual pool layout (RAID level,
   drives, capacity) so a rebuild from scratch has the numbers. -->
-- NAS-side network bond / 10GbE setup — <!-- TODO: AS6706T has a
-  10GbE port; record whether it's bonded with the 2.5GbE ports, what
-  IP it uses, and which port is connected to which LAN switch. -->
+- NAS-side network setup — one 2.5GbE port carries everything (main
+  LAN; `nas_ip` in inventory). The second 2.5GbE port and the 10GbE
+  port are **unallocated**, available for a future dedicated backup
+  link or LAG bond if/when the throughput case materializes. The
+  PBS↔NAS dedicated-network option was evaluated and deferred —
+  rationale lives in
+  [`pbs-hosts/CLAUDE.md` § "Network shape"](../pbs-hosts/CLAUDE.md).
+  No VLAN tagging on the active port.
 
 ## Hardware
 
@@ -181,16 +186,121 @@ on. Go back to step 3, fix it, `exportfs -ra` on the NAS, retry.
 If the mount itself hangs, NFS server isn't running (step 1) or the
 firewall on the NAS is blocking the LAN subnet.
 
-## 5. (Optional, deferred) Additional shares
+## 5. Export for the PBS bulk datastore
+
+PBS lives on dedicated hardware (`pbs01`) and needs its **own** NFS
+export — separate from the `proxmox-vms` share above. The two workloads have different IO profiles: PVE VM disks
+are large sequential reads/writes; the PBS chunk store is millions
+of small files (deduplicated chunks under `.chunks/0000/` …
+`.chunks/ffff/`) with metadata-heavy GC and verify passes. Mixing
+them on one export ACL lets one workload's burst starve the other's
+cache, and the NAS-side R/W cache is tuned per share anyway.
+
+The PBS host mounts this export at `/mnt/pbs-bulk` and creates its
+datastore at `/mnt/pbs-bulk/datastore`. The PVE cluster does NOT
+mount this share — backups flow PVE → PBS API → NFS, not PVE → NFS
+directly.
+
+**This section is self-contained.** PBS setup happens at a different
+time than the PVE-side share above, so the click paths are restated
+here instead of pointing back to § 2-3.
+
+### 5a. Create the `proxmox-backups` shared folder
+
+1. ADM web UI → **Access Control** → **Shared Folders** → **Add**.
+2. **Volume:** `volume1` (same underlying btrfs pool as `proxmox-vms`).
+3. **Folder name:** `proxmox-backups` (matches `nas_pbs_nfs_export` in
+   [pbs-hosts/ansible/inventory.yml.example](../pbs-hosts/ansible/inventory.yml.example);
+   change both if you pick a different name).
+4. **Description:** "PBS chunk store (NFS, dedicated)".
+5. **Access permissions** (filesystem ACL — NFS-side gating is in
+   § 5b below):
+   - **`admin`** — Read/Write.
+   - **`guest`** — No access.
+   - **everyone else** — No access.
+
+   NFS clients never see usernames; this ACL is just the underlying
+   filesystem ownership. The NFS export ACL is the real trust
+   boundary.
+6. **Advanced:** leave compression / encryption off. PBS already
+   deduplicates chunks and optionally encrypts at the client; adding
+   btrfs compression on top burns CPU on every read for little space
+   win, and share-level encryption is redundant with PBS's own.
+7. **Apply.**
+
+After creation the folder lives at `/volume1/proxmox-backups` on the
+NAS filesystem. The PBS host's `pbs_datastore.yml` task will create
+its `datastore/` subdirectory inside on first apply — pre-creating
+it is harmless but not required.
+
+### 5b. Configure the NFS export
+
+1. ADM web UI → **Access Control** → **Shared Folders** → select
+   `proxmox-backups` → **Edit** → **NFS** tab (or "NFS Privileges").
+2. **Add an export rule** with these values:
+
+   | Field | Value | Why |
+   |---|---|---|
+   | **Allowed IP / Host** | the PBS host's single LAN IP, `/32` form (e.g. `192.0.2.20/32`) | Tighter than the subnet-wide ACL on the PVE share — there's exactly one consumer. Widening later is a one-click change. |
+   | **Privilege** | Read/Write | PBS writes chunks. |
+   | **Squash option** | **No root squash** (`no_root_squash`) | PBS's chunk store is owned by the daemon `backup` user (uid 34 on PBS 4.x). The role's `pbs_datastore.yml` chowns the datastore directory to `backup:backup` on first apply; with root-squash on, the chown gets remapped to nobody and fails. |
+   | **Anonymous GID/UID** | leave blank | Only relevant when root-squash is on. |
+   | **Sync mode** | **Sync** | `async` risks corrupting the chunk store on NAS power loss. PBS verify would surface the corruption eventually but recovery costs a full re-backup. |
+   | **Insecure ports** | **Enabled** | PBS's NFS client uses source ports > 1024; without this the mount succeeds but I/O fails. |
+   | **Subtree check** | **Disabled** | Legacy; causes file-handle problems with rename. |
+
+3. **Apply.** ADM regenerates `/etc/exports` and runs `exportfs -ra`.
+
+The NAS does **not** need a matching `backup` user/group on its side.
+The client sends UID 34 in the NFS wire payload; with
+`no_root_squash` the NAS accepts it and writes files owned by uid 34
+on the btrfs filesystem. Whether the NAS has a name for that uid is
+cosmetic (`ls -ln` will show `34` instead of `backup`).
+
+The "How NFS authentication actually works here" subsection under § 3
+applies identically to this export — trust boundary is the network
+ACL, not the UID claim.
+
+### 5c. Verify from the workstation
+
+```bash
+showmount -e <nas_ip> | grep proxmox-backups
+# Expected: /volume1/proxmox-backups  <pbs01_ip>/32
+
+# Mount test — run from the PBS host's LAN IP, or temporarily widen the
+# ACL to include your workstation IP for this test then revert.
+sudo mkdir -p /mnt/pbs-test
+sudo mount -t nfs4 -o vers=4.2 <nas_ip>:/volume1/proxmox-backups /mnt/pbs-test
+sudo touch /mnt/pbs-test/probe && sudo ls -la /mnt/pbs-test/probe   # owner root:root
+sudo rm /mnt/pbs-test/probe
+sudo umount /mnt/pbs-test
+sudo rmdir /mnt/pbs-test
+```
+
+If the role's chown step later fails during `just pbs-hosts`, root-
+squash is still on. Go back to § 5b, fix it, `exportfs -ra` on the
+NAS, retry.
+
+### 5d. PBS-specific NAS notes
+
+- **Inode budget.** PBS stores chunks as separate files under 65,536
+  nested directories (`.chunks/0000/` … `.chunks/ffff/`). File count
+  at low-double-digit TB will be in the millions. btrfs handles that
+  cleanly; just be aware if any NAS monitoring or quota system counts
+  files rather than bytes.
+- **NAS-side snapshots are redundant.** Every PBS snapshot is already
+  immutable in the chunk store, and PBS handles retention via prune
+  jobs. A btrfs snapshot schedule on `proxmox-backups` is storage you
+  don't need to spend — leave that share off any ADM snapshot policy
+  you set for `proxmox-vms`.
+
+## 6. (Optional, deferred) Additional shares
 
 Likely future shares; not required for the cluster's current scope:
 
 - **`proxmox-iso`** — `/volume1/proxmox-iso`, mounted on all nodes,
   registered in Proxmox as `nas-iso` content type `iso,vztmpl`. Lets
   the per-node ISO libraries (currently `local`) go away.
-- **`proxmox-backup`** — `/volume1/proxmox-backup`, registered with
-  content type `backup`. Pairs with a `vzdump` schedule. Cluster-wide
-  backup target.
 - **`obsidian-vault-mirror`** — read-only mirror of the workstation's
   Obsidian vault; not a homelab-cluster concern.
 
@@ -198,6 +308,13 @@ Each one is repeat the steps 2 + 3 above with a different folder
 name. Add the corresponding `nas_*_export` fields to inventory and a
 follow-on `pvesm add nfs` invocation. Don't pre-create empty shares
 "in case I need them later" — wait for a concrete consumer.
+
+> **Note on legacy `proxmox-backup` share:** earlier drafts of this
+> doc listed a `proxmox-backup` share registered as PVE storage with
+> content type `backup` (the `vzdump`-to-NFS path). That's a different
+> mechanism from the PBS host above and is no longer the lab's
+> backup-of-record. `proxmox-backups` (the export in § 5) is the
+> active design.
 
 ## Related docs
 

@@ -1,0 +1,106 @@
+---
+# Defaults for the pbs-host role. Override anything here in inventory
+# (group_vars / host_vars / inline `vars:` blocks). Inventory wins; this
+# file is the fallback so a fresh `inventory.yml` doesn't need to list
+# every knob.
+#
+# See pbs-hosts/CLAUDE.md for the role's full intent and the vault doc
+# [[Proxmox Backup Server — Capabilities and Tiered Storage]] for the
+# authoritative architecture (datastore tiering, retention policy).
+
+# ----- packages -------------------------------------------------------
+# Baseline package set installed by tasks/packages.yml. Aim small: only
+# things useful on every PBS host. state: present, not latest — upgrades
+# are a separate operator decision (see "What this role MUST NOT do" in
+# CLAUDE.md).
+pbs_host_packages:
+  # Minimum set required for the role's own downstream tasks. Operator
+  # debugging tools (htop, iperf3, tmux, dnsutils, tcpdump, etc.) are
+  # deliberately NOT installed by the role — `apt install <foo>` on
+  # demand if you need them on a specific host. Keeping the baseline
+  # tight means a fresh-host bootstrap installs exactly what the
+  # automation depends on, no more.
+  #
+  # JSON parsing in pbs_datastore.yml / pbs_users.yml / pbs_jobs.yml
+  # uses Ansible's `from_json` filter, NOT the `jq` binary — so jq is
+  # intentionally absent.
+  - chrony             # time.yml enables + configures chronyd
+  - ufw                # firewall.yml uses community.general.ufw → ufw binary
+  - nfs-common         # nfs.yml mounts NFSv4.2; kernel mount needs userspace utils
+
+# ----- apt repos ------------------------------------------------------
+# Where the .sources file lands. trixie + pbs-no-subscription, deb822
+# format. See templates/etc/apt/sources.list.d/pbs-no-subscription.sources.j2.
+pbs_host_sources_file: /etc/apt/sources.list.d/pbs-no-subscription.sources
+
+# Legacy enterprise repo paths dropped by the PBS installer (one of
+# these is present depending on installer vintage; tasks/repo.yml
+# removes both).
+pbs_host_enterprise_list: /etc/apt/sources.list.d/pbs-enterprise.list
+pbs_host_enterprise_sources: /etc/apt/sources.list.d/pbs-enterprise.sources
+
+# ----- NFS ------------------------------------------------------------
+# Mount options for the Asustor NFS share carrying the bulk datastore.
+# vers=4.2 picks up file-locking + delegations. _netdev keeps the mount
+# from blocking boot if the NAS is offline. noatime cuts spurious
+# writebacks during chunk reads. Large rsize/wsize match PVE's mount.
+pbs_host_nfs_options: "vers=4.2,_netdev,noatime,rsize=1048576,wsize=1048576"
+
+# ----- firewall -------------------------------------------------------
+# Whether to enable ufw at the end of tasks/firewall.yml. Default on.
+# Set to false during initial bring-up if you want to validate
+# connectivity first without firewall confusion.
+pbs_host_firewall_enabled: true
+
+# Allowed inbound from the LAN subnet (besides ICMP). The PBS web UI
+# and API both listen on 8007.
+pbs_host_firewall_allowed_tcp_ports:
+  - 22                 # SSH
+  - 8007               # PBS web UI + API
+
+# ----- datastores -----------------------------------------------------
+# Per-host pbs_datastores in inventory is the source of truth. These
+# defaults apply when inventory doesn't override.
+pbs_default_prune_keep_last: 3
+pbs_default_prune_keep_daily: 7
+pbs_default_prune_keep_weekly: 4
+pbs_default_prune_keep_monthly: 6
+pbs_default_prune_keep_yearly: 1
+
+# Default schedules for verify + prune + GC jobs created by
+# tasks/pbs_jobs.yml. PBS uses systemd-calendar-event syntax.
+# Stagger across the week so they don't all hit the NAS at once.
+pbs_verify_schedule: "sat 02:00"
+pbs_prune_schedule: "wed 03:00"
+pbs_gc_schedule: "sun 02:00"
+# Skip re-verifying snapshots whose last successful verify was within
+# this many days. Reduces unnecessary IO on healthy datastores.
+pbs_verify_outdated_after_days: 7
+
+# API user for the PVE cluster to authenticate as when pushing backups.
+# Service identity, not a human. The role does NOT create the user or
+# token — operator creates them via the PBS web UI before first apply
+# and stores the secret in KeePassXC under
+# `Homelab/PBS/pveingress-cluster` (Password field). See the header
+# comment in tasks/pbs_users.yml for the runbook.
+pbs_pve_ingress_user: "pveingress@pbs"
+pbs_pve_ingress_token_name: "cluster"
+# Role granted on each datastore namespace, applied to BOTH the parent
+# user and the token (see tasks/pbs_users.yml header comment for the
+# intersection-semantics reason — granting only on the token yields
+# zero effective permissions on PBS 4.x).
+#
+# DatastoreAdmin (not the narrower DatastoreBackup) because PVE's
+# `pvesm add pbs` storage-registration handshake — and the periodic
+# storage health check — call API endpoints that require
+# Datastore.Audit. DatastoreBackup in PBS 4.x includes Datastore.Backup
+# + Datastore.Read + Datastore.Verify but NOT Datastore.Audit, so PVE
+# gets a 403 trying to enumerate the datastore and surfaces it as
+# "Cannot find datastore 'bulk', check permissions and existence!"
+# (the error is misleading — the datastore exists, the ACL grant
+# exists, but the audit-gated list endpoint can't see it).
+# DatastoreAdmin is acceptable here because the only consumer is the
+# trusted PVE cluster on the same LAN. If you ever expose PBS to a
+# less-trusted PVE instance, switch to a tighter pair: keep
+# DatastoreBackup for write, add a second ACL grant for DatastoreAudit.
+pbs_pve_ingress_role: "DatastoreAdmin"

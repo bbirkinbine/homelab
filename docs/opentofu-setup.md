@@ -159,6 +159,37 @@ two entries:
 The .tfvars.tpl placeholder syntax for the latter is therefore
 `kp://Homelab/Tofu/workstation-ssh-pubkey#Notes`.
 
+For the PBS-side bootstrap, one more entry. PBS 4.x's User Management
+form requires a password even for service identities, so this entry
+carries two fields. The token-string format matches
+`Homelab/Tofu/proxmox-api-token` exactly — full `<tokenid>=<secret>`
+shape — just stored in Notes instead of Password because the entry's
+Password slot is already taken by the UI password:
+
+- `Homelab/PBS/pveingress-cluster` →
+  - **Password** field: random 32-char password set on the
+    `pveingress@pbs` PBS user. Generated via the KeePassXC dice
+    icon, pasted into the PBS form, kept for completeness — never
+    read at runtime because the PVE cluster authenticates via the
+    token.
+  - **Notes** field: full token string `pveingress@pbs!cluster=<secret>`
+    (operator concatenates the auth-id with `=` and the secret PBS
+    displays in the token-create modal). Identical format to
+    `Homelab/Tofu/proxmox-api-token`. The future PVE-side play splits
+    at `=` to feed `pvesm add pbs ... --username --password`.
+
+The future PVE-side play that registers PBS as a storage target will
+hydrate from `kp://Homelab/PBS/pveingress-cluster#Notes` (same `#Notes`
+shape this doc already uses for the SSH pubkey).
+
+None of the entries above need operator-picked passwords — every one is
+either server-generated (Proxmox / PBS token creation displays a 32+
+character random value once) or pre-existing on the workstation (your
+SSH pubkey). If you ever do need to generate a password yourself in
+KeePassXC for some other purpose, use the dice icon in the Add Entry
+dialog — the default profile (32 chars, all classes) is more than
+enough for anything in this lab.
+
 ---
 
 ## Per-role workflow

@@ -1,0 +1,12 @@
+---
+# Role-internal constants — not meant to be overridden from inventory.
+# Defaults that ARE overridable live in defaults/main.yml. Keep this
+# file minimal; anything in here is effectively a magic number, and
+# the right way to manage those is to surface them as named constants
+# in one place so they're greppable.
+
+# CLI binary used for all PBS configuration ops (datastore, user,
+# token, remote, sync-job, verify-job, gc-schedule). Centralized so
+# tasks reference one name. Path is fixed by the proxmox-backup-server
+# package; no need to make this overridable.
+pbs_mgr_bin: /usr/sbin/proxmox-backup-manager

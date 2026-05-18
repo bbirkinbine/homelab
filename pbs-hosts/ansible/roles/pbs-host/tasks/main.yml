@@ -1,0 +1,71 @@
+---
+# Entry point for the pbs-host role. The order below matters:
+#
+#   repo            → pull packages from the right place before installing
+#   packages        → ufw, chrony, nfs-common, etc. land before tasks that need them
+#   time            → time agreement matters; do it early
+#   hosts_file      → other tasks may rely on hostname resolution
+#   tuning          → sysctl drop-in (TCP buffers for chunk transfers)
+#   nfs             → mount the Asustor share at /mnt/pbs-bulk
+#   firewall        → ufw rules + enable
+#   users           → operator SSH key for root@<host>
+#   pbs_datastore   → create datastores via proxmox-backup-manager
+#   pbs_users       → service user + API token for PVE ingress
+#   pbs_jobs        → verify + GC schedules per datastore
+#
+# import_tasks (not include_tasks) — static composition so syntax
+# errors in any sub-file surface during `--syntax-check`.
+
+- name: Assert required per-host vars are set
+  ansible.builtin.assert:
+    that:
+      - pbs_lan_ip | default('') | length > 0
+      - pbs_datastores | default([]) | length > 0
+    fail_msg: >-
+      Inventory is missing one or more of pbs_lan_ip, pbs_datastores
+      for host {{ inventory_hostname }}. At least one datastore must be
+      defined. See pbs-hosts/ansible/inventory.yml.example.
+    quiet: true
+
+# Empty pubkey is permitted so the initial scaffold runs cleanly.
+# Warn loudly though — root@<host> will not pick up a key.
+- name: Warn if admin_ssh_pubkey is empty
+  ansible.builtin.debug:
+    msg: >-
+      admin_ssh_pubkey is empty. tasks/users.yml will skip installing a
+      root authorized_keys entry. Set it in inventory before the first
+      production apply.
+  when: (admin_ssh_pubkey | default('')) | length == 0
+
+- name: APT repositories
+  ansible.builtin.import_tasks: repo.yml
+
+- name: Base packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Time sync (chrony)
+  ansible.builtin.import_tasks: time.yml
+
+- name: /etc/hosts
+  ansible.builtin.import_tasks: hosts_file.yml
+
+- name: Sysctl tuning
+  ansible.builtin.import_tasks: tuning.yml
+
+- name: NFS mount (bulk datastore)
+  ansible.builtin.import_tasks: nfs.yml
+
+- name: Host firewall (ufw)
+  ansible.builtin.import_tasks: firewall.yml
+
+- name: Operator SSH keys
+  ansible.builtin.import_tasks: users.yml
+
+- name: PBS datastores
+  ansible.builtin.import_tasks: pbs_datastore.yml
+
+- name: PBS users + API tokens
+  ansible.builtin.import_tasks: pbs_users.yml
+
+- name: PBS scheduled jobs (verify, GC)
+  ansible.builtin.import_tasks: pbs_jobs.yml

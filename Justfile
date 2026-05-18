@@ -94,6 +94,30 @@ pve-hosts-check:
 pve-hosts-one host:
     cd pve-hosts/ansible && ansible-playbook -i inventory.yml site.yml --limit {{host}}
 
+# --- pbs-hosts (layer 0, parallel to pve-hosts) ------------------------------
+#
+# Mirror of the pve-hosts-* recipes for the Proxmox Backup Server hosts
+# under pbs-hosts/. Same separation rationale: layer 0 against bare-
+# metal PBS, not VMs; inventory + preconditions diverge from pve-hosts
+# enough that a shared recipe would mostly be branching.
+
+# Install Galaxy collections for the pbs-host role (one-time per workstation).
+pbs-hosts-deps:
+    cd pbs-hosts/ansible && ansible-galaxy collection install -r requirements.yml
+
+# Apply the pbs-host role across all PBS hosts in inventory.yml.
+pbs-hosts:
+    cd pbs-hosts/ansible && ansible-playbook -i inventory.yml site.yml
+
+# Same, but --check --diff (drift report only, no changes applied).
+pbs-hosts-check:
+    cd pbs-hosts/ansible && ansible-playbook -i inventory.yml site.yml --check --diff
+
+# Apply against a single PBS host (useful when more than one PBS host exists).
+#   just pbs-hosts-one pbs01
+pbs-hosts-one host:
+    cd pbs-hosts/ansible && ansible-playbook -i inventory.yml site.yml --limit {{host}}
+
 # --- housekeeping ------------------------------------------------------------
 
 # `tofu fmt -recursive` across every .tf file in the repo.

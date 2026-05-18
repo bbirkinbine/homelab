@@ -1,0 +1,97 @@
+---
+# pbs-hosts/ansible/inventory.yml.example
+#
+# Copy to inventory.yml (gitignored) and fill in the placeholder values
+# marked with `# TODO`. One PBS host (`pbs01`) — add more under
+# `hosts:` if/when the lab grows.
+#
+# A `pve_hosts` mirror group is included for /etc/hosts resolution only.
+# The play targets `pbs_hosts`; pve_hosts entries here are for var
+# lookup, not connection. Keep this synchronized with
+# pve-hosts/ansible/inventory.yml — when a PVE node IP changes, change
+# it here too.
+
+pbs_hosts:
+  vars:
+    # ----- cluster-wide -----
+    pbs_lan_subnet: "192.0.2.0/24"          # RFC 5737 docs range — replace with real LAN subnet
+
+    # NAS — dedicated NFS export for PBS bulk datastore (different from
+    # the PVE-VMs export under nas-vms; keep them separate so PBS chunk
+    # IO doesn't compete with VM disk IO for cache and export ACLs).
+    nas_hostname: "asustor.lan"             # TODO: confirm or change
+    nas_ip: "192.0.2.10"                    # replace with real NAS IP
+    nas_pbs_nfs_export: "/volume1/proxmox-backups"  # TODO: confirm against ADM Shared Folders
+    nas_pbs_mount_point: "/mnt/pbs-bulk"
+
+    # Repos — PBS 4.x = Debian 13 (trixie)
+    pbs_repo_distribution: "trixie"
+
+    # Time sync — same targets as the PVE cluster for consistency
+    chrony_servers:
+      - "time.cloudflare.com"
+      - "0.pool.ntp.org"
+      - "1.pool.ntp.org"
+
+    # SSH key allowed to root@<host>. Single string; multi-line via
+    # YAML `|` if you have more than one.
+    admin_ssh_pubkey: ""                    # TODO: paste your pubkey
+
+    # Common Ansible connection bits — PBS ISO install ships python3.
+    ansible_user: root
+    ansible_python_interpreter: /usr/bin/python3
+
+  hosts:
+    # ---- pbs01 (primary backup target) ----
+    pbs01:
+      ansible_host: 192.0.2.20              # replace with real LAN IP
+      pbs_lan_ip: "192.0.2.20"              # replace with real LAN IP
+
+      # Datastores. The bulk datastore is required; the local fast
+      # datastore is optional (off by default — flip the toggle below
+      # AND add a second entry here to enable). Paths are absolute;
+      # the role does not mkfs, only checks they exist.
+      pbs_datastores:
+        - name: "bulk"
+          path: "/mnt/pbs-bulk/datastore"   # under the NAS NFS mount
+          # Retention. PBS prune keeps the LAST N of each interval.
+          # These are starting defaults — tune once real backup volume
+          # is observed.
+          prune_keep_last: 3
+          prune_keep_daily: 7
+          prune_keep_weekly: 4
+          prune_keep_monthly: 6
+          prune_keep_yearly: 1
+
+      # Optional second datastore on local fast block storage for hot
+      # retention. NVMe (~3 GB/s) vs NFS (~200 MB/s with cache) is the
+      # winning ratio. CAVEAT: the stock G3 Pro ships with a 512 GB
+      # SATA SSD (~500 MB/s) — only marginally faster than the NFS
+      # bulk store for sequential writes. To actually win, swap the
+      # stock drive for an NVMe before enabling this lever.
+      #
+      # See pbs-hosts/CLAUDE.md § "Network shape" for why an
+      # NVMe-backed local fast datastore beats a dedicated PBS↔NAS
+      # network on i3-10110U hardware.
+      #
+      # To enable after the drive swap: flip this true AND add a
+      # second entry to pbs_datastores pointing at a pre-existing
+      # directory on the new drive (typically under
+      # /var/lib/proxmox-backup/fast/).
+      pbs_local_fast_datastore_enabled: false
+
+# Mirror of the PVE cluster's inventory for /etc/hosts resolution.
+# Keep synchronized with pve-hosts/ansible/inventory.yml — when a PVE
+# node's LAN IP changes, change it here too. We don't import the file
+# directly because Ansible doesn't support cross-inventory includes,
+# and the small duplication is preferable to a build step.
+pve_hosts:
+  vars:
+    pve_lan_subnet: "192.0.2.0/24"
+  hosts:
+    pve12t:
+      pve_lan_ip: "192.0.2.12"
+    pve13m:
+      pve_lan_ip: "192.0.2.13"
+    pve13t:
+      pve_lan_ip: "192.0.2.14"

@@ -1,0 +1,25 @@
+# /etc/apt/sources.list.d/pbs-no-subscription.sources — managed by Ansible
+# (pbs-host role). Replaces the stock enterprise sources file which 401s
+# without a Proxmox subscription. Format: deb822 (multi-stanza), which
+# PBS 4.x defaults to. Reference: https://pbs.proxmox.com/wiki/index.php/Package_Repositories
+#
+# Note the repo URL: /pbs (NOT /pve — that's the PVE-side repo). Component
+# is `pbs-no-subscription` (mirror of PVE's pve-no-subscription).
+
+Types: deb
+URIs: http://deb.debian.org/debian
+Suites: {{ pbs_repo_distribution }} {{ pbs_repo_distribution }}-updates
+Components: main contrib
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: http://security.debian.org/debian-security
+Suites: {{ pbs_repo_distribution }}-security
+Components: main contrib
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: http://download.proxmox.com/debian/pbs
+Suites: {{ pbs_repo_distribution }}
+Components: pbs-no-subscription
+Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg

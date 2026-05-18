@@ -1,0 +1,200 @@
+---
+# Wire the PVE-cluster's backup-ingress identity into PBS, then grant
+# it the configured role (default DatastoreAdmin, see defaults/main.yml
+# for why) on each datastore.
+#
+# The user (`pveingress@pbs`) and its API token (`cluster`) are NOT
+# created by this role. Convention in this repo is that any secret
+# generated server-side (PBS prints the cleartext token once at
+# create time and never again) is created by the operator outside of
+# Ansible and stored in KeePassXC — matching the pattern used for the
+# PVE-side `tofu@pve!apply` and `packer@pve!builder` tokens.
+#
+# Manual prereq (one-time, before first apply):
+#
+#   1. Open the PBS web UI: https://<pbs01-ip>:8007 (login root@pam).
+#   2. Configuration → Access Control → User Management → Add
+#      User ID: pveingress
+#      Realm:   Proxmox Backup authentication server
+#      (Password and Email are optional; service users don't need
+#      either when only token auth is used.)
+#   3. Configuration → Access Control → API Tokens → Add
+#      User:       pveingress@pbs
+#      Token Name: cluster
+#      Expiration: (leave default unless you want time-limited)
+#      Privilege Separation: KEEP CHECKED — the token gets its own
+#      ACL grant in step 4 below; the parent user stays bare.
+#   4. PBS displays the secret value ONCE in a modal. Copy it into
+#      KeePassXC under:
+#         Homelab/PBS/pveingress-cluster   (Password field)
+#      This entry is consumed by the future PVE-side hydrate flow
+#      that registers PBS as a storage target (pvesm add pbs ...).
+#      pbs-host itself does NOT read the secret — only the auth-id.
+#
+# This role then:
+#   - Asserts the user + token exist on PBS (fails loudly with the
+#     manual-prereq pointer if not).
+#   - Grants the token the configured ACL role on each datastore
+#     (default `DatastoreAdmin`; see defaults/main.yml for rationale).
+
+- name: Query existing PBS users
+  ansible.builtin.command: "{{ pbs_mgr_bin }} user list --output-format json"
+  register: pbs_existing_users
+  changed_when: false
+  check_mode: false   # pure read; needed so --check produces a real diff
+
+- name: Parse existing user IDs
+  ansible.builtin.set_fact:
+    pbs_existing_user_ids: >-
+      {{ (pbs_existing_users.stdout | from_json) | map(attribute='userid') | list }}
+
+- name: Assert PVE-ingress user exists in PBS
+  ansible.builtin.assert:
+    that:
+      - pbs_pve_ingress_user in pbs_existing_user_ids
+    fail_msg: |-
+      Required PBS user `{{ pbs_pve_ingress_user }}` not found.
+
+      The pbs-host role does not create this user — convention is to
+      create it manually in the PBS web UI before running the role,
+      so the token secret PBS generates can be captured into KeePassXC
+      without a workstation-side capture file.
+
+      Quick steps:
+        1. PBS web UI: https://{{ inventory_hostname }}:8007 (root@pam)
+        2. Configuration → Access Control → User Management → Add
+           User ID: pveingress, Realm: Proxmox Backup authentication server
+        3. Configuration → Access Control → API Tokens → Add
+           User: pveingress@pbs, Token Name: cluster
+        4. Copy the secret PBS displays into KeePassXC under:
+             Homelab/PBS/pveingress-cluster   (Password field)
+        5. Re-run `just pbs-hosts`.
+
+      Full runbook: pbs-hosts/ansible/roles/pbs-host/tasks/pbs_users.yml
+                    header comment + pbs-hosts/README.md "Quick start".
+    quiet: true
+
+# Token enumeration. JSON output of `user list-tokens` gives token names
+# without the secret. The token full ID is `<user>!<tokenname>`.
+- name: Query existing tokens for the PVE-ingress user
+  ansible.builtin.command: >-
+    {{ pbs_mgr_bin }} user list-tokens {{ pbs_pve_ingress_user }} --output-format json
+  register: pbs_existing_tokens
+  changed_when: false
+  check_mode: false   # pure read; needed so --check produces a real diff
+
+- name: Parse existing token names
+  ansible.builtin.set_fact:
+    pbs_existing_token_names: >-
+      {{ (pbs_existing_tokens.stdout | default('[]', true) | from_json)
+         | map(attribute='tokenid')
+         | map('regex_replace', '^.+!', '')
+         | list }}
+
+- name: Assert PVE-ingress API token exists in PBS
+  ansible.builtin.assert:
+    that:
+      - pbs_pve_ingress_token_name in pbs_existing_token_names
+    fail_msg: |-
+      Required PBS API token `{{ pbs_pve_ingress_user }}!{{ pbs_pve_ingress_token_name }}` not found.
+
+      User `{{ pbs_pve_ingress_user }}` exists but the `{{ pbs_pve_ingress_token_name }}`
+      token under it does not. Create it manually in the PBS web UI
+      so the secret PBS prints can be captured into KeePassXC:
+
+        1. PBS web UI: https://{{ inventory_hostname }}:8007 (root@pam)
+        2. Configuration → Access Control → API Tokens → Add
+           User: {{ pbs_pve_ingress_user }}
+           Token Name: {{ pbs_pve_ingress_token_name }}
+        3. Copy the secret PBS displays into KeePassXC under:
+             Homelab/PBS/pveingress-cluster   (Password field)
+        4. Re-run `just pbs-hosts`.
+    quiet: true
+
+# ACL: grant the configured role on each datastore's namespace to BOTH
+# the parent user AND the token. PBS 4.x privilege separation is
+# intersection-based: a token's effective permissions are
+# (parent user's perms) ∩ (token's own perms). Granting only on the
+# token yields zero effective perms because the user has none, and
+# `pvesm add pbs` then fails with the misleading "Cannot find datastore
+# '<name>', check permissions and existence!" error (the datastore
+# exists, the token's grant exists — the user has no grant, so the
+# intersection is empty, and the audit-gated list endpoint returns
+# nothing).
+#
+# Granting on both makes the token's intersection non-empty and matches
+# Datastore.Audit (the privilege PVE needs to enumerate the datastore
+# during storage registration). Both grants are at the same role so
+# rotating one without the other doesn't expand effective scope.
+#
+# Default role is `DatastoreAdmin`; see defaults/main.yml's comment
+# for why DatastoreBackup is too narrow (no Datastore.Audit).
+#
+# `acl update` is server-side ADDITIVE — each call adds a
+# (path, role, auth-id) tuple without removing other tuples with the
+# same path + auth-id but different role. Without explicit
+# reconciliation, changing `pbs_pve_ingress_role` (e.g.
+# DatastoreBackup -> DatastoreAdmin) on an already-bootstrapped host
+# leaves the old role grant behind alongside the new one. The four
+# tasks below — assemble the auth-id list, query current ACL, remove
+# stale tuples on managed datastores for either auth-id, then
+# (re-)add the configured role for both — make this fully reconciling.
+
+- name: Assemble the auth-ids that get the configured role
+  ansible.builtin.set_fact:
+    pbs_grant_auth_ids:
+      - "{{ pbs_pve_ingress_user }}"
+      - "{{ pbs_pve_ingress_user }}!{{ pbs_pve_ingress_token_name }}"
+
+- name: Query existing PBS ACL entries
+  ansible.builtin.command: "{{ pbs_mgr_bin }} acl list --output-format json"
+  register: pbs_existing_acl
+  changed_when: false
+  check_mode: false   # pure read; needed so --check produces a real diff
+
+# Find every ACL entry for either of our auth-ids on a managed
+# datastore path where the role is NOT what `pbs_pve_ingress_role`
+# currently asks for. These are the stale grants to delete. Scoping
+# to managed datastore paths means we never touch ACL grants the
+# operator may have set up by hand for some other purpose under a
+# different path.
+- name: Compute stale ACL grants to remove for the PVE-ingress identities
+  ansible.builtin.set_fact:
+    pbs_acl_grants_to_remove: >-
+      {{ pbs_existing_acl.stdout | from_json
+         | selectattr('ugid', 'in', pbs_grant_auth_ids)
+         | selectattr('roleid', 'ne', pbs_pve_ingress_role)
+         | selectattr('path', 'in',
+              pbs_datastores | map(attribute='name')
+                             | map('regex_replace', '^', '/datastore/')
+                             | list)
+         | list }}
+
+- name: Remove stale ACL grants on managed datastore paths
+  ansible.builtin.command: >-
+    {{ pbs_mgr_bin }} acl update
+    {{ acl_entry.path }}
+    {{ acl_entry.roleid }}
+    --auth-id {{ acl_entry.ugid }}
+    --delete
+  loop: "{{ pbs_acl_grants_to_remove }}"
+  loop_control:
+    loop_var: acl_entry
+    label: "{{ acl_entry.path }} {{ acl_entry.roleid }} {{ acl_entry.ugid }} (stale)"
+
+- name: Grant configured ACL role to user + token on each datastore
+  ansible.builtin.command: >-
+    {{ pbs_mgr_bin }} acl update
+    /datastore/{{ grant.0.name }}
+    {{ pbs_pve_ingress_role }}
+    --auth-id {{ grant.1 }}
+  loop: "{{ pbs_datastores | product(pbs_grant_auth_ids) | list }}"
+  loop_control:
+    loop_var: grant
+    label: "/datastore/{{ grant.0.name }} <- {{ grant.1 }}"
+  # `acl update` (add) is idempotent server-side; we always run it but
+  # don't report changed unless we can detect drift. Setting
+  # changed_when: false keeps re-runs clean. The stale-removal step
+  # above handles role rotations; this step ensures the desired role
+  # is present on both auth-ids.
+  changed_when: false

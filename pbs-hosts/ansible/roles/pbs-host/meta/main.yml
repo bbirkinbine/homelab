@@ -1,0 +1,29 @@
+---
+# Galaxy metadata for the pbs-host role. Kept minimal — the role is
+# only ever applied via the sibling site.yml against an inventory of
+# PBS hosts Brian owns. There's no plan to publish to Galaxy.
+
+galaxy_info:
+  role_name: pbs_host
+  author: brian.birkinbine
+  description: >-
+    Layer-0 bootstrap for Proxmox Backup Server 4.x hosts (Debian 13 /
+    trixie). Configures APT, packages, chrony, /etc/hosts, sysctl
+    tuning, NFS mount for the bulk datastore, ufw, datastores, API
+    user + token for PVE ingress, and verify/GC schedules. Stops short
+    of PVE-side storage registration.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+
+dependencies: []
+
+collections:
+  # ansible.posix.mount — fstab + mount management for the NFS share.
+  # ansible.posix.authorized_key — SSH key install for root.
+  - ansible.posix
+  # community.general.ufw — host firewall management.
+  - community.general
