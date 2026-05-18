@@ -20,7 +20,7 @@ Single 2.5GbE LAN port; no dedicated PBS↔NAS backup network. A second NIC (USB
 
 If the backup window ever overruns, the levers ranked by effect-per-dollar are:
 
-1. **Enable the local fast datastore** (`pbs_local_fast_datastore_enabled: true` plus a second entry in `pbs_datastores` pointing at the NVMe). Hot retention writes hit local NVMe (~3 GB/s) instead of NFS (~200 MB/s with cache). No hardware change.
+1. **Enable the local fast datastore** (`pbs_local_fast_datastore_enabled: true` plus a second entry in `pbs_datastores` pointing at the local fast drive). Hot retention writes hit local NVMe (~3 GB/s) instead of NFS (~200 MB/s with cache). Caveat: `pbs01` ships with a 512 GB SATA SSD (~500 MB/s), only marginally faster than NFS-with-cache for sequential writes — to realize the lever's full value, swap the stock drive for an NVMe before enabling. Cheap one-time hardware change; software-only enablement after.
 2. **PVE-side backup-job parallelism** (`max-workers` on the backup job) plus an incremental-nightly + full-weekly schedule shape. Saturates CPU instead of leaving cores idle.
 3. **The L33 escape hatch:** iSCSI + local ZFS-with-special-vdev. Significant; defer until measured GC overrun.
 4. **Re-evaluate the dedicated backup network** only after a PBS hardware refresh to a ≥4-core current-gen CPU, or if the workload shifts to large low-dedupe payloads (LLM model dumps, video archives).
@@ -35,14 +35,14 @@ One PBS host. Dedicated x86 mini-PC running stock Proxmox Backup Server 4.x from
 
 | Host | Hardware | Role |
 |---|---|---|
-| `pbs01` | GMKtec G3 Pro Mini PC — Intel Core i3-10110U (2C/4T, Comet Lake-U), 16 GB DDR4, 512 GB NVMe, 1× 2.5GbE | Primary backup target. Receives PVE-cluster backups. |
+| `pbs01` | GMKtec G3 Pro Mini PC — Intel Core i3-10110U (2C/4T, Comet Lake-U), 16 GB DDR4, 512 GB SATA SSD (stock), 1× 2.5GbE | Primary backup target. Receives PVE-cluster backups. |
 
 Network: single 2.5GbE LAN port (vlan-untagged) on the same switched LAN as the Asustor and the PVE cluster. No TB fabric; no bridges; no VLANs at this layer.
 
 Storage:
 
 - **Bulk datastore (default, required):** NFS mount from the Asustor's RAID6 + NVMe-R/W-cache volume. PBS's metadata-heavy workload (GC, verify) is helped by the NAS-side R/W cache; expected datastore size in the low-double-digit TB range. NFS path stays under `/mnt/pbs-bulk`.
-- **Fast datastore (optional, off by default):** local NVMe on the PBS host. Use case is a hot-retention window with sub-second restore startup. On the 512 GB NVMe this would carve out a small directory (≤200 GB) alongside the OS install. Gated by `pbs_local_fast_datastore_enabled` in inventory.
+- **Fast datastore (optional, off by default):** local fast block storage on the PBS host. Use case is a hot-retention window with sub-second restore startup. The stock G3 Pro ships with a 512 GB SATA SSD; meaningful gain over the NFS-with-cache bulk store requires swapping it for an NVMe first. Either way, the carve-out is a small directory (≤200 GB) alongside the OS install. Gated by `pbs_local_fast_datastore_enabled` in inventory.
 
 NFS-backed datastores are slower than local for metadata-heavy operations (GC, verify); the NAS-side R/W cache mitigates the worst of it at the lab's expected scale (single- to low-double-digit TB). Escape hatch if GC ever spills past the backup window: move the volume to iSCSI + local ZFS-with-special-vdev. Out of scope for this role.
 

@@ -62,7 +62,7 @@ Set these once before the install:
 | **VT-x** | Enabled | Not strictly required for PBS (no virtualization workload) but the default; leave on. |
 | **VT-d (IOMMU)** | Enabled | Same — default on; harmless. |
 | **Secure Boot** | Disabled | PBS 4.x will boot with it on, but disabling avoids surprises with DKMS modules and custom kernels if you ever go off-stock. One less thing to fight. |
-| **Boot order** | USB first | Temporary, for the install. Revert to NVMe-first after the install completes so the box doesn't try to USB-boot on every power cycle. |
+| **Boot order** | USB first | Temporary, for the install. Revert to SATA-first after the install completes so the box doesn't try to USB-boot on every power cycle. |
 | **Wake-on-LAN** | Enabled (optional) | Lets you wake the host remotely if you've ever powered it off. PBS is normally on 24/7, so this is operator preference. |
 
 Save and exit. Insert the USB. Power-cycle.
@@ -79,7 +79,7 @@ The PBS installer is a 6–8 step GUI, near-identical to the PVE installer. Defa
 
 3. **Target Harddisk → Options.** PBS-specific notes:
    - **Filesystem: `ext4`.** Not ZFS — same reasoning as the PVE side (ZFS is off the table for this lab; RAM overhead + no ECC + small dataset = wrong tool). PBS chunk-store integrity comes from PBS's own hash-on-write, not the filesystem.
-   - **Target disk: the internal NVMe** (`nvme0n1`, the only block device on a stock G3 Pro). The 512 GB NVMe holds only the OS + journal; bulk backup data lives on the NAS NFS mount (managed by the `pbs-host` role).
+   - **Target disk: the internal SATA SSD** (the only block device on a stock G3 Pro — the installer will surface it as `sda` or similar). The 512 GB SATA SSD holds only the OS + journal; bulk backup data lives on the NAS NFS mount (managed by the `pbs-host` role).
    - Leave `hdsize`, `swapsize`, `maxroot` at the installer defaults. PBS doesn't carve out a `local-lvm` analog by default; the disk is one big root partition.
 
 4. **Country / Time zone / Keyboard.** US / `America/New_York` / `en-US`. Match the PVE cluster's timezone — chrony in the `pbs-host` role syncs against the same NTP targets as PVE, but a matching timezone keeps log timestamps comparable across hosts.
@@ -93,7 +93,7 @@ The PBS installer is a 6–8 step GUI, near-identical to the PVE installer. Defa
 
 7. **Summary.** Verify hostname, IP, disk, filesystem. **Tick "Reboot after install"** before clicking Install.
 
-8. **Wait ~3–5 minutes.** PBS installs faster than PVE because there's less to install — no qemu, no `pveproxy`, no Ceph. When the box reboots, remove the USB stick immediately so it boots from NVMe.
+8. **Wait ~3–5 minutes.** PBS installs faster than PVE because there's less to install — no qemu, no `pveproxy`, no Ceph. When the box reboots, remove the USB stick immediately so it boots from the internal SATA SSD.
 
 The first boot drops to a console login (`Proxmox Backup Server 4.x …`) and prints the web UI URL (`https://<ip>:8007`). Verify both from your workstation:
 
@@ -116,7 +116,7 @@ ssh-copy-id root@pbs01.local
 # Prompts once for the install-time root password; never again after.
 ```
 
-That's the only manual post-install step. PBS doesn't need the equivalent of `pve12t`'s `nuc12-fast` carve-out — the bulk datastore lives on the NAS NFS mount, and the local NVMe is the OS-only filesystem.
+That's the only manual post-install step. PBS doesn't need the equivalent of `pve12t`'s `nuc12-fast` carve-out — the bulk datastore lives on the NAS NFS mount, and the local SATA SSD is the OS-only filesystem.
 
 ---
 
@@ -138,7 +138,7 @@ Everything beyond that — `pbs-host` Ansible baseline (`just pbs-hosts`), API t
 
 | Host | Hardware | Notes |
 |---|---|---|
-| `pbs01` | GMKtec G3 Pro Mini PC — Intel Core i3-10110U (2C/4T, Comet Lake-U), 16 GB DDR4, 512 GB NVMe, 1× 2.5GbE | Primary backup target for the PVE cluster. Bulk datastore on Asustor NFS. |
+| `pbs01` | GMKtec G3 Pro Mini PC — Intel Core i3-10110U (2C/4T, Comet Lake-U), 16 GB DDR4, 512 GB SATA SSD (stock; an NVMe swap is required if the optional local-fast datastore tier is ever enabled — see `pbs-hosts/CLAUDE.md` § "Network shape"), 1× 2.5GbE | Primary backup target for the PVE cluster. Bulk datastore on Asustor NFS. |
 
 The i3-10110U is a 2-core / 4-thread Comet Lake-U at ~2.1 GHz base. PBS's hot path (chunk hashing, GC, verify) is single-threaded per worker, so core count matters less than IPC + I/O. The 2.5GbE LAN port is the throughput ceiling for backup ingest from the PVE cluster; the CPU is comfortably ahead of the network.
 
