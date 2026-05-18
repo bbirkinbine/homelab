@@ -34,12 +34,13 @@ definitions replicate cluster-wide via pmxcfs. VMs whose disks live on
 cluster-shared NFS (`nas-vms` from the Asustor) live-migrate between
 nodes; roles pinned to specific hardware (eGPU, USB-HSM) stay node-local.
 
-### Non-Proxmox hosts
+### Backup target
 
 | Host | Role |
 | --- | --- |
-| `t480` | ThinkPad T480 running Ubuntu — local VirtualBox build host for the Windows 11 `virtualbox-iso` Packer target. Produces a VMDK that converts to qcow2 for libvirt / virt-manager. Not a Proxmox node. |
 | `pbs01` | GMKtec G3 Pro mini-PC running Proxmox Backup Server 4.x — dedicated backup target for the PVE cluster. Bulk datastore lives on NFS from the Asustor. Not part of the corosync cluster. |
+
+Operator-side build hosts (macOS for `proxmox-iso` targets, T480 + Ubuntu for the Windows `virtualbox-iso` target) are described in the Tech stack table below — not lab infrastructure.
 
 ## Tech stack
 
