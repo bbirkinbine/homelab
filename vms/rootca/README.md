@@ -42,8 +42,8 @@ vms/rootca/
    it at `/var/lib/rootca-encrypted` where all ceremony artifacts live.
    Host root sees only the encrypted block range for that partition;
    the OS install itself is cleartext (the rest of the disk is the
-   standard Packer 9100 base). This is a 2026-05-11 architecture
-   change from the prior host-side LUKS Directory pool; the threat
+   standard Packer 9100 base). This is a deliberate departure from
+   the original host-side LUKS Directory pool approach; the threat
    model moves the encryption boundary into the VM so that a host-root
    attacker on pve12t cannot reach the cleartext Root CA key material
    without also compromising the running guest.
@@ -136,12 +136,12 @@ ceremony state is opaque even to root inside the guest; while it's
 unlocked, there's no network egress path. The threat being defended
 against is: a sustained attacker with root on pve12t cannot extract
 the Root CA key material without (a) the in-VM LUKS passphrase AND
-(b) HSM-A physically plugged in AND (c) the HSM User PIN. The 2026-05-11
-move from host-side LUKS to in-VM LUKS strengthens (a) — under the
-prior model, host root on pve12t could read the cleartext partition
-while it was unlocked for a ceremony; under the new model, host root
-sees only the encrypted block range and would additionally need to
-compromise the running guest to reach the cleartext.
+(b) HSM-A physically plugged in AND (c) the HSM User PIN. The in-VM
+LUKS choice strengthens (a) — a host-side LUKS Directory pool (the
+original design) would let host root on pve12t read the cleartext
+partition while it was unlocked for a ceremony; with in-VM LUKS, host
+root sees only the encrypted block range and would additionally need
+to compromise the running guest to reach the cleartext.
 
 ## Ceremony procedure (boots the VM for a Root CA operation)
 
@@ -269,7 +269,7 @@ just destroy rootca
 | --- | --- | --- |
 | vCPU | 2 | HSM is the bottleneck, not the CPU |
 | RAM | 4 GiB | openssl + pkcs11-provider during ceremonies; comfortable |
-| Disk | 40 GiB | Standard 9100 base wants ~8 GiB; the rest carries `/var/lib/rootca-encrypted` (LUKS partition for ceremony artifacts). Bumped from 32 GiB on 2026-05-11 with the host-side → in-VM LUKS move so the encrypted partition has somewhere to live |
+| Disk | 40 GiB | Standard 9100 base wants ~8 GiB; the rest carries `/var/lib/rootca-encrypted` (LUKS partition for ceremony artifacts). Bumped from 32 GiB with the host-side → in-VM LUKS move so the encrypted partition has somewhere to live |
 | Balloon | 0 | mlock-style memory hygiene; nothing else needs the RAM anyway |
 | Machine | q35 | Matches the rest of the homelab |
 | CPU type | x86-64-v3 | Module default; AES-NI via the Intel ISA bit. Portable across NUC12/13 even though USB passthrough still pins this VM to pve12t |
