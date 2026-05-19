@@ -158,7 +158,37 @@ kp_lookup() {
     -s -a "$field" "$KEEPASSXC_DB" "/$path"
 }
 
-echo "==> rendering $OUT from $TPL"
+# Old-school `banner`-style attention grab printed BEFORE each
+# keepassxc-cli invocation when the DB is YubiKey-protected. Each
+# invocation re-issues the HMAC-SHA1 challenge, so the user has to
+# physically touch the key — easy to miss the blink while looking at
+# something else, hence the oversized prompt.
+yubikey_banner() {
+  local count="$1" total="$2" spec="$3"
+  cat >&2 <<'BANNER'
+
+     _____ ___  _   _  ____ _   _   _  _________   __
+    |_   _/ _ \| | | |/ ___| | | | | |/ / ____\ \ / /
+      | || | | | | | | |   | |_| | | ' /|  _|  \ V /
+      | || |_| | |_| | |___|  _  | | . \| |___  | |
+      |_| \___/ \___/ \____|_| |_| |_|\_\_____| |_|
+
+    >>>  LOOK FOR THE BLINKING LIGHT  <<<
+
+BANNER
+  printf '    [%d/%d]  %s\n\n' "$count" "$total" "$spec" >&2
+}
+
+# Pre-count kp:// references (skipping comments) so we can show
+# touch-count progress. With a YubiKey-locked DB, each keepassxc-cli
+# invocation re-issues the HMAC challenge — N references = N touches.
+TOTAL_REFS="$(grep -v '^[[:space:]]*#' "$TPL" | grep -oE 'kp://[^[:space:]"'"'"')]+' | wc -l | tr -d ' ')"
+
+if [[ -n "${KEEPASSXC_YUBIKEY:-}" ]]; then
+  echo "==> rendering $OUT from $TPL  ($TOTAL_REFS kp:// refs — YubiKey will blink before each)"
+else
+  echo "==> rendering $OUT from $TPL  ($TOTAL_REFS kp:// refs)"
+fi
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 
@@ -166,6 +196,7 @@ trap 'rm -f "$TMP"' EXIT
 # We process line-by-line so a single failed lookup gives a clear
 # error pointing at the offending line.
 LINE_NO=0
+REF_COUNT=0
 while IFS= read -r line || [[ -n "$line" ]]; do
   LINE_NO=$((LINE_NO + 1))
   # Skip HCL comments — kp:// inside a `#` line is documentation, not a placeholder.
@@ -175,6 +206,12 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   fi
   while [[ "$line" =~ kp://([^[:space:]\"\'\)]+) ]]; do
     SPEC="${BASH_REMATCH[1]}"
+    REF_COUNT=$((REF_COUNT + 1))
+    if [[ -n "${KEEPASSXC_YUBIKEY:-}" ]]; then
+      yubikey_banner "$REF_COUNT" "$TOTAL_REFS" "kp://$SPEC"
+    else
+      echo "    [$REF_COUNT/$TOTAL_REFS] kp://$SPEC" >&2
+    fi
     KP_ERR="$(mktemp)"
     if ! VALUE="$(kp_lookup "$SPEC" 2>"$KP_ERR")"; then
       echo "ERROR: line $LINE_NO: could not resolve kp://$SPEC" >&2
