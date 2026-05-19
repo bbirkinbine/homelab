@@ -40,19 +40,30 @@ Three patterns ship today; new roles should fit one of them.
 
 A long-running service that wants live migration eventually, doesn't
 need any host hardware, doesn't store irreplaceable state on local
-disk. Examples: OpenBao (shipping), future k3s nodes. (amp-game is
-intentionally NOT cluster-mobile despite being on the new shape —
-its `disk_storage` is pinned to `local-lvm` for I/O latency; see
-[`vms/amp-game/README.md`](../vms/amp-game/README.md).)
+disk. Examples: OpenBao, OpenClaw, NemoClaw, future k3s nodes.
+(amp-game is intentionally NOT cluster-mobile despite being on the
+new shape — its `disk_storage` is pinned to `local-lvm` for I/O
+latency; see [`vms/amp-game/README.md`](../vms/amp-game/README.md).)
 
-- **Disk storage**: `local-lvm` today; will move to `nas-vms` (NFS from
-  the Asustor) when the cluster transition lands.
+- **Disk storage**: `nas-vms` (NFS from the Asustor, registered
+  cluster-wide per ADR-0004) — the role's `disk_storage` variable
+  defaults to it so cluster-mobility works out of the box.
+- **Snippets storage**: `nas-vms` (same reason — a per-node `local`
+  snippet becomes unreachable after live-migration).
 - **CPU type**: `x86-64-v3` (module default — common baseline across
-  the NUC pair).
+  the three NUC CPU generations).
 - **NIC**: one virtio NIC on vmbr0 (module default).
 - **USB passthrough**: none.
 
 **Template to copy:** `vms/openbao/`. Almost everything generalizes.
+
+> **Note for existing roles.** OpenBao / OpenClaw / NemoClaw were
+> created on per-node `local-lvm` before nas-vms became the default.
+> Their committed `terraform.tfvars.tpl` carries a pre-flip pin that
+> keeps the next `tofu apply` a no-op for storage. Drop the pin lines
+> to opt into the migration (destructive — disk is recreated), or use
+> `qm move-disk` for an in-place move. See each role's README
+> **Storage migration** section.
 
 ### B. Hardware-pinned VM (eGPU or USB-bound)
 
@@ -162,9 +173,20 @@ Concrete steps:
    - `main.tf` — change `name`, `vm_id`, sizing, `tags`, the
      `templatefile()` template path (still points at sibling
      `cloud-init/`).
-   - `variables.tf` — drop or rename variables that don't apply.
-   - `terraform.tfvars.example` + `.tfvars.tpl` — update both. Pick a
-     unique `VM_ID` per the convention in [ADR-0008](decisions/0008-service-vmid-range.md):
+   - `variables.tf` — drop or rename variables that don't apply. If
+     you copied a cluster-mobile role (openbao / openclaw / nemoclaw),
+     `disk_storage` and `snippets_storage` already default to `nas-vms`
+     — leave them alone. If you copied a hardware-pinned role
+     (rootca), they default to `local-lvm` / `local`; flip to `nas-vms`
+     unless the new role is also hardware-pinned (USB / eGPU passthrough).
+   - `terraform.tfvars.example` + `.tfvars.tpl` — update both. **Remove
+     the pre-flip pin block** (`disk_storage = "local-lvm"` +
+     `snippets_storage = "local"`) from the `.tpl` if you copied openbao
+     / openclaw / nemoclaw — that pin exists ONLY to keep the original
+     pre-flip instance bit-identical, and a fresh role should inherit
+     the `nas-vms` default for cluster-mobility. In the `.example`, the
+     pin is already commented out; leave it that way. Pick a unique
+     `VM_ID` per the convention in [ADR-0008](decisions/0008-service-vmid-range.md):
      services live in 8000-8099 (`openbao=8030`, `rootca=8031`), workloads
      in 100-399 (`amp-game=110`).
 

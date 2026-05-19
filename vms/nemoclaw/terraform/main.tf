@@ -83,6 +83,9 @@ module "nemoclaw" {
   balloon_mb   = 0
   disk_size_gb = 64
 
+  disk_storage     = var.disk_storage
+  snippets_storage = var.snippets_storage
+
   tags = ["nemoclaw", "tofu"]
 
   user_data = templatefile("${path.module}/../cloud-init/user-data.yaml.tftpl", {

@@ -377,6 +377,36 @@ reads it via `${path.module}/../cloud-init/user-data.yaml.tftpl`.
 
 ---
 
+## Storage variable convention
+
+Two role-level variables decide where a VM's bits live: `disk_storage`
+(boot disk) and `snippets_storage` (cloud-init snippet). Both surface
+on every role's `variables.tf` and feed the shared module's
+`disk_storage` / `snippets_storage` inputs.
+
+- **Cluster-mobile roles** (openbao, openclaw, nemoclaw): default both
+  to `nas-vms` (Asustor NFS, registered cluster-wide per ADR-0004).
+  Live migration works out of the box; the snippet stays reachable
+  post-migration.
+- **Hardware-pinned roles** (amp-game, rootca, future llm): override
+  with `local-lvm` (or a dedicated pool like `nuc12-fast`) and per-node
+  `local` for snippets. The override always carries a reason in the
+  variable description — I/O latency for amp-game, HSM passthrough for
+  rootca, eGPU passthrough for the future llm.
+
+When adding a new role, copy the openbao shape — you'll get the
+nas-vms default for free. Override only if the VM is hardware-pinned
+or has a hard I/O-latency requirement that NFS can't meet.
+
+**Pre-flip pin (existing roles).** OpenBao / OpenClaw / NemoClaw were
+created before nas-vms became the default. Their committed `.tfvars.tpl`
+includes a two-line pin (`disk_storage = "local-lvm"` + `snippets_storage
+= "local"`) that keeps `tofu apply` a no-op for storage. Remove those
+lines and re-run `just hydrate <role>` when you want the next apply to
+move the VM to nas-vms (destructive: disk is recreated).
+
+---
+
 ## Related
 
 - `docs/proxmox-tofu-permissions.md` — `tofu@pve` API token setup.

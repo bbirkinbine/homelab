@@ -31,3 +31,25 @@ variable "ssh_public_key" {
   type        = string
   description = "Single-line authorized_key string for admin_username. Typically your workstation's ed25519 pubkey."
 }
+
+# --- Storage ------------------------------------------------------------------
+# Cluster-mobile defaults: both the boot disk and the cloud-init snippet land
+# on `nas-vms` (Asustor NFS, registered cluster-wide per ADR-0004) so the VM
+# can live-migrate without re-uploading the snippet from a stale per-node
+# `local` store. The committed terraform.tfvars.tpl pins both to the pre-flip
+# values (`local-lvm` / `local`) because openbao was originally created on
+# node-local storage and moving the disk would force a destroy + recreate;
+# drop those pin lines from your tfvars when you want the next apply to
+# move the VM to nas-vms. See vms/openbao/README.md "Storage migration".
+
+variable "disk_storage" {
+  type        = string
+  default     = "nas-vms"
+  description = "Proxmox storage pool for the boot disk. Defaults to nas-vms (cluster-shared NFS) so the role is cluster-mobile out of the box. Override to local-lvm only if I/O latency matters more than mobility (see vms/amp-game)."
+}
+
+variable "snippets_storage" {
+  type        = string
+  default     = "nas-vms"
+  description = "Proxmox storage for the cloud-init snippet (must allow `snippets` content). Defaults to nas-vms so the snippet stays reachable post-live-migration; per-node `local` breaks the migration target. See docs/cluster-bring-up.md step 8."
+}
