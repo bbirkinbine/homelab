@@ -97,16 +97,22 @@ at the time you're deploying — typically:
 
 ```bash
 ssh claw-admin@<vm-ip>
-sudo -u openclaw -i           # become the service user (bash, $HOME=/home/openclaw)
-npm install -g openclaw       # or whatever upstream recommends today
-openclaw --version            # smoke check
-exit                          # back to claw-admin
+sudo npm install -g openclaw          # global install: needs sudo (writes to /usr/lib/node_modules)
+# Binary lands at /usr/bin/openclaw, executable by any user. Now switch
+# to the service user for the smoke check + onboard:
+sudo -u openclaw -i
+openclaw --version
 ```
 
+The install command needs sudo because npm-global writes to a
+root-owned tree — `claw-admin` has sudo, the `openclaw` service user
+doesn't. After install, every subsequent `openclaw` invocation runs
+as the service user (where `~/.openclaw/` lives).
+
 If upstream's docs change to a `curl | bash` or container path, swap
-the `npm install -g openclaw` line accordingly — the surrounding
-prereqs (Node 24 on PATH, service user with linger, ufw rule) don't
-care which install method you take.
+the install command accordingly — the surrounding prereqs (Node 24
+on PATH, service user with linger, ufw rule) don't care which
+install method you take.
 
 ## First-onboard ceremony (operator-driven, one-time)
 

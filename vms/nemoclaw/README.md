@@ -136,20 +136,29 @@ dry-run; both run normally on a real apply.
 
 The role gets you to "ready for any upstream install." Pick whichever
 install path [upstream](https://github.com/NVIDIA/NemoClaw) documents
-at the time you're deploying — typically either:
+at the time you're deploying — typically one of:
+
+**A. Upstream's documented path (curl | bash, uses nvm internally).**
+Install runs as the service user; lands under
+`~/.nvm/versions/node/v22/bin/`. No sudo on the install.
 
 ```bash
 ssh nemo-admin@<vm-ip>
 sudo -u nemoclaw -i           # become the service user
-
-# Upstream's documented path (curl | bash, uses nvm internally):
 curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
-
-# OR, npm-global if you prefer the role's pre-installed Node 22:
-npm install -g nemoclaw
-
 nemoclaw --version            # smoke check
-exit                          # back to nemo-admin
+```
+
+**B. npm-global against the role's pre-installed Node 22.** Install
+runs as `nemo-admin` with sudo (writes to
+`/usr/lib/node_modules`); binary lands at `/usr/bin/nemoclaw`,
+executable by any user.
+
+```bash
+ssh nemo-admin@<vm-ip>
+sudo npm install -g nemoclaw
+sudo -u nemoclaw -i           # for the onboard
+nemoclaw --version
 ```
 
 The role's prereqs work with either path. If upstream's install
