@@ -86,10 +86,10 @@ The two roles are not mutually exclusive — keep both for the
    storage must also be enabled on `local` (preflight reports the
    cure command if missing).
 5. **An NVIDIA API key OR a non-NVIDIA inference provider.** NemoClaw
-   defaults to NVIDIA Endpoints. You'll provide the key during the
-   onboard ceremony, not at deploy time — but have it ready.
-   Stash at `Homelab/NemoClaw/nvidia-api-key` (or wherever your
-   preferred provider's key lives).
+   defaults to NVIDIA Endpoints. You'll paste the key into the
+   `nemoclaw onboard` wizard interactively — nothing in this repo's
+   automation reads it, so have it handy at deploy time but stash it
+   wherever you keep API keys.
 6. **Spare 16 GiB of RAM on the target node.** This is upstream's
    "Recommended" tier and our default. 8 GiB is the documented
    minimum; drop the module's `memory_mb` to 8192 in

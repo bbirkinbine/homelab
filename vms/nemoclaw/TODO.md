@@ -51,25 +51,68 @@ Three layers to consider, since nemoclaw stacks more than openclaw:
   manager; the manager itself runs on the host (outside the
   sandbox), so the openclaw-layer answer probably applies.
 
+### What the OpenShell sandbox model actually allows (research notes)
+
+Per github.com/NVIDIA/OpenShell:
+
+- **Network policy is default-deny outbound.** Every sandbox starts
+  with minimal outbound access.
+- **Policies are declarative YAML** applied via
+  `openshell policy set <name> --policy <file>.yaml --wait`.
+- **Enforcement is application-layer** (userspace policy engine,
+  not iptables/netns). The engine intercepts every outbound
+  connection and returns one of: allow, route-for-inference
+  (the special LLM path that strips caller creds and injects
+  backend creds), or deny (returns a clear `policy_denied`
+  error to the agent so it can react).
+- **HTTP-aware:** policies constrain method + path, not just
+  host:port — example denial:
+  `{"error":"policy_denied","detail":"POST /repos/octocat/hello-world/issues not permitted by policy"}`
+- **Policies are hot-reloadable** — no sandbox restart needed.
+
+### The likely answer
+
+The sandbox is **not** meant to talk to openbao directly. From the
+OpenShell docs: *"Credentials never left into the sandbox
+filesystem; they are injected as environment variables at runtime."*
+The intended pattern is:
+
+1. Host (where the `nemoclaw` user runs the CLI, outside the
+   sandbox) pulls the credential from openbao at sandbox-launch
+   time.
+2. Host injects the resolved value as an env var into the sandbox.
+3. Sandbox sees `$OPENAI_API_KEY` (or similar) and never knows
+   openbao exists — can't enumerate the secret tree, can't
+   re-resolve, can't pivot.
+
+The OpenShell concept that wires this is **"providers"** —
+credential-resolution plugins that run host-side. Whether NVIDIA
+ships a Vault/openbao provider out of the box, or you'd write one,
+is the next research step.
+
 ### Open sub-questions
 
-1. **Sandbox boundary vs. secret backend.** OpenShell's sandbox is
-   designed to limit what the agent can talk to. Punching a hole for
-   "talk to openbao to fetch a model-provider key" partially defeats
-   the sandboxing — unless the secret fetch happens host-side at
-   sandbox-launch time and the cleartext is injected as an env
-   var / file mount that the sandbox sees but can't re-resolve.
-2. **LiteLLM Vault integration.** If the routed pool is on, LiteLLM
-   is the natural integration point — it already understands
-   per-provider key bindings and has docs for Vault. Check what
-   shape that takes today.
-3. **Auth model for nemoclaw-host → openbao.** Same shape as the
-   openclaw TODO — AppRole? Periodic token? Where does the
+1. **Does NemoClaw / OpenShell ship a Vault/openbao provider?**
+   If yes: configure it, point it at `vms/openbao/`, done. If no:
+   how invasive is writing one — is the provider interface
+   documented and stable, or is this still alpha churn?
+2. **LiteLLM Vault integration (routed-pool layer).** If the routed
+   pool is on, LiteLLM is a second possible integration point — it
+   already understands per-provider key bindings and has docs for
+   Vault. Check what shape that takes today.
+3. **Auth model for the nemoclaw HOST → openbao.** Same shape as
+   the openclaw TODO — AppRole? Periodic token? Where does the
    bootstrap credential live, and how is it revoked at VM destroy?
 4. **Backup story.** If secrets move out of `/var/lib/docker`, the
    backup tar shrinks dramatically and the offsite-`.tgz` stops
    being secret-bearing. That's a win for backup hygiene — worth
    weighing in the trade-off.
+5. **Could the sandbox call openbao directly anyway?** A policy
+   entry with `allow GET /v1/secret/data/...` on the openbao host
+   would let the sandboxed agent fetch its own secrets. That punches
+   a hole in the boundary (sandbox can re-fetch on demand, partial
+   enumeration depending on path policy) but might be acceptable
+   for some shapes. The host-side provider pattern is cleaner.
 
 ### Why this matters
 
