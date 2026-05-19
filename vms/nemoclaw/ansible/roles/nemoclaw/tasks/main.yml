@@ -42,6 +42,13 @@
       # Ubuntu doesn't understand, and the task fails with
       # "chmod: invalid mode 'A+user:nemoclaw:rx:allow'".
       - acl
+      # `binutils` ships `strings` + `objdump`, which upstream's
+      # NemoClaw installer uses to "verify OpenShell messaging
+      # credential rewrite support" — the installer aborts with
+      # "'strings' is required ... Install binutils or an equivalent
+      # package and retry" if not present. Not on the Ubuntu cloud
+      # base by default.
+      - binutils
     state: present
     update_cache: true
     # No cache_valid_time — see openbao/openclaw notes; the Packer
