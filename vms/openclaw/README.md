@@ -62,6 +62,7 @@ just hydrate openclaw        # render terraform.tfvars from KeePassXC
 just plan openclaw           # review the plan
 just apply openclaw          # create the VM
 just inventory openclaw      # write ansible/inventory.yml from tofu output
+just ansible-check openclaw  # OPTIONAL: preview the role's diff (see "Previewing with --check first" below)
 just ansible openclaw        # install Node 24 + openclaw + systemd unit
 ```
 

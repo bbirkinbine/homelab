@@ -103,6 +103,7 @@ just hydrate nemoclaw        # render terraform.tfvars from KeePassXC
 just plan nemoclaw           # review the plan
 just apply nemoclaw          # create the VM
 just inventory nemoclaw      # write ansible/inventory.yml from tofu output
+just ansible-check nemoclaw  # OPTIONAL: preview the role's diff (see "Previewing with --check first" below)
 just ansible nemoclaw        # install Docker + Node 22 + nemoclaw CLI
 ```
 
