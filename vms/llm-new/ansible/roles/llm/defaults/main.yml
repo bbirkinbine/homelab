@@ -1,0 +1,29 @@
+---
+# Defaults for the llm role. Override in inventory, group_vars, or
+# host_vars if a deployment diverges from the canonical setup
+# (eGPU-passthrough Ollama on Ubuntu 24.04).
+
+# Ollama listen address. 0.0.0.0:11434 means any LAN client (Open WebUI
+# container on the same host, other workstations on the LAN) can hit
+# the API directly. UFW restricts which sources can reach the port.
+# If you ever expose this VM beyond LAN, FRONT IT with auth — the
+# Ollama API has no built-in authentication.
+llm_ollama_listen: "0.0.0.0:11434"
+
+# UFW ports opened on the VM. 11434 = Ollama API; 8080 = Open WebUI
+# (only relevant if you run the Open WebUI container documented in
+# the README "Optional: Open WebUI" section).
+llm_ufw_ports:
+  - { port: 11434, comment: "Ollama API" }
+  - { port: 8080, comment: "Open WebUI (optional)" }
+
+# Whether to install nvtop (htop-for-GPUs). Tiny package, useful for
+# `watch -n1 nvtop` when sanity-checking inference throughput. Skip
+# only if you're allergic to extra packages.
+llm_install_nvtop: true
+
+# Whether the role should reboot after installing the NVIDIA driver.
+# Required for the kernel module to load. Set false if you want to
+# control the reboot yourself (e.g. you're chaining other Ansible
+# runs and want a single reboot at the end).
+llm_reboot_after_driver_install: true

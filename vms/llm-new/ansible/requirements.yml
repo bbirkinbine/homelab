@@ -1,0 +1,12 @@
+---
+# Galaxy collections this role pulls. Install with:
+#   just ansible-deps llm
+# Or directly:
+#   ansible-galaxy collection install -r requirements.yml
+#
+# TODO: add (or remove) collections as the role's tasks need them.
+# community.general is the safe default — apt's `ufw` module, plus
+# many common helpers, live there.
+collections:
+  - name: community.general
+    version: ">=8.0.0"

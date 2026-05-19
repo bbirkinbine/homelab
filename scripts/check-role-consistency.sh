@@ -86,10 +86,14 @@ heading() {
 role_class() {
   case "$1" in
     openbao|openclaw|nemoclaw|rootca) echo service ;;
-    amp-game)                          echo workload ;;
-    *)                                 echo unknown ;;
+    amp-game|llm|llm-new)             echo workload ;;
+    *)                                echo unknown ;;
   esac
 }
+# `llm-new` is the transitional name while the eGPU port is under review
+# alongside the still-present legacy `vms/llm/` (no terraform/ dir).
+# After the operator review + `rm -rf vms/llm && git mv vms/llm-new vms/llm`,
+# `llm-new` can come out of this case statement.
 
 # --- discover roles ---------------------------------------------------------
 #

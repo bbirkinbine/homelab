@@ -169,9 +169,14 @@ Concrete steps:
      `usb_passthrough = {...}` block per [`vms/rootca/`](../vms/rootca/).
      (Read rootca's two-phase lifecycle README before deciding if you
      also need the air-gap step.)
-   - eGPU passthrough → not yet shipping; the `modules/proxmox-vm/`
-     module needs a `hostpci` block first. When that lands, copy
-     `vms/_template/`, add `hostpci`, swap storage to a local pool.
+   - eGPU passthrough → copy `vms/_template/`, swap storage to a
+     local pool, and add a `hostpci_devices = [{...}]` block per
+     [`vms/llm/`](../vms/llm/) (canonical eGPU example — RTX 3090 on
+     `pve12t` via Thunderbolt). The module's `hostpci_devices` input
+     references a Proxmox cluster-wide PCI resource mapping by name,
+     which is a one-time operator bring-up step (`pvesh create
+     /cluster/mapping/pci ...`) documented in the llm role's README
+     "PCI mapping prereq" section.
 
 2. **Copy the directory structure and rename the placeholder:**
    ```bash
