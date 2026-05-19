@@ -30,17 +30,20 @@ and validation rules. Quick reference:
 | `snippets_storage` | no | Defaults to `local`. Must have the `snippets` content type enabled — see [`docs/cluster-bring-up.md`](../../docs/cluster-bring-up.md) Step 7. |
 | `user_data` | yes | Rendered cloud-init user-data YAML; the module uploads it as a snippet and attaches it via `cicustom`. |
 | `network_devices` | no | List of `{bridge, vlan, model, mac_address}` maps. Defaults to one `vmbr0` virtio NIC. |
-| `usb_passthrough` | no | List of `{host_port}` maps for USB passthrough by `<bus>-<port>` (required for the Root CA HSM role; pinning by port avoids the identical-VID:PID collision problem). |
+| `usb_passthrough` | no | Optional `{host, usb3}` object for USB passthrough by `<bus>-<port>` (required for the Root CA HSM role; pinning by port avoids the identical-VID:PID collision problem). |
+| `hostpci_devices` | no | List of `{mapping, pcie, xvga, mdev, rombar}` maps for PCIe passthrough. Devices reference a Proxmox cluster-wide PCI resource mapping name (NOT raw PCI address — the raw form requires root password auth, incompatible with API tokens). Used by the LLM role's eGPU passthrough. Setting any element enforces `balloon_mb = 0` and `machine = "q35"` via plan-time preconditions. |
 
 ## What this module does NOT cover
 
 By design — speculative features bloat the surface and slow validation:
 
-- **GPU / PCIe passthrough.** Will be added when the LLM role ports to
-  OpenTofu; doing it speculatively means a `dynamic "hostpci"` block
-  plus balloon=0 cross-var preconditions that the current roles don't
-  exercise. See [`docs/proxmox-gpu-passthrough.md`](../../docs/proxmox-gpu-passthrough.md)
-  for the manual flow that exists today.
+- **Cluster-side PCI resource mapping creation.** `hostpci_devices`
+  references a cluster-wide mapping by name; the mapping itself is a
+  one-time bring-up step (Datacenter → Resource Mappings → PCI, or
+  `pvesh create /cluster/mapping/pci ...` — see [`variables.tf`](variables.tf)
+  for the exact pvesh form). Lives in cluster state (`/etc/pve/`), not
+  per-VM. See [`docs/proxmox-gpu-passthrough.md`](../../docs/proxmox-gpu-passthrough.md)
+  for the host-side IOMMU + vfio-pci binding prerequisites.
 - **Storage attachments beyond a single boot disk.** Roles that need a
   second disk add it in their own `terraform/main.tf` against the
   module's `vm_id`.
