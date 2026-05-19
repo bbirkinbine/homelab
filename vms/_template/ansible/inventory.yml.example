@@ -1,0 +1,40 @@
+---
+# vms/__ROLE__/ansible/inventory.yml.example
+#
+# This file documents the inventory shape. The actual inventory.yml is
+# gitignored and is populated automatically by:
+#
+#   just inventory __ROLE__
+#
+# That recipe runs scripts/write-inventory.sh, which reads
+# `tofu output ansible_inventory_hint` and writes the result here as
+# vms/__ROLE__/ansible/inventory.yml. It refuses to write if the
+# qemu-guest-agent hasn't reported the VM's IP yet — wait ~30s after
+# `just apply __ROLE__` and retry.
+#
+# IP stability: pin a DHCP reservation per service VM on the router
+# (by MAC, visible via `tofu output mac`). Without that, the lease can
+# rotate and the inventory.yml's `ansible_host` goes stale; you'd have
+# to re-run `just inventory __ROLE__` after each rotation.
+#
+# Group `__ROLE___servers` (plural) vs the host `__ROLE__` (singular):
+# Ansible 2.16+ warns when a group and a host share the same name;
+# pluralizing the group sidesteps that.
+
+__ROLE___servers:
+  hosts:
+    __ROLE__:
+      # Populated by `just inventory __ROLE__` from `tofu output ipv4`.
+      # If the agent hasn't reported yet (output is null), look up the
+      # lease on your router by MAC (from `tofu output mac`) or
+      # hostname (`__ROLE__`).
+      ansible_host: 10.0.0.X
+
+      # First-boot user created by cloud-init (matches the value of
+      # var.admin_username in terraform.tfvars).
+      ansible_user: __ROLE__-admin
+
+      # The Packer base image ships /usr/bin/python3 (cloud-init
+      # depends on it). Setting this explicitly skips Ansible's
+      # interpreter discovery and silences the matching warning.
+      ansible_python_interpreter: /usr/bin/python3

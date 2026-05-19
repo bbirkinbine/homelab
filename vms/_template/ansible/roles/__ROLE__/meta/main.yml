@@ -1,0 +1,19 @@
+---
+galaxy_info:
+  role_name: __ROLE__
+  author: brian.birkinbine
+  description: "TODO: one-line description of what this role installs and configures."
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+
+dependencies: []
+
+collections:
+  # `community.general.ufw` — apt's ufw module ships there. Make the
+  # dependency explicit so a fresh Ansible install knows what to fetch.
+  # TODO: add other collections if the tasks reach for them.
+  - community.general

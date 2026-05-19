@@ -1,0 +1,13 @@
+---
+# Defaults for the __ROLE__ role. Override in inventory, group_vars, or
+# host_vars if a deployment diverges.
+#
+# TODO: define the variables this role's tasks reference. Examples from
+# other roles:
+#   * vms/openbao/ansible/roles/openbao/defaults/main.yml — service
+#     config (raft node id, listener address, mlock toggle).
+#   * vms/openclaw/ansible/roles/openclaw/defaults/main.yml — service
+#     user setup, install flags.
+#
+# Leave this file (even if empty) — Ansible expects roles/<name>/defaults/
+# to exist; an empty defaults/main.yml is the canonical minimum.

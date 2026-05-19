@@ -24,6 +24,11 @@
 #      workloads in 100-399. Role class is named explicitly in the
 #      role_class() function below; add new roles there.
 #
+# Discovery: any vms/<name>/terraform/ directory is picked up. Names
+# starting with `_` are skipped (convention reserved for templates and
+# scaffolding — `vms/_template/`). Add the role to role_class() below
+# whenever a new role lands.
+#
 # Why bash instead of Python or a real linter framework: this runs
 # pre-commit / pre-PR, in seconds, and the operator already has
 # bash + grep + awk. Anything heavier is wrong for the job. Mirror
@@ -87,19 +92,33 @@ role_class() {
 }
 
 # --- discover roles ---------------------------------------------------------
+#
+# Directories under vms/ whose name starts with `_` are skipped — that
+# convention is reserved for templates and scaffolding (vms/_template/),
+# which intentionally carry placeholder values that would fail the real-
+# role checks (e.g. vm_id=8099 placeholder, __ROLE__ identifier strings).
+# The template's structural integrity is verified by being copy-tested
+# the next time someone uses it to create a real role.
 
 ROLES=()
+SKIPPED=()
 for role_dir in vms/*/terraform; do
   role="$(basename "$(dirname "$role_dir")")"
-  ROLES+=("$role")
+  case "$role" in
+    _*) SKIPPED+=("$role") ;;
+    *)  ROLES+=("$role") ;;
+  esac
 done
 
 if [[ ${#ROLES[@]} -eq 0 ]]; then
-  echo "ERROR: no vms/*/terraform/ roles found. Are you in the repo root?" >&2
+  echo "ERROR: no real (non-underscore-prefixed) vms/*/terraform/ roles found. Are you in the repo root?" >&2
   exit 2
 fi
 
 printf '%sDiscovered roles:%s %s\n' "$BOLD" "$RESET" "${ROLES[*]}"
+if [[ ${#SKIPPED[@]} -gt 0 ]]; then
+  printf '%sSkipped (template / scaffolding):%s %s\n' "$YELLOW" "$RESET" "${SKIPPED[*]}"
+fi
 
 # --- 1. tofu fmt across tracked .tf files ----------------------------------
 
