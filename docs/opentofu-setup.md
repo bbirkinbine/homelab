@@ -407,6 +407,36 @@ move the VM to nas-vms (destructive: disk is recreated).
 
 ---
 
+## Pre-PR sanity checks
+
+Before opening a PR that touches `vms/*/terraform/` or `modules/proxmox-vm/`,
+run:
+
+```bash
+just check-roles
+```
+
+This wraps [`scripts/check-role-consistency.sh`](../scripts/check-role-consistency.sh)
+— a repo-wide sweep that catches the kinds of drift that a per-role
+`tofu fmt` / `tofu validate` won't (missing storage knob surface,
+inconsistent module wiring, stale references to removed variables,
+VMID range violations per [ADR-0008](decisions/0008-service-vmid-range.md),
+missing canonical files). Read the script's header for the current list
+of checks; new checks get added as drift categories emerge.
+
+The check is independent of `just check <role>` — that one is a
+*per-role* preflight that hits ssh / Proxmox API / template / snippets-
+storage for one role about to be applied. `just check-roles` is a
+*cross-role* static analysis with no network dependency. Both have a
+place; run the right one for the situation.
+
+If `check-roles` fails on something that's genuinely intentional, the
+fix is to refine the check (add a knowing exclusion, narrow the regex)
+rather than work around it — a false-positive that gets ignored once
+gets ignored forever.
+
+---
+
 ## Related
 
 - `docs/proxmox-tofu-permissions.md` — `tofu@pve` API token setup.
