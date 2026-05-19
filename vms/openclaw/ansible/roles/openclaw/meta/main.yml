@@ -1,0 +1,19 @@
+---
+galaxy_info:
+  role_name: openclaw
+  author: brian.birkinbine
+  description: Install OpenClaw gateway (Node 24 + npm-global) on Ubuntu 24.04 (Packer base) as a systemd service.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+
+dependencies: []
+
+collections:
+  # `community.general.ufw` ships the ufw module the role uses to open
+  # port 18789. Make the dependency explicit so a fresh Ansible install
+  # knows what to fetch.
+  - community.general

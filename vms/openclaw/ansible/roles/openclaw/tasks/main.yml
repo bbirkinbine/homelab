@@ -1,0 +1,222 @@
+---
+# Prep an Ubuntu 24.04 VM for an operator-run openclaw install. The role
+# stops short of installing the openclaw binary itself — upstream
+# changes the install path often enough (npm-global, curl|sh, container)
+# that pinning one method in IaC becomes a maintenance tax. Instead the
+# role gets the host to a state where `sudo npm i -g openclaw` (or any
+# other upstream-recommended install) Just Works:
+#
+#   * Node 24 on PATH (via NodeSource apt repo)
+#   * `openclaw` system user with a real $HOME under /home/openclaw
+#   * Gateway port pre-opened through ufw
+#   * apt-daily timers active so security patches flow on the long-
+#     running VM
+#
+# See vms/openclaw/README.md "Install openclaw" for the canonical
+# operator install command, and "First-onboard ceremony" for the
+# interactive pairing + OAuth steps after install.
+#
+# Idempotency:
+#   * NodeSource keyring + repo: written via get_url + apt_repository
+#     (both idempotent).
+#   * Service user: ansible.builtin.user with system=true; no-op once
+#     present.
+#
+# Check-mode behavior:
+#   The four NodeSource-bootstrap tasks below (apt prereqs, keyrings
+#   dir, archive key, apt_repository) carry `check_mode: false` so they
+#   run live even under --check. Without the keyring + repo actually
+#   written to disk, the downstream `apt: name=nodejs` task fails with
+#   "No package matching 'nodejs' is available" because the apt cache
+#   has no idea NodeSource exists. Same convention as pbs-hosts.
+#   The Node major-version assert further down carries
+#   `when: not ansible_check_mode` — there's nothing live to validate
+#   on a dry-run.
+
+- name: Ensure dependencies for the NodeSource apt repo are installed
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+    # No cache_valid_time — the Packer base wipes /var/lib/apt/lists/*
+    # but leaves /var/cache/apt/pkgcache.bin mtime recent, so
+    # cache_valid_time would mask the empty lists and `apt install`
+    # would fail on a fresh clone. Same pattern as amp_game / openbao.
+  check_mode: false
+
+- name: Ensure /etc/apt/keyrings exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  check_mode: false
+
+# NodeSource publishes their archive key as a binary OpenPGP key. Drop
+# it under keyrings as a stable filename and reference it from the
+# repo file's signed-by= attribute (modern apt pattern; replaces the
+# deprecated apt-key add).
+- name: Install NodeSource apt archive key
+  ansible.builtin.get_url:
+    url: "{{ openclaw_nodesource_key_url }}"
+    dest: "{{ openclaw_nodesource_keyring }}"
+    owner: root
+    group: root
+    mode: "0644"
+  check_mode: false
+
+- name: Add NodeSource apt repository
+  ansible.builtin.apt_repository:
+    repo: "{{ openclaw_nodesource_repo }}"
+    filename: nodesource
+    state: present
+    update_cache: true
+  check_mode: false
+
+- name: Install nodejs (brings npm)
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+
+- name: Capture installed node version
+  ansible.builtin.command: node --version
+  register: openclaw_node_version_raw
+  changed_when: false
+
+- name: Assert Node major >= openclaw_node_major
+  ansible.builtin.assert:
+    that:
+      - openclaw_node_version_raw.stdout is regex('^v(' ~ openclaw_node_major ~ '|[3-9][0-9])\\.')
+    fail_msg: >-
+      Installed Node {{ openclaw_node_version_raw.stdout | trim }} is older than v{{ openclaw_node_major }}.
+      Check that /etc/apt/sources.list.d/nodesource.list points at node_{{ openclaw_node_major }}.x, then re-run.
+  # Skip in --check: the preceding command: task skips by default in
+  # check mode, leaving stdout empty — the regex would always fail. The
+  # role's bootstrap already verified node_24.x is in sources.list.d; an
+  # asserted version check only makes sense post-install.
+  when: not ansible_check_mode
+
+- name: Create openclaw service group
+  ansible.builtin.group:
+    name: "{{ openclaw_service_group }}"
+    state: present
+    system: true
+
+# Real home + bash shell so the operator can `sudo -u openclaw -i`
+# cleanly and the openclaw CLI's $HOME-relative config layout
+# (~/.openclaw) lands where upstream's docs expect.
+- name: Create openclaw service user
+  ansible.builtin.user:
+    name: "{{ openclaw_service_user }}"
+    group: "{{ openclaw_service_group }}"
+    home: "{{ openclaw_service_home }}"
+    shell: "{{ openclaw_service_shell }}"
+    create_home: true
+    system: true
+    state: present
+
+- name: Ensure service-user .openclaw workspace directory exists
+  ansible.builtin.file:
+    path: "{{ openclaw_service_home }}/.openclaw"
+    state: directory
+    owner: "{{ openclaw_service_user }}"
+    group: "{{ openclaw_service_group }}"
+    mode: "0750"
+
+# Without linger, a user-systemd unit installed via
+# `openclaw onboard --install-daemon` only runs while the operator has
+# an active login session — it dies on SSH disconnect. Linger keeps
+# the user's systemd instance alive across logout so the gateway
+# survives.
+- name: Enable systemd linger for service user
+  ansible.builtin.command: "loginctl enable-linger {{ openclaw_service_user }}"
+  args:
+    creates: "/var/lib/systemd/linger/{{ openclaw_service_user }}"
+  when: openclaw_enable_linger
+
+# NOPASSWD sudo for the openclaw service user. Deliberate trust call —
+# the common openclaw deployment pattern lets the agent run the whole
+# machine. Flip openclaw_grant_sudo=false in inventory to drop this and
+# treat the service user as strictly unprivileged. validate: visudo -cf
+# prevents a broken drop-in from locking the host out of sudo.
+- name: Grant openclaw service user NOPASSWD sudo
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ openclaw_service_user }}"
+    content: "{{ openclaw_service_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s
+  when: openclaw_grant_sudo
+
+- name: Remove sudoers drop-in if openclaw_grant_sudo is disabled
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/{{ openclaw_service_user }}"
+    state: absent
+  when: not openclaw_grant_sudo
+
+# Gateway HTTP port. The Packer base ships ufw with 22/tcp already
+# allowed; this opens 18789. Keep this LAN-only — the gateway has no
+# native HTTP auth beyond pairing, so don't proxy it to the internet
+# without an mTLS reverse proxy in front. Pre-opening the port here
+# means the operator's `openclaw onboard` (post-install) is reachable
+# from the LAN without an extra ufw step.
+- name: Allow openclaw gateway through ufw
+  community.general.ufw:
+    rule: allow
+    port: "{{ openclaw_gateway_port }}"
+    proto: tcp
+    comment: "OpenClaw gateway"
+  when: openclaw_ufw_allow_gateway
+
+# The Packer base masks apt-daily timers so locked-down roles can
+# stay frozen. openclaw is a long-running service and we want
+# security patches flowing — re-enable here (same pattern as openbao).
+- name: Unmask apt-daily timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    masked: false
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+- name: Enable unattended-upgrades config
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Start apt-daily timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+- name: Show next-steps reminder
+  ansible.builtin.debug:
+    msg: >-
+      Prereqs are in place: Node {{ openclaw_node_major }} on PATH,
+      service user '{{ openclaw_service_user }}' with $HOME at
+      {{ openclaw_service_home }}, and ufw allows {{ openclaw_gateway_port }}/tcp.
+      Install + onboard, no sudo needed (Node is already there so the
+      installer skips its only root-requiring step):
+        ssh claw-admin@<vm-ip>
+        sudo -u {{ openclaw_service_user }} -i
+        curl -fsSL https://openclaw.ai/install.sh | bash
+        exec $SHELL   # pick up the new PATH
+        openclaw onboard
+      See vms/openclaw/README.md "Install openclaw" and "First-onboard ceremony".
+  when: not ansible_check_mode

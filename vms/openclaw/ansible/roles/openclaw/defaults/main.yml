@@ -1,0 +1,57 @@
+---
+# Defaults for the openclaw role. Override in inventory, group_vars, or
+# host_vars if a deployment diverges; the defaults match a single-host
+# Ubuntu 24.04 deployment running the gateway as a system service.
+
+# Node.js major version. Upstream recommends Node 24, accepts >= 22.16.
+# Pinning to 24 matches the README's first-line recommendation; bump
+# only when a future openclaw release requires it.
+openclaw_node_major: "24"
+
+# NodeSource apt-key landing site. Modern signed-by= keyring pattern
+# (replaces deprecated apt-key add).
+openclaw_nodesource_keyring: /etc/apt/keyrings/nodesource.asc
+openclaw_nodesource_key_url: "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
+
+# Linux/glibc target for the apt repo. NodeSource publishes for `nodistro`
+# (their distro-agnostic main pool); the apt path under that is
+# `/node_<major>.x/`. This stays stable across Ubuntu versions.
+openclaw_nodesource_repo: "deb [signed-by={{ openclaw_nodesource_keyring }}] https://deb.nodesource.com/node_{{ openclaw_node_major }}.x nodistro main"
+
+# Service user. NOT the admin user from cloud-init (that's claw-admin,
+# used only for ssh + sudo). The daemon runs as a dedicated unprivileged
+# user so its workspace + secrets live under one home dir.
+#
+# Real shell + linger (matching the nemoclaw role's pattern) so the
+# operator can `sudo -u openclaw -i` and run upstream's installer plus
+# `openclaw onboard --install-daemon` (which writes a user-systemd unit
+# under ~/.config/systemd/user — needs linger to survive logout).
+openclaw_service_user: openclaw
+openclaw_service_group: openclaw
+openclaw_service_home: /home/openclaw
+openclaw_service_shell: /bin/bash
+openclaw_enable_linger: true
+
+# NOPASSWD sudo for the openclaw service user. Default OFF — the role
+# treats this as a deliberate trust call the operator must make in
+# inventory, not a silent default. Common openclaw deployments DO grant
+# the agent sudo (the "let the agent run the whole machine" pattern,
+# matching how a lot of people use the upstream CLI), but the role's
+# baseline is least-privilege. To enable, set `openclaw_grant_sudo: true`
+# in inventory.yml and re-run. The hardened alternative is
+# vms/nemoclaw/, which keeps its service user unprivileged AND runs
+# OpenClaw inside an OpenShell sandbox — see that role for the model.
+openclaw_grant_sudo: false
+
+# Gateway listen port. Default in the openclaw CLI; expose this in
+# defaults so the ufw rule below can stay in sync with whatever port
+# the operator runs the gateway on after running upstream's installer.
+openclaw_gateway_port: 18789
+
+# Whether to open the gateway port through ufw. LAN-only by default —
+# the gateway has no auth at the HTTP layer beyond pairing, so don't
+# expose this to the internet without a Tailscale / reverse-proxy
+# perimeter. Pre-opening the port here means the operator's first
+# `openclaw onboard` from inside the VM is reachable from the LAN
+# without an extra ufw step.
+openclaw_ufw_allow_gateway: true

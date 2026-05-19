@@ -1,0 +1,17 @@
+---
+# vms/nemoclaw/ansible/site.yml
+#
+# Top-level play for the nemoclaw role. Runs the `nemoclaw` role
+# against the inventory's `nemoclaw_servers` host group.
+#
+# Usage from repo root:
+#   just ansible nemoclaw
+# Or directly:
+#   cd vms/nemoclaw/ansible && ansible-playbook -i inventory.yml site.yml
+
+- name: Install NemoClaw prerequisites (Docker + Node 22 + nemoclaw CLI)
+  hosts: nemoclaw_servers
+  become: true
+  gather_facts: true
+  roles:
+    - role: nemoclaw

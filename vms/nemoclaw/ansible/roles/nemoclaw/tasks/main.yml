@@ -1,0 +1,277 @@
+---
+# Prep an Ubuntu 24.04 VM for an operator-run NemoClaw install. The
+# role stops short of installing the nemoclaw binary itself — upstream
+# changes the install path often (npm-global, curl|bash with nvm,
+# container variants) and pinning one method in IaC turns into a
+# maintenance tax. Instead the role gets the host to a state where any
+# upstream-recommended install Just Works:
+#
+#   * Docker (Docker Inc.'s apt repo + docker-ce/buildx/compose),
+#     enabled at boot — NemoClaw's sandbox model expects this.
+#   * Node 22 on PATH (via NodeSource apt repo) — covers the
+#     `npm install -g nemoclaw` install path, and harmless if the
+#     operator goes the upstream `curl | bash` (nvm-based) route.
+#   * `nemoclaw` service user with bash + docker-group + linger, so
+#     `sudo -u nemoclaw -i` and `nemoclaw onboard` Just Work.
+#
+# See vms/nemoclaw/README.md "Install nemoclaw" for the canonical
+# operator install command, and "First-onboard ceremony" for the
+# interactive pairing + sandbox-creation steps after install.
+#
+# Check-mode behavior:
+#   The six repo-bootstrap tasks (apt prereqs, keyrings dir, Docker
+#   key + repo, NodeSource key + repo) carry `check_mode: false` so
+#   they run live even under --check. Without the keyrings + repo
+#   files actually on disk, the downstream `apt: name=docker-ce` and
+#   `apt: name=nodejs` tasks fail with "No package matching <foo> is
+#   available". Same convention as pbs-hosts and openclaw. The Node
+#   major-version assert and the docker smoke check carry
+#   `when: not ansible_check_mode` — nothing live to validate on a
+#   dry-run.
+
+- name: Ensure dependencies for the apt repos are installed
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      # `acl` provides setfacl, required for Ansible's `become_user`
+      # to an unprivileged user (the nemoclaw service user in the
+      # smoke-check task below). Without it, Ansible falls back to
+      # BSD-style `chmod +a` ACL syntax which GNU coreutils on
+      # Ubuntu doesn't understand, and the task fails with
+      # "chmod: invalid mode 'A+user:nemoclaw:rx:allow'".
+      - acl
+      # `binutils` ships `strings` + `objdump`, which upstream's
+      # NemoClaw installer uses to "verify OpenShell messaging
+      # credential rewrite support" — the installer aborts with
+      # "'strings' is required ... Install binutils or an equivalent
+      # package and retry" if not present. Not on the Ubuntu cloud
+      # base by default.
+      - binutils
+    state: present
+    update_cache: true
+    # No cache_valid_time — see openbao/openclaw notes; the Packer
+    # base wipes /var/lib/apt/lists/* but leaves pkgcache.bin recent.
+  check_mode: false
+
+- name: Ensure /etc/apt/keyrings exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  check_mode: false
+
+# --- Docker apt repo + install -----------------------------------------------
+
+# Docker Inc.'s archive key is ASCII-armored — same modern signed-by=
+# pattern as the NodeSource + OpenBao keys. The download.docker.com
+# URL is current as of 2026-05; if Docker reorganizes their key
+# layout, update nemoclaw_docker_key_url in defaults.
+- name: Install Docker apt archive key
+  ansible.builtin.get_url:
+    url: "{{ nemoclaw_docker_key_url }}"
+    dest: "{{ nemoclaw_docker_keyring }}"
+    owner: root
+    group: root
+    mode: "0644"
+  check_mode: false
+
+- name: Add Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: "{{ nemoclaw_docker_repo }}"
+    filename: docker
+    state: present
+    update_cache: true
+  check_mode: false
+
+- name: Install Docker engine + plugins
+  ansible.builtin.apt:
+    name: "{{ nemoclaw_docker_packages }}"
+    state: present
+
+# Skip in --check: the preceding `apt: name=docker-ce` dry-runs in
+# check mode, so docker.service / containerd.service unit files
+# aren't actually on disk yet — the systemd module then fails with
+# "Could not find the requested service docker: host". Both run live
+# on a real apply.
+- name: Enable and start docker.service
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+- name: Enable and start containerd.service
+  ansible.builtin.systemd:
+    name: containerd
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+# --- NodeSource apt repo + Node 22 install -----------------------------------
+
+- name: Install NodeSource apt archive key
+  ansible.builtin.get_url:
+    url: "{{ nemoclaw_nodesource_key_url }}"
+    dest: "{{ nemoclaw_nodesource_keyring }}"
+    owner: root
+    group: root
+    mode: "0644"
+  check_mode: false
+
+- name: Add NodeSource apt repository
+  ansible.builtin.apt_repository:
+    repo: "{{ nemoclaw_nodesource_repo }}"
+    filename: nodesource
+    state: present
+    update_cache: true
+  check_mode: false
+
+- name: Install nodejs (brings npm)
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+
+- name: Capture installed node version
+  ansible.builtin.command: node --version
+  register: nemoclaw_node_version_raw
+  changed_when: false
+
+# NemoClaw documents 22.16 as the minimum. NodeSource's node_22.x
+# pool ships v22.x.y where y >= the latest LTS patch — sufficient
+# for the minimum. We assert major >= 22 (not the full 22.16) because
+# NodeSource doesn't expose minor-version pinning without a more
+# complex setup; the upstream npm preinstall hook (per package.json)
+# does the minor-version check anyway.
+- name: Assert Node major >= nemoclaw_node_major
+  ansible.builtin.assert:
+    that:
+      - nemoclaw_node_version_raw.stdout is regex('^v(' ~ nemoclaw_node_major ~ '|[3-9][0-9])\\.')
+    fail_msg: >-
+      Installed Node {{ nemoclaw_node_version_raw.stdout | trim }} is older than v{{ nemoclaw_node_major }}.
+      Check that /etc/apt/sources.list.d/nodesource.list points at node_{{ nemoclaw_node_major }}.x, then re-run.
+  # Skip in --check: the preceding command: task skips by default in
+  # check mode, leaving stdout empty. Same convention as openclaw.
+  when: not ansible_check_mode
+
+# --- Service user ------------------------------------------------------------
+
+- name: Create nemoclaw service group
+  ansible.builtin.group:
+    name: "{{ nemoclaw_service_group }}"
+    state: present
+    system: true
+
+# Real shell + create_home so the operator can `sudo -u nemoclaw -i`
+# and run `nemoclaw onboard` interactively. Docker group membership
+# is what lets the user invoke `docker` without sudo (matches
+# upstream's "runs as your normal user, no sudo" claim).
+- name: Create nemoclaw service user
+  ansible.builtin.user:
+    name: "{{ nemoclaw_service_user }}"
+    group: "{{ nemoclaw_service_group }}"
+    groups: ["docker"]
+    append: true
+    home: "{{ nemoclaw_service_home }}"
+    shell: "{{ nemoclaw_service_shell }}"
+    create_home: true
+    system: true
+    state: present
+
+# Without enable-linger, any future user-level systemd unit the
+# nemoclaw stack adds would die when the operator's SSH session
+# closes. Docker + k3s already use system units (no linger needed
+# for those), so this is forward-looking insurance.
+- name: Enable systemd linger for service user
+  ansible.builtin.command: "loginctl enable-linger {{ nemoclaw_service_user }}"
+  args:
+    creates: "/var/lib/systemd/linger/{{ nemoclaw_service_user }}"
+  when: nemoclaw_enable_linger
+
+# --- UFW ---------------------------------------------------------------------
+
+# Mandatory: the sandbox containers reach the OpenShell gateway over
+# the Docker bridge. Without this rule, `nemoclaw onboard` fails at
+# the preflight gateway-reachability check.
+- name: Allow OpenShell gateway from Docker bridge subnet
+  community.general.ufw:
+    rule: allow
+    from_ip: "{{ nemoclaw_docker_bridge_subnet }}"
+    to_port: "{{ nemoclaw_openshell_gateway_port }}"
+    proto: tcp
+    comment: "NemoClaw OpenShell gateway"
+
+- name: Allow Model Router through ufw
+  community.general.ufw:
+    rule: allow
+    port: "{{ nemoclaw_router_port }}"
+    proto: tcp
+    comment: "NemoClaw Model Router (LiteLLM proxy)"
+  when: nemoclaw_ufw_allow_router
+
+# --- Patching ----------------------------------------------------------------
+#
+# Same pattern as openbao/openclaw — the Packer base masks apt-daily
+# timers; we want patches flowing on a long-running service.
+
+- name: Unmask apt-daily timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    masked: false
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+- name: Enable unattended-upgrades config
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Start apt-daily timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+# --- Smoke checks ------------------------------------------------------------
+
+# Skip in --check — nothing live to verify on a dry-run. The debug
+# task below references the docker check's stdout, so it gates on the
+# same condition.
+- name: Verify docker engine responds to the service user
+  ansible.builtin.command: docker info --format '{% raw %}{{.ServerVersion}}{% endraw %}'
+  become: true
+  become_user: "{{ nemoclaw_service_user }}"
+  register: nemoclaw_docker_check
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Show next-steps reminder
+  ansible.builtin.debug:
+    msg: >-
+      Prereqs are in place: Docker {{ nemoclaw_docker_check.stdout }} reachable
+      from '{{ nemoclaw_service_user }}', Node {{ nemoclaw_node_major }} on PATH,
+      service user '{{ nemoclaw_service_user }}' with $HOME at
+      {{ nemoclaw_service_home }} (linger enabled). Install + onboard, no sudo
+      needed (Docker + Node are already there so the installer skips its
+      root-requiring steps):
+        ssh nemo-admin@<vm-ip>
+        sudo -u {{ nemoclaw_service_user }} -i
+        curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
+      The installer drops you straight into `nemoclaw onboard` for the
+      interactive sandbox + model-provider + channel setup.
+      See vms/nemoclaw/README.md "Install nemoclaw" and "First-onboard ceremony".
+  when: not ansible_check_mode
