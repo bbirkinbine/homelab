@@ -289,6 +289,16 @@ it with mTLS at a reverse proxy or restrict access via Tailscale.
 
 ## Security notes
 
+- **The openclaw service user has NOPASSWD sudo by default.** Deliberate
+  trust call, not an oversight. The common openclaw deployment pattern
+  lets the agent run the whole VM — install packages, restart services,
+  edit configs — as part of its tool capabilities. If you want the
+  agent strictly sandboxed at the OS level instead, set
+  `openclaw_grant_sudo: false` in inventory and re-run the role; the
+  task tears down the `/etc/sudoers.d/openclaw` drop-in. For an
+  agent-with-real-guardrails posture, see [`vms/nemoclaw/`](../nemoclaw/),
+  which keeps its service user unprivileged and runs OpenClaw inside
+  an OpenShell sandbox with network policy + capability drops.
 - **DM pairing policy.** Stock OpenClaw treats unknown senders on
   Telegram/WhatsApp/Signal/Discord/Slack/etc. with a pairing-code
   prompt (`dmPolicy="pairing"`). Don't relax to `dmPolicy="open"`

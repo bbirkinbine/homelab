@@ -138,6 +138,27 @@
     creates: "/var/lib/systemd/linger/{{ openclaw_service_user }}"
   when: openclaw_enable_linger
 
+# NOPASSWD sudo for the openclaw service user. Deliberate trust call —
+# the common openclaw deployment pattern lets the agent run the whole
+# machine. Flip openclaw_grant_sudo=false in inventory to drop this and
+# treat the service user as strictly unprivileged. validate: visudo -cf
+# prevents a broken drop-in from locking the host out of sudo.
+- name: Grant openclaw service user NOPASSWD sudo
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ openclaw_service_user }}"
+    content: "{{ openclaw_service_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s
+  when: openclaw_grant_sudo
+
+- name: Remove sudoers drop-in if openclaw_grant_sudo is disabled
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/{{ openclaw_service_user }}"
+    state: absent
+  when: not openclaw_grant_sudo
+
 # Gateway HTTP port. The Packer base ships ufw with 22/tcp already
 # allowed; this opens 18789. Keep this LAN-only — the gateway has no
 # native HTTP auth beyond pairing, so don't proxy it to the internet
