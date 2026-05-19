@@ -23,9 +23,11 @@
 //
 // Role-class: cluster-mobile service VM (matches openbao). No host
 // hardware passthrough, no irreplaceable on-host state — the daemon's
-// state lives under /home/openclaw/.openclaw, which is portable across
-// nodes once nas-vms NFS storage is wired into module defaults (see
-// CLAUDE.md "Active context"). x86-64-v3 module default keeps the
+// state lives under /home/openclaw/.openclaw. With the role's default
+// disk_storage = "nas-vms" (see variables.tf "--- Storage"), a freshly
+// applied openclaw is portable across cluster nodes; the pre-flip
+// pin in terraform.tfvars.tpl keeps the existing instance on local-lvm
+// until you opt into migration. x86-64-v3 module default keeps the
 // migration path open.
 
 provider "proxmox" {
@@ -84,6 +86,9 @@ module "openclaw" {
   memory_mb    = 16384
   balloon_mb   = 0
   disk_size_gb = 64
+
+  disk_storage     = var.disk_storage
+  snippets_storage = var.snippets_storage
 
   tags = ["openclaw", "tofu"]
 

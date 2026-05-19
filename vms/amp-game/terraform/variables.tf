@@ -60,5 +60,11 @@ variable "vm_disk_size_gb" {
 variable "disk_storage" {
   type        = string
   default     = "local-lvm"
-  description = "Proxmox storage pool for the boot disk. Default local-lvm (NVMe) is the right call for game-server I/O latency — Brian explicitly rejected nas-vms (NFS) for this workload because world saves and player joins are I/O-sensitive."
+  description = "Proxmox storage pool for the boot disk. This role OVERRIDES the cluster-mobile default of nas-vms (used by openbao / openclaw / nemoclaw): local-lvm (NVMe) is the right call for game-server I/O latency — Brian explicitly rejected nas-vms (NFS) for this workload because world saves and player joins are I/O-sensitive. amp-game is therefore node-pinned despite being on the new role shape. The variable is exposed (and shown commented in terraform.tfvars.example) so a planned node move or temporary re-host can flip it without editing the role definition."
+}
+
+variable "snippets_storage" {
+  type        = string
+  default     = "local"
+  description = "Proxmox storage for the cloud-init snippet (must allow `snippets` content type). Default `local` (per-node) is fine because amp-game is node-pinned to its `disk_storage` host — no live-migration to worry about. Exposed (and shown commented in terraform.tfvars.example) for symmetry with the cluster-mobile roles and to make a planned node move trivial to configure."
 }

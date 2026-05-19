@@ -30,3 +30,18 @@ admin_username = "bao-admin"
 # Single-line authorized_key. ssh-ed25519 recommended (shorter, faster
 # verify, and what KeePassXC stores cleanly on a single line).
 ssh_public_key = "ssh-ed25519 AAAA...your-pubkey... brianbirkinbine@workstation"
+
+# --- Storage -----------------------------------------------------------------
+# Defaults (in variables.tf) put the boot disk and cloud-init snippet on
+# `nas-vms` so the VM is cluster-mobile. For NEW deployments on shared NFS,
+# leave the two lines below commented out and you'll get the nas-vms default.
+#
+# The block below is the PRE-FLIP PIN for openbao instances that were created
+# on per-node local-lvm before nas-vms became the default. Uncomment to keep
+# `tofu apply` a no-op for storage; remove (or leave commented) to land the
+# boot disk + snippet on nas-vms on the next apply. Moving an existing VM's
+# disk this way RECREATES it (destructive) — see vms/openbao/README.md
+# "Storage migration" for the manual `qm move-disk` path that avoids recreate.
+#
+# disk_storage     = "local-lvm"
+# snippets_storage = "local"

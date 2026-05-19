@@ -68,6 +68,9 @@ module "openbao" {
   balloon_mb   = 0
   disk_size_gb = 32
 
+  disk_storage     = var.disk_storage
+  snippets_storage = var.snippets_storage
+
   tags = ["openbao", "tofu"]
 
   // The cloud-init template lives in the role's cloud-init/ subfolder

@@ -46,13 +46,13 @@ variable "enable_network" {
 variable "disk_storage" {
   type        = string
   default     = "local-lvm"
-  description = "Proxmox storage pool backing the VM's disk. Standard `local-lvm` is fine — encryption is handled INSIDE the guest (see vms/rootca/README.md § 'How the air-gap is enforced'). The Ansible role carves a LUKS partition on the second half of this disk and mounts it at /var/lib/rootca-encrypted. (Pre-2026-05-11 this was an encrypted Directory pool named `rootca-encrypted` on a host-side LUKS partition; the host-side LUKS approach was dropped in favor of in-VM encryption for stronger isolation.)"
+  description = "Proxmox storage pool backing the VM's disk. This role OVERRIDES the cluster-mobile default of nas-vms (used by openbao / openclaw / nemoclaw) because the Root CA is hardware-pinned to pve12t for HSM USB passthrough and never live-migrates — node-local is fine. Encryption is handled INSIDE the guest (see vms/rootca/README.md § 'How the air-gap is enforced'); the Ansible role carves a LUKS partition on the second half of this disk and mounts it at /var/lib/rootca-encrypted. (Pre-2026-05-11 this was an encrypted Directory pool named `rootca-encrypted` on a host-side LUKS partition; the host-side LUKS approach was dropped in favor of in-VM encryption for stronger isolation.)"
 }
 
 variable "snippets_storage" {
   type        = string
   default     = "local"
-  description = "Proxmox storage pool for the cloud-init snippet (must allow `snippets` content type). Default `local` matches the openbao role — the snippet itself is identity-only (hostname / admin user / SSH pubkey) and not sensitive."
+  description = "Proxmox storage pool for the cloud-init snippet (must allow `snippets` content type). This role OVERRIDES the cluster-mobile default of nas-vms with per-node `local` because the VM never live-migrates (HSM passthrough pins it to pve12t). The snippet itself is identity-only (hostname / admin user / SSH pubkey) and not sensitive."
 }
 
 variable "disk_size_gb" {

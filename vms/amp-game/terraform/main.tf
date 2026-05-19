@@ -77,11 +77,12 @@ module "amp_game" {
   //   * Storage = local-lvm (NVMe). Brian's explicit choice over nas-vms
   //     (NFS) — game-server I/O latency for world saves and player
   //     joins outweighs the cluster-mobility benefit of shared storage.
-  cores        = var.vm_cores
-  memory_mb    = var.vm_memory_mb
-  balloon_mb   = 0
-  disk_size_gb = var.vm_disk_size_gb
-  disk_storage = var.disk_storage
+  cores            = var.vm_cores
+  memory_mb        = var.vm_memory_mb
+  balloon_mb       = 0
+  disk_size_gb     = var.vm_disk_size_gb
+  disk_storage     = var.disk_storage
+  snippets_storage = var.snippets_storage
 
   tags = ["amp-game", "tofu"]
 
