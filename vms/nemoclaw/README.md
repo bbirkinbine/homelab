@@ -142,6 +142,11 @@ be running" prereqs are already met. Everything else — npm-global
 under the user's prefix, the nemoclaw install itself, the onboard
 wizard — runs in the service user's $HOME.
 
+> Upstream's install reference: [docs.nvidia.com/nemoclaw](https://docs.nvidia.com/nemoclaw/latest/get-started/prerequisites.html).
+> Check the page before deploying — NemoClaw is alpha and the
+> install URL or non-interactive env vars may have shifted since
+> this README was written.
+
 ```bash
 ssh nemo-admin@<vm-ip>
 sudo -u nemoclaw -i           # become the service user
@@ -159,9 +164,6 @@ sudo -u nemoclaw -i bash -c '
     bash
 '
 ```
-
-Full install reference at
-[docs.nvidia.com/nemoclaw](https://docs.nvidia.com/nemoclaw/latest/get-started/prerequisites.html).
 
 ## First-onboard ceremony (operator-driven, one-time)
 

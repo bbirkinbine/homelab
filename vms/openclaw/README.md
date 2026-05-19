@@ -99,6 +99,10 @@ root). Everything else — npm prefix config under `~/.npm-global`,
 PATH wiring in `.bashrc`, the openclaw install itself — runs in the
 service user's $HOME.
 
+> Upstream's install reference: [docs.openclaw.ai/install](https://docs.openclaw.ai/install).
+> Check the page before deploying — the `curl | bash` URL or
+> recommended flags may have shifted since this README was written.
+
 ```bash
 ssh claw-admin@<vm-ip>
 sudo -u openclaw -i           # become the service user
