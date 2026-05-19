@@ -152,21 +152,43 @@ the per-role READMEs.
 
 ## Creating a new role from scratch
 
-The fastest path is "copy `vms/openbao/`, swap names, swap content."
+The fastest path is "copy `vms/_template/`, replace `__ROLE__`, sweep
+the TODOs." `vms/_template/` is a generic cluster-mobile skeleton — no
+role-specific cruft to strip out, valid HCL/YAML throughout (passes
+`tofu fmt` and `tofu validate`), structurally identical to a real
+role. The template's own README walks through the swap-out steps.
+
 Concrete steps:
 
-1. **Pick the role-class** from the three above. Note the template VM
-   you'll clone:
-   - Cluster-mobile → copy `vms/openbao/`
-   - Hardware-pinned with USB → copy `vms/rootca/` (and read its
-     two-phase lifecycle before deciding if you need the air-gap step)
+1. **Pick the role-class** from the three above. The template fits
+   class A directly; classes B/C copy the template and cross-reference
+   the relevant existing role for the hardware-specific bits:
+   - Cluster-mobile → copy `vms/_template/` as-is.
+   - Hardware-pinned with USB → copy `vms/_template/`, then swap the
+     module call's storage knobs to local-lvm/local and add a
+     `usb_passthrough = {...}` block per [`vms/rootca/`](../vms/rootca/).
+     (Read rootca's two-phase lifecycle README before deciding if you
+     also need the air-gap step.)
    - eGPU passthrough → not yet shipping; the `modules/proxmox-vm/`
-     module will need a `hostpci` block added when the LLM role lands
+     module needs a `hostpci` block first. When that lands, copy
+     `vms/_template/`, add `hostpci`, swap storage to a local pool.
 
-2. **Copy the directory structure:**
+2. **Copy the directory structure and rename the placeholder:**
    ```bash
-   cp -r vms/openbao vms/<newrole>
+   cp -r vms/_template vms/<newrole>
    cd vms/<newrole>
+
+   # Replace __ROLE__ everywhere — directory, identifiers, comments.
+   # The placeholder is a valid HCL/YAML identifier so files are
+   # already parsed; you just need to swap names.
+   git ls-files -o --exclude-standard | xargs sed -i '' 's/__ROLE__/<newrole>/g'  # macOS
+   # (Linux: `sed -i 's/__ROLE__/<newrole>/g'`)
+
+   # Rename the ansible role directory.
+   mv ansible/roles/__ROLE__ ansible/roles/<newrole>
+
+   # Sweep TODOs.
+   grep -rn 'TODO:' .
    ```
 
 3. **Edit the tofu workspace** (`vms/<newrole>/terraform/`):

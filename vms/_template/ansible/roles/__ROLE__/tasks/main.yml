@@ -1,0 +1,45 @@
+---
+# Tasks for the __ROLE__ role.
+#
+# Runs against the inventory's __ROLE___servers group as the
+# `admin_username` user (from cloud-init), `become: true` from
+# site.yml.
+#
+# Cloud-init has already done: hostname, admin user + SSH key, sudo.
+# Everything else — apt repos, package install, service user setup,
+# config templates, systemd units, ufw rules — belongs here.
+#
+# TODO: replace the starter tasks below with the role's actual work.
+# Compare against vms/openbao/ansible/roles/openbao/tasks/main.yml
+# for a service-VM example (apt install + systemd config + ufw).
+
+- name: Wait for cloud-init to finish
+  ansible.builtin.command: cloud-init status --wait
+  changed_when: false
+  # cloud-init might still be finishing apt-daily / unattended-upgrades
+  # background work the moment Ansible first connects. Waiting here
+  # avoids dpkg-lock races on the first task that runs apt.
+
+# - name: Install packages
+#   ansible.builtin.apt:
+#     name:
+#       - TODO
+#     state: present
+#     update_cache: true
+#     cache_valid_time: 3600
+#
+# - name: Allow service port through ufw
+#   community.general.ufw:
+#     rule: allow
+#     port: "TODO"
+#     proto: tcp
+#     comment: "__ROLE__ TODO"
+#
+# - name: Drop systemd override (CAP_NET_BIND_SERVICE, etc.)
+#   ansible.builtin.copy:
+#     src: __ROLE__-override.conf
+#     dest: /etc/systemd/system/__ROLE__.service.d/override.conf
+#     owner: root
+#     group: root
+#     mode: "0644"
+#   notify: Reload systemd

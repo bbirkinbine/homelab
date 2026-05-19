@@ -1,0 +1,19 @@
+---
+# Handlers for the __ROLE__ role. Triggered via `notify:` in tasks/main.yml.
+#
+# TODO: add handlers as the role's tasks need them. The shape below is
+# a starter set — restart-service, reload-systemd, reload-ufw. Trim or
+# extend based on what the role actually manages.
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+# - name: Restart __ROLE__
+#   ansible.builtin.systemd:
+#     name: __ROLE__
+#     state: restarted
+#
+# - name: Reload ufw
+#   community.general.ufw:
+#     state: reloaded

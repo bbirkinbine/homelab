@@ -1,0 +1,17 @@
+---
+# vms/__ROLE__/ansible/site.yml
+#
+# Top-level play for the __ROLE__ role. Runs the `__ROLE__` role
+# against the inventory's `__ROLE___servers` host group.
+#
+# Usage from repo root:
+#   just ansible __ROLE__
+# Or directly:
+#   cd vms/__ROLE__/ansible && ansible-playbook -i inventory.yml site.yml
+
+- name: Bootstrap __ROLE__
+  hosts: __ROLE___servers
+  become: true
+  gather_facts: true
+  roles:
+    - role: __ROLE__
