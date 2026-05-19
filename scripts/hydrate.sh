@@ -92,9 +92,45 @@ if [[ ! -f "$TPL" ]]; then
   exit 65
 fi
 
+# Deploy-target reminder. The .tpl carries a sticky default for
+# proxmox_node; an operator following a copy-paste flow can easily
+# miss it. Parse the value out of whichever file is current and
+# splash a banner so the target is impossible to overlook before
+# tofu plan/apply runs. Skipped silently if the file has no
+# proxmox_node line (some roles may not, or it might be commented).
+deploy_target_banner() {
+  local file="$1"
+  local node role
+  node="$(grep -E '^[[:space:]]*proxmox_node[[:space:]]*=' "$file" 2>/dev/null \
+            | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' | head -n1)"
+  role="$(echo "$TPL" | sed -E 's|.*/vms/([^/]+)/terraform/.*|\1|')"
+
+  if [[ -z "$node" ]]; then
+    return
+  fi
+
+  cat >&2 <<'BANNER'
+
+     ____  _____ ____  _     ___  __   __
+    |  _ \| ____|  _ \| |   / _ \ \ \ / /
+    | | | |  _| | |_) | |  | | | | \ V /
+    | |_| | |___|  __/| |__| |_| |  | |
+    |____/|_____|_|   |_____\___/   |_|
+
+BANNER
+  {
+    printf '    Role:      %s\n' "$role"
+    printf '    Target:    PVE node "%s"\n' "$node"
+    printf '    Template:  %s\n' "$TPL"
+    printf '\n'
+    printf '    Wrong node? Edit the template above, then re-hydrate with --force.\n\n'
+  } >&2
+}
+
 # Skip if already up-to-date.
 if [[ -f "$OUT" && $FORCE -eq 0 && "$OUT" -nt "$TPL" ]]; then
   echo "==> $OUT is newer than $TPL; skipping (use --force to rehydrate)."
+  deploy_target_banner "$OUT"
   exit 0
 fi
 
@@ -233,3 +269,5 @@ done < "$TPL"
 
 install -m 600 "$TMP" "$OUT"
 echo "==> wrote $OUT (mode 0600)"
+
+deploy_target_banner "$OUT"
