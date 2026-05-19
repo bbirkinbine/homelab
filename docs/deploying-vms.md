@@ -82,8 +82,9 @@ impossible. Examples: future LLM role (eGPU on `pve12t`), the Root CA
   CardLogix HSM pair enumerates identically, and the labeled-jack
   discipline is the contract.
 
-**Template to copy:** `vms/rootca/` (HSM passthrough variant) or — when
-it lands — a future `vms/llm/` (eGPU passthrough variant).
+**Template to copy:** `vms/rootca/` (HSM passthrough variant) or
+`vms/llm/` (eGPU passthrough variant — RTX 3090 on `pve12t` via
+Thunderbolt).
 
 ### C. Air-gapped VM (no NIC after bootstrap)
 

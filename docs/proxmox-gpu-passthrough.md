@@ -271,9 +271,13 @@ accurate memory, but Proxmox's web UI doesn't use it for the memory
 metric — only for IP/ping/fsfreeze. No clean fix without a custom
 dashboard.
 
-[`vms/llm/deploy.sh`](../vms/llm/deploy.sh) does all of the per-VM
-setup automatically and refuses to proceed if any prerequisite is
-missing.
+[`vms/llm/terraform/main.tf`](../vms/llm/terraform/main.tf) wires all
+of the per-VM passthrough setup automatically via the shared module's
+`hostpci_devices` input (which references a cluster-wide PCI resource
+mapping by name — see [`vms/llm/README.md`](../vms/llm/README.md)
+"PCI mapping prereq" for the one-time `pvesh create
+/cluster/mapping/pci ...` operator step). `scripts/preflight.sh`
+refuses to proceed if any prerequisite is missing.
 
 ## Thunderbolt eGPU specifics
 
@@ -296,15 +300,18 @@ it. Consequences:
    Conventional wisdom says each Thunderbolt port is its own PCIe
    root port, so the same enclosure plugged into TB1 vs TB2 should
    land on a different `bus:dev`. In practice it depends on the
-   SoC's TB topology — the i7-1260P NUC in `pve12` keeps the eGPU
+   SoC's TB topology — the i7-1260P NUC in `pve12t` keeps the eGPU
    at the same `3c:00` address on both ports (verified by moving
    the cable). Other hosts/CPUs may not. After any physical change
    (port swap, enclosure swap, host reboot), run
-   `lspci -nn | grep -i nvidia` and confirm `GPU_PCI_ADDRESS` in
-   `vms/llm/.env` still matches. `deploy.sh` rejects mismatched
-   addresses early; for an already-deployed VM, edit
-   `/etc/pve/qemu-server/<vm-id>.conf`'s `hostpci0` line and
-   reboot the VM.
+   `lspci -nn | grep -i nvidia` and update the **cluster-wide PCI
+   mapping** rather than the role's tfvars (the role references the
+   mapping by name; the mapping holds the address). Refresh with:
+   `pvesh set /cluster/mapping/pci/rtx-3090 --map
+   'node=pve12t,path=0000:<new-bus:dev>.0,iommugroup=<group>' --map
+   'node=pve12t,path=0000:<new-bus:dev>.1,iommugroup=<group>'`. If a
+   VM is already running against the old address, `qm shutdown` it,
+   apply the mapping update, then `qm start`.
 
 4. **Link speed ceiling: PCIe 3.0 x4.** Thunderbolt 3/4 tunnels PCIe
    at 4 lanes max; you cannot get x16 over Thunderbolt regardless
@@ -433,12 +440,15 @@ if the host is ever reinstalled. Capture commands at the bottom.
 3c:00.1 Audio device [0403]: NVIDIA Corporation GA102 High Definition Audio Controller [10de:1aef] (rev a1)
 ```
 
-The 3090 enumerates at bus `3c:00` over Thunderbolt; this is what
-`vms/llm/.env`'s `GPU_PCI_ADDRESS` is set to. On this NUC the bus
-address is stable across both TB ports (verified by moving the cable
-between TB1 and TB2 — the eGPU stays at `3c:00`). Different hosts
-may behave differently; always re-check with `lspci` after any
-physical change.
+The 3090 enumerates at bus `3c:00` over Thunderbolt; this is the
+address that goes into the cluster-wide PCI mapping the llm role
+references by name (`var.gpu_pci_mapping = "rtx-3090"`). On this NUC
+the bus address is stable across both TB ports (verified by moving
+the cable between TB1 and TB2 — the eGPU stays at `3c:00`). Different
+hosts may behave differently; always re-check with `lspci` after any
+physical change and update the mapping (NOT the role's tfvars — the
+role references the mapping by name; the mapping is what holds the
+physical address).
 
 ### Thunderbolt enrollment
 
