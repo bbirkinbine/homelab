@@ -1,18 +1,19 @@
 # Inputs to the shared Proxmox-VM module.
 #
 // Scope notes:
-//   * No hostpci / GPU passthrough variable yet — will be added when the
-//     LLM role ports to OpenTofu. Adding it speculatively here would
-//     mean a `dynamic "hostpci"` block paired with cross-variable
-//     preconditions for balloon=0, none of which the openbao role
-//     exercises.
-//   * No USB passthrough variable yet — the Root CA VM (the only role
-//     that will need it post-2026-05-10) is not in scope for this
-//     module yet. When it lands, decide between (a) extending this
-//     module with an optional `usb {}` list or (b) a sibling
-//     proxmox-vm-with-usb module. The shape of HSM passthrough is
-//     fiddly enough (host=<bus>-<port> pin, usb3 toggle) that a
-//     separate module may be cleaner.
+//   * USB passthrough lives at `usb_passthrough` (single optional
+//     object). HSM tokens pin by physical bus-port, NOT VID:PID,
+//     because the CardLogix pair enumerates identically — see the
+//     variable's own comment block for the labeled-jack discipline.
+//   * PCIe / GPU passthrough lives at `hostpci_devices` (list of
+//     objects). Devices are referenced by Proxmox cluster-wide PCI
+//     resource mapping name, NOT raw PCI address — the raw-address
+//     form (`hostpci.id`) is incompatible with API token auth, and
+//     the homelab uses tokens exclusively. Mapping name decouples
+//     VM config from physical PCI addresses (matters for the
+//     Thunderbolt eGPU whose bus address shifts after enclosure
+//     swaps). The mapping itself is a one-time cluster bring-up
+//     step (Datacenter → Resource Mappings → PCI; or via pvesh).
 //   * Defaults match the homelab's conventions: q35 machine type
 //     (modern PCIe), serial0 vga (because the base template wires up
 //     ttyS0 for `qm terminal`), local-lvm + local for storage names
@@ -148,4 +149,41 @@ variable "usb_passthrough" {
     usb3 = optional(bool, false)
   })
   default = null
+}
+
+# --- PCIe / GPU passthrough --------------------------------------------------
+
+// Devices are referenced by Proxmox cluster-wide PCI resource mapping name,
+// NOT raw PCI address. Reason: the bpg/proxmox provider's `hostpci.id`
+// attribute requires root username+password auth and is incompatible with
+// API tokens — and this lab uses tokens exclusively per
+// docs/proxmox-tofu-permissions.md. The `mapping` attribute works with
+// tokens AND decouples VM config from physical PCI addresses (matters for
+// the Thunderbolt eGPU whose bus address shifts after enclosure swaps or
+// port changes — see vms/llm/legacy/README.md if it survived the port).
+//
+// Creating a mapping is a one-time cluster-side step (NOT this module's
+// job): Datacenter → Resource Mappings → PCI → Add, OR
+//   pvesh create /cluster/mapping/pci --id rtx-3090 \
+//     --map 'node=pve12t,path=0000:3c:00.0,iommugroup=14' \
+//     --map 'node=pve12t,path=0000:3c:00.1,iommugroup=14'
+// The role's terraform.tfvars then passes mapping = "rtx-3090". Cluster-
+// scoped state, so it's defined once and works on whichever node the VM
+// lands on (though most passthrough VMs are node-pinned anyway).
+//
+// Cross-variable constraints, enforced via preconditions in main.tf:
+//   * `balloon_mb = 0` is required (PCIe passthrough needs pinned RAM).
+//   * `machine = "q35"` is required (PCIe is q35-only).
+// Operators who set hostpci_devices with mismatched values get a clear
+// error message at plan time rather than a confusing runtime failure.
+variable "hostpci_devices" {
+  description = "List of PCI devices to pass through, referenced by Proxmox cluster-wide PCI resource mapping name. Default = [] (no passthrough). Each entry: {mapping = \"<cluster-mapping-name>\", pcie = true|false, xvga = true|false, mdev = \"<id>\", rombar = true|false}. `pcie` defaults to true (required by modern GPUs); `xvga` to false (set true only when the device is the VM's primary display, which causes Proxmox to ignore `vga_type`); `rombar` to true (matches the upstream default — firmware ROM visible to guest). `mdev` is for mediated-device split (vGPU) and is normally null."
+  type = list(object({
+    mapping = string
+    pcie    = optional(bool, true)
+    xvga    = optional(bool, false)
+    mdev    = optional(string)
+    rombar  = optional(bool, true)
+  }))
+  default = []
 }

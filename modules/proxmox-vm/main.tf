@@ -11,14 +11,12 @@
 //      and references the snippet from `initialization.user_data_file_id`.
 //
 // What this module deliberately does NOT do:
-//   - No hostpci/PCIe passthrough block. Adding when LLM role ports.
-//   - No USB passthrough. The Root CA VM (the only future consumer)
-//     will likely warrant a separate module — see variables.tf.
-//   - No network_device block — the Packer base ships net0 wired to
-//     vmbr0 and Proxmox preserves that on clone. Override at the
-//     caller if a role needs a different bridge.
 //   - No init/destroy provisioners. Configuration management is
 //     Ansible's job; this module owns only the VM shape.
+//   - No cluster-side PCI mapping creation. `hostpci_devices`
+//     references a cluster-wide mapping by name; the mapping itself
+//     is a one-time bring-up step (see variables.tf "PCIe / GPU
+//     passthrough" comment for the pvesh / UI flow).
 
 resource "proxmox_virtual_environment_file" "user_data" {
   content_type = "snippets"
@@ -109,12 +107,47 @@ resource "proxmox_virtual_environment_vm" "this" {
   // USB passthrough. Pinned by host bus-port (e.g. host="1-2"), NOT
   // by VID:PID — CardLogix HSM tokens enumerate identically and the
   // labeled physical jack is the contract. Default null = no
-  // passthrough (openbao, llm, k3s nodes). Used by the Root CA role.
+  // passthrough (openbao, k3s nodes). Used by the Root CA role.
   dynamic "usb" {
     for_each = var.usb_passthrough == null ? [] : [var.usb_passthrough]
     content {
       host = usb.value.host
       usb3 = usb.value.usb3
+    }
+  }
+
+  // PCIe / GPU passthrough. Devices are referenced by Proxmox cluster-
+  // wide PCI resource mapping name (set up once via Datacenter →
+  // Resource Mappings → PCI or via pvesh — see variables.tf comment).
+  // Default [] = no passthrough. The `device` attribute is auto-assigned
+  // from the list index (hostpci0, hostpci1, ...). Used by the LLM role
+  // (eGPU passthrough).
+  dynamic "hostpci" {
+    for_each = var.hostpci_devices
+    content {
+      device  = "hostpci${hostpci.key}"
+      mapping = hostpci.value.mapping
+      pcie    = hostpci.value.pcie
+      xvga    = hostpci.value.xvga
+      mdev    = hostpci.value.mdev
+      rombar  = hostpci.value.rombar
+    }
+  }
+
+  // Cross-variable preconditions for PCIe passthrough — fail at plan
+  // time with a useful message instead of a confusing runtime / boot
+  // failure. Both constraints come from Proxmox's hardware requirements:
+  //   * RAM must be pinned (balloon disabled) — the host can't move
+  //     pages out from under a device with DMA access.
+  //   * The PCIe topology only exists in q35 — i440fx exposes legacy PCI.
+  lifecycle {
+    precondition {
+      condition     = length(var.hostpci_devices) == 0 || var.balloon_mb == 0
+      error_message = "PCIe passthrough (hostpci_devices) requires balloon_mb = 0 — pinned RAM is mandatory for devices with DMA access."
+    }
+    precondition {
+      condition     = length(var.hostpci_devices) == 0 || var.machine == "q35"
+      error_message = "PCIe passthrough (hostpci_devices) requires machine = \"q35\" — i440fx exposes only legacy PCI."
     }
   }
 
