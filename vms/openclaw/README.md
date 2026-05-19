@@ -91,28 +91,37 @@ version only makes sense after a real apply.
 
 ## Install openclaw
 
-The role gets you to "ready for any upstream install." Pick whichever
-install path [upstream](https://github.com/openclaw/openclaw) documents
-at the time you're deploying — typically:
+Use upstream's recommended `curl | bash` installer, running as the
+openclaw service user. **No sudo is needed** — our role already
+installed Node 24 via NodeSource, so the installer detects it and
+skips its own Node install (which is the only step that would need
+root). Everything else — npm prefix config under `~/.npm-global`,
+PATH wiring in `.bashrc`, the openclaw install itself — runs in the
+service user's $HOME.
 
 ```bash
 ssh claw-admin@<vm-ip>
-sudo npm install -g openclaw          # global install: needs sudo (writes to /usr/lib/node_modules)
-# Binary lands at /usr/bin/openclaw, executable by any user. Now switch
-# to the service user for the smoke check + onboard:
-sudo -u openclaw -i
-openclaw --version
+sudo -u openclaw -i           # become the service user
+curl -fsSL https://openclaw.ai/install.sh | bash
+exec $SHELL                   # pick up the new PATH from .bashrc
+openclaw --version            # smoke check
 ```
 
-The install command needs sudo because npm-global writes to a
-root-owned tree — `claw-admin` has sudo, the `openclaw` service user
-doesn't. After install, every subsequent `openclaw` invocation runs
-as the service user (where `~/.openclaw/` lives).
+Upstream documents a handful of variants (`install-cli.sh` for a
+fully local prefix at `~/.openclaw`, npm-global, pnpm-global, git
+source build) at [docs.openclaw.ai/install](https://docs.openclaw.ai/install).
+The `install.sh` path is their headline recommendation and the
+lowest-friction option on our prepared host; the others all work
+too if you have a reason to prefer them.
 
-If upstream's docs change to a `curl | bash` or container path, swap
-the install command accordingly — the surrounding prereqs (Node 24
-on PATH, service user with linger, ufw rule) don't care which
-install method you take.
+For non-interactive / repeatable installs (CI, rebuild scripts),
+upstream honors these env vars on the install.sh path:
+
+| Variable | Effect |
+| --- | --- |
+| `OPENCLAW_INSTALL_METHOD=npm` | Skip the "git or npm?" prompt — pick npm-global (default) |
+| `OPENCLAW_VERSION=<tag>` | Pin to a specific release tag instead of latest |
+| `NO_PROMPT=1` or `OPENCLAW_NO_PROMPT=1` | Suppress all interactive prompts (you'll skip the onboard ceremony — run it separately) |
 
 ## First-onboard ceremony (operator-driven, one-time)
 

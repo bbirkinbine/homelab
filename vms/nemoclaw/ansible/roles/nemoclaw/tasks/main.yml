@@ -233,11 +233,13 @@
       Prereqs are in place: Docker {{ nemoclaw_docker_check.stdout }} reachable
       from '{{ nemoclaw_service_user }}', Node {{ nemoclaw_node_major }} on PATH,
       service user '{{ nemoclaw_service_user }}' with $HOME at
-      {{ nemoclaw_service_home }} (linger enabled). SSH to the VM, then follow
-      upstream's install instructions at https://www.nvidia.com/nemoclaw —
-      typically either `curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash`
-      or `sudo npm install -g nemoclaw`. After install run
-      `sudo -u {{ nemoclaw_service_user }} -i nemoclaw onboard` for the
+      {{ nemoclaw_service_home }} (linger enabled). Install + onboard, no sudo
+      needed (Docker + Node are already there so the installer skips its
+      root-requiring steps):
+        ssh nemo-admin@<vm-ip>
+        sudo -u {{ nemoclaw_service_user }} -i
+        curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
+      The installer drops you straight into `nemoclaw onboard` for the
       interactive sandbox + model-provider + channel setup.
       See vms/nemoclaw/README.md "Install nemoclaw" and "First-onboard ceremony".
   when: not ansible_check_mode

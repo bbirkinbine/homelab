@@ -190,10 +190,12 @@
       Prereqs are in place: Node {{ openclaw_node_major }} on PATH,
       service user '{{ openclaw_service_user }}' with $HOME at
       {{ openclaw_service_home }}, and ufw allows {{ openclaw_gateway_port }}/tcp.
-      SSH to the VM as claw-admin, then follow the upstream install
-      instructions at https://openclaw.dev — typically
-      `sudo npm install -g openclaw`. After install, run
-      `sudo -u {{ openclaw_service_user }} -i openclaw onboard` for the
-      interactive channel + model-provider pairing.
+      Install + onboard, no sudo needed (Node is already there so the
+      installer skips its only root-requiring step):
+        ssh claw-admin@<vm-ip>
+        sudo -u {{ openclaw_service_user }} -i
+        curl -fsSL https://openclaw.ai/install.sh | bash
+        exec $SHELL   # pick up the new PATH
+        openclaw onboard
       See vms/openclaw/README.md "Install openclaw" and "First-onboard ceremony".
   when: not ansible_check_mode

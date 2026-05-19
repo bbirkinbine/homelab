@@ -134,13 +134,13 @@ dry-run; both run normally on a real apply.
 
 ## Install nemoclaw
 
-The role gets you to "ready for any upstream install." Pick whichever
-install path [upstream](https://github.com/NVIDIA/NemoClaw) documents
-at the time you're deploying — typically one of:
-
-**A. Upstream's documented path (curl | bash, uses nvm internally).**
-Install runs as the service user; lands under
-`~/.nvm/versions/node/v22/bin/`. No sudo on the install.
+Use upstream's recommended `curl | bash` installer, running as the
+nemoclaw service user. **No sudo is needed** — our role already
+installed Node 22 (via NodeSource) and Docker (Docker Inc.'s apt
+repo), so the installer's "install Node via nvm" and "Docker must
+be running" prereqs are already met. Everything else — npm-global
+under the user's prefix, the nemoclaw install itself, the onboard
+wizard — runs in the service user's $HOME.
 
 ```bash
 ssh nemo-admin@<vm-ip>
@@ -149,22 +149,19 @@ curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
 nemoclaw --version            # smoke check
 ```
 
-**B. npm-global against the role's pre-installed Node 22.** Install
-runs as `nemo-admin` with sudo (writes to
-`/usr/lib/node_modules`); binary lands at `/usr/bin/nemoclaw`,
-executable by any user.
+For non-interactive / repeatable installs, upstream honors:
 
 ```bash
-ssh nemo-admin@<vm-ip>
-sudo npm install -g nemoclaw
-sudo -u nemoclaw -i           # for the onboard
-nemoclaw --version
+sudo -u nemoclaw -i bash -c '
+  curl -fsSL https://www.nvidia.com/nemoclaw.sh | \
+    NEMOCLAW_NON_INTERACTIVE=1 \
+    NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 \
+    bash
+'
 ```
 
-The role's prereqs work with either path. If upstream's install
-moves to a container or some new shape, swap the install command —
-the surrounding prereqs (Docker, Node 22, nemoclaw user with docker
-group + linger) don't care.
+Full install reference at
+[docs.nvidia.com/nemoclaw](https://docs.nvidia.com/nemoclaw/latest/get-started/prerequisites.html).
 
 ## First-onboard ceremony (operator-driven, one-time)
 
