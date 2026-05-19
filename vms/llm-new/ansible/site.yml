@@ -1,0 +1,17 @@
+---
+# vms/llm/ansible/site.yml
+#
+# Top-level play for the llm role. Runs the `llm` role
+# against the inventory's `llm_servers` host group.
+#
+# Usage from repo root:
+#   just ansible llm
+# Or directly:
+#   cd vms/llm/ansible && ansible-playbook -i inventory.yml site.yml
+
+- name: Bootstrap llm
+  hosts: llm_servers
+  become: true
+  gather_facts: true
+  roles:
+    - role: llm

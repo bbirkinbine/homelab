@@ -1,0 +1,61 @@
+# vms/llm/terraform/terraform.tfvars.example
+#
+# Copy to terraform.tfvars (gitignored) and fill in real values, OR
+# copy to terraform.tfvars.tpl with kp:// placeholders and use
+# `just hydrate llm` to resolve them against KeePassXC.
+#
+# See docs/opentofu-setup.md for the hydration workflow.
+
+# Proxmox API endpoint URL. Trailing slash is OK. The llm role is
+# pinned to pve12t (eGPU), but `pmxcfs` replicates user.cfg so the
+# token authenticates against any cluster node.
+proxmox_endpoint = "https://pve12t:8006/"
+
+# Full API token in `user@realm!tokenid=secret-uuid` form.
+# See docs/proxmox-tofu-permissions.md for how to mint one. The token's
+# role must include the privileges enumerated there.
+#
+# When you switch to the .tpl + hydrate flow, this line becomes:
+#   proxmox_api_token = "kp://Homelab/Tofu/proxmox-api-token"
+proxmox_api_token = "tofu@pve!apply=00000000-0000-0000-0000-000000000000"
+
+# Proxmox node — HARDCODED to pve12t. The RTX 3090 is physically attached
+# via Thunderbolt to pve12t's Razer Core X enclosure. Changing this
+# without moving the eGPU (and re-creating the PCI mapping on the new
+# node) breaks the passthrough at boot.
+proxmox_node = "pve12t"
+
+# First-boot admin user. cloud-init creates this with sudo + the SSH
+# key below. Ansible runs against this user for all subsequent config.
+admin_username = "llm-admin"
+
+# Single-line authorized_key. ssh-ed25519 recommended.
+ssh_public_key = "ssh-ed25519 AAAA...your-pubkey... brianbirkinbine@workstation"
+
+# eGPU passthrough mapping name. The mapping itself is created once at
+# the cluster level via Datacenter -> Resource Mappings -> PCI, or via:
+#   pvesh create /cluster/mapping/pci --id rtx-3090 \
+#     --map 'node=pve12t,path=0000:3c:00.0,iommugroup=14' \
+#     --map 'node=pve12t,path=0000:3c:00.1,iommugroup=14'
+# The .0 function is the GPU; .1 is its HDMI-audio companion (both
+# move together in the same IOMMU group). Pass them both so Proxmox
+# binds the whole device. Change this variable's value ONLY if you
+# named the mapping something different at create time. Find the
+# current physical address with `ssh root@pve12t 'lspci -nn | grep -i nvidia'`.
+gpu_pci_mapping = "rtx-3090"
+
+# Storage overrides — uncomment to deviate from the defaults in
+# variables.tf (nuc12-fast / local — pinned to pve12t alongside the eGPU).
+# Flip to nas-vms only for a planned move to a different node (which
+# also requires moving the eGPU + creating its mapping there).
+# disk_storage     = "nuc12-fast"
+# snippets_storage = "local"
+
+# Sizing overrides — uncomment to deviate from the defaults in
+# variables.tf (6 cores / 32 GiB / 300 GiB):
+#   * Bump RAM (49152 = 48 GiB) for CPU-fallback inference on larger models.
+#   * Bump cores to 8-10 if doing significant CPU-fallback work.
+#   * Bump disk to 500-700 GiB if hoarding many quants.
+# vm_cores        = 8
+# vm_memory_mb    = 49152
+# vm_disk_size_gb = 500

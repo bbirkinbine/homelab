@@ -100,8 +100,9 @@ Conscious omissions — add them only when the role actually needs them:
 
 - USB passthrough — see [vms/rootca/terraform/main.tf](../rootca/terraform/main.tf)
   for the `usb_passthrough` shape (pinned by host bus-port, NOT VID:PID).
-- PCIe / eGPU passthrough — not yet supported by `modules/proxmox-vm/`;
-  the `hostpci` block lands when the LLM role ports.
+- PCIe / eGPU passthrough — see [vms/llm/terraform/main.tf](../llm/terraform/main.tf)
+  for the `hostpci_devices` shape (references a Proxmox cluster-wide PCI
+  resource mapping by name; mapping is a one-time bring-up step).
 - Air-gap toggle — [vms/rootca/](../rootca/) shows the conditional NIC
   pattern (`enable_network = true/false` + `network_devices = []` to
   remove declaratively).

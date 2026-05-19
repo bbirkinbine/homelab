@@ -1,0 +1,34 @@
+---
+# Handlers for the llm role. Triggered via `notify:` in tasks/main.yml.
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart docker
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted
+  # Triggered after `nvidia-ctk runtime configure` to pick up the NVIDIA
+  # runtime registration in /etc/docker/daemon.json.
+
+- name: Restart ollama
+  ansible.builtin.systemd:
+    name: ollama
+    state: restarted
+  # Triggered when the systemd override (OLLAMA_HOST) changes. Safe
+  # because Ollama reloads its model cache lazily; no in-flight request
+  # disruption beyond the restart itself.
+
+- name: Reload ufw
+  community.general.ufw:
+    state: reloaded
+
+- name: Reboot for NVIDIA kernel module
+  ansible.builtin.reboot:
+    msg: "Rebooting to load the NVIDIA kernel module after driver install."
+    reboot_timeout: 600
+  when: llm_reboot_after_driver_install | bool
+  # Without this reboot, `nvidia-smi` fails until the next boot ("No
+  # devices were found" / kernel module not loaded). The reboot also
+  # ensures Ollama's first start happens with the driver live.

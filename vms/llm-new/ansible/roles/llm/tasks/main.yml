@@ -1,0 +1,220 @@
+---
+# Tasks for the llm role.
+#
+# Runs against the inventory's llm_servers group as `llm-admin` (from
+# cloud-init), `become: true` from site.yml.
+#
+# Cloud-init has already done: hostname, admin user + SSH key, sudo.
+# This role installs the rest: NVIDIA server-branch driver, Docker,
+# NVIDIA Container Toolkit, Ollama, ufw rules, unattended-upgrades.
+# Reboots once after the NVIDIA driver install so the kernel module
+# loads cleanly (Ollama detects the GPU at startup, so its first
+# `systemctl start` must happen with the driver live).
+#
+# Ported from the legacy /usr/local/sbin/llm-provision.sh that used to
+# run from cloud-init runcmd. Functionally equivalent, but idempotent
+# under Ansible re-runs — see the apt / get_url / ansible.builtin.copy
+# tasks below for the state-checking patterns.
+
+- name: Wait for cloud-init to finish
+  ansible.builtin.command: cloud-init status --wait
+  changed_when: false
+  # cloud-init might still be finishing apt-daily / unattended-upgrades
+  # background work the moment Ansible first connects. Waiting here
+  # avoids dpkg-lock races on the first apt task.
+
+# --- Base prereqs ----------------------------------------------------------
+
+- name: Install build prereqs + ubuntu-drivers + matching kernel headers
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - pciutils
+      - build-essential
+      - dkms
+      - ubuntu-drivers-common
+      # Kernel headers MUST match the running kernel for the NVIDIA
+      # DKMS module to build. ansible_kernel resolves at runtime to
+      # e.g. "6.8.0-31-generic"; the matching headers package is
+      # linux-headers-<kernel-string>.
+      - "linux-headers-{{ ansible_kernel }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  # Long timeout — apt-get on a fresh Packer base can take a while if
+  # the security mirror is slow.
+  register: llm_prereqs_apt
+  retries: 3
+  delay: 10
+  until: llm_prereqs_apt is succeeded
+
+- name: Install nvtop (htop for GPUs)
+  ansible.builtin.apt:
+    name: nvtop
+    state: present
+  when: llm_install_nvtop | bool
+
+# --- NVIDIA driver ---------------------------------------------------------
+
+# `ubuntu-drivers install --gpgpu` picks the current recommended server-
+# branch driver (e.g. nvidia-driver-570-server). Server branches are LTS-
+# cycle and recommended for compute workloads. Auto-pick avoids the
+# "pinned driver rots as kernels update" failure mode that hits when
+# the apt repo deprecates a specific version.
+- name: Check whether nvidia-smi is already installed
+  ansible.builtin.command: which nvidia-smi
+  register: llm_nvidia_smi
+  changed_when: false
+  failed_when: false
+
+- name: Install NVIDIA server-branch driver (ubuntu-drivers --gpgpu)
+  ansible.builtin.command: ubuntu-drivers install --gpgpu
+  when: llm_nvidia_smi.rc != 0
+  register: llm_driver_install
+  changed_when: llm_driver_install.rc == 0
+  notify: Reboot for NVIDIA kernel module
+
+# --- Docker ----------------------------------------------------------------
+
+- name: Install Docker + compose-v2 (Ubuntu repos)
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose-v2
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# --- NVIDIA Container Toolkit ----------------------------------------------
+# Adds GPU access to Docker containers. Required for any LLM-in-container
+# workflow (Open WebUI doesn't need it directly, but anything running
+# ollama / vLLM / TensorRT-LLM inside Docker does).
+
+- name: Ensure /usr/share/keyrings exists for the NVIDIA toolkit GPG key
+  ansible.builtin.file:
+    path: /usr/share/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Fetch NVIDIA Container Toolkit GPG key
+  ansible.builtin.get_url:
+    url: https://nvidia.github.io/libnvidia-container/gpgkey
+    dest: /tmp/nvidia-container-toolkit-key.asc
+    mode: "0644"
+    force: false
+  register: llm_nv_key_download
+
+- name: Dearmor NVIDIA Container Toolkit GPG key into keyring
+  ansible.builtin.command:
+    cmd: gpg --dearmor --batch --yes -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg /tmp/nvidia-container-toolkit-key.asc
+    creates: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+
+- name: Fetch NVIDIA Container Toolkit apt source list (rewriting deb URL with the keyring)
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+        | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+        > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+    creates: /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+- name: Install nvidia-container-toolkit
+  ansible.builtin.apt:
+    name: nvidia-container-toolkit
+    state: present
+    update_cache: true
+
+- name: Configure docker runtime for NVIDIA (writes /etc/docker/daemon.json runtime block)
+  ansible.builtin.command:
+    cmd: nvidia-ctk runtime configure --runtime=docker
+    creates: /etc/docker/daemon.json
+  notify: Restart docker
+
+# --- Ollama ----------------------------------------------------------------
+# Upstream ships an official installer script (curl | sh) that handles
+# the apt-vs-tarball decision per OS and creates the systemd unit. We
+# guard with `creates:` so re-runs are no-ops once /usr/local/bin/ollama
+# exists. To upgrade Ollama, delete the binary first (the role's README
+# documents this).
+
+- name: Check whether ollama is already installed
+  ansible.builtin.command: which ollama
+  register: llm_ollama_check
+  changed_when: false
+  failed_when: false
+
+- name: Install Ollama (upstream curl|sh installer)
+  ansible.builtin.shell:
+    cmd: curl -fsSL https://ollama.com/install.sh | sh
+    creates: /usr/local/bin/ollama
+  when: llm_ollama_check.rc != 0
+
+- name: Ensure ollama systemd drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/ollama.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Drop ollama systemd override (listen address)
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/ollama.service.d/override.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Service]
+      Environment="OLLAMA_HOST={{ llm_ollama_listen }}"
+  notify:
+    - Reload systemd
+    - Restart ollama
+
+- name: Enable (but don't start yet) the ollama service
+  ansible.builtin.systemd:
+    name: ollama
+    enabled: true
+  # First start happens AFTER the NVIDIA reboot, so the driver is live
+  # when Ollama probes the GPU. The reboot handler at the end of the
+  # play forces this ordering.
+
+# --- ufw -------------------------------------------------------------------
+
+- name: Allow LLM-stack ports through ufw
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port }}"
+    proto: tcp
+    comment: "{{ item.comment }}"
+  loop: "{{ llm_ufw_ports }}"
+  notify: Reload ufw
+
+# --- unattended-upgrades ----------------------------------------------------
+# Base template ships with these timers masked so locked-down roles can
+# stay frozen. llm gets normal security patches.
+
+- name: Unmask + enable apt-daily timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    masked: false
+    state: started
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+- name: Ensure unattended-upgrades is configured for security patches
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
