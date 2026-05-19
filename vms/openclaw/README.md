@@ -23,7 +23,7 @@ for the cross-cutting workflow.
 vms/openclaw/
 ├── README.md                  this file
 ├── terraform/                 VM provisioning (clone, size, cloud-init)
-├── ansible/                   role config (Node 24 + npm + systemd)
+├── ansible/                   role config (Node 24 + service user + ufw)
 └── cloud-init/                first-boot identity (hostname, user, SSH key)
 ```
 
@@ -63,13 +63,16 @@ just plan openclaw           # review the plan
 just apply openclaw          # create the VM
 just inventory openclaw      # write ansible/inventory.yml from tofu output
 just ansible-check openclaw  # OPTIONAL: preview the role's diff (see "Previewing with --check first" below)
-just ansible openclaw        # install Node 24 + openclaw + systemd unit
+just ansible openclaw        # install prereqs: Node 24, service user, ufw rule
 ```
 
-End state: the gateway is **running but not onboarded** —
-`curl http://<vm-ip>:18789/healthz` returns 200, but no channels are
-paired and no model provider is authorized. The role deliberately
-does NOT run `openclaw onboard`; that's the operator ceremony below.
+End state: a VM with Node 24 on PATH, the `openclaw` service user
+created with bash + linger + a `~/.openclaw` workspace dir, ufw
+allowing `:18789/tcp`, and apt-daily timers active. **The openclaw
+binary is NOT installed yet** — the role deliberately stops at
+prereqs so it survives upstream's install-path churn (npm-global,
+`curl | bash`, containers). The operator runs the install + onboard
+ceremonies below.
 
 ### Previewing with `--check` first
 
@@ -81,13 +84,29 @@ downstream — produces a meaningful diff for every change the role
 would make, instead of failing at `Install nodejs` with `No package
 matching 'nodejs' is available`. Same convention as pbs-hosts.
 
-Post-install validations skip cleanly under `--check`: the Node
-major-version assertion and the gateway `/healthz` probe are
-gated with `when: not ansible_check_mode`. The role's bootstrap
-already verifies `node_24.x` is the configured repo; asserting the
-installed version + probing the live endpoint only makes sense
-after a real apply. A re-check after `just ansible openclaw` runs
-all validations.
+The Node major-version assertion skips cleanly under `--check`
+(`when: not ansible_check_mode`). The role's bootstrap already
+verifies `node_24.x` is the configured repo; asserting the installed
+version only makes sense after a real apply.
+
+## Install openclaw
+
+The role gets you to "ready for any upstream install." Pick whichever
+install path [upstream](https://github.com/openclaw/openclaw) documents
+at the time you're deploying — typically:
+
+```bash
+ssh claw-admin@<vm-ip>
+sudo -u openclaw -i           # become the service user (bash, $HOME=/home/openclaw)
+npm install -g openclaw       # or whatever upstream recommends today
+openclaw --version            # smoke check
+exit                          # back to claw-admin
+```
+
+If upstream's docs change to a `curl | bash` or container path, swap
+the `npm install -g openclaw` line accordingly — the surrounding
+prereqs (Node 24 on PATH, service user with linger, ufw rule) don't
+care which install method you take.
 
 ## First-onboard ceremony (operator-driven, one-time)
 
@@ -98,10 +117,7 @@ Ansible. Run it once, by hand, from the VM:
 
 ```bash
 ssh claw-admin@<vm-ip>
-# Switch to the service user — that's the account whose ~/.openclaw
-# the systemd unit reads. NOT the claw-admin operator account.
-sudo -u openclaw -H bash
-
+sudo -u openclaw -i           # become the service user
 openclaw onboard
 ```
 
@@ -121,20 +137,25 @@ The wizard walks through, in order:
 3. **Skills selection.** Pick from the bundled set or skip — you can
    add skills via [ClawHub](https://clawhub.ai) later.
 
-> **Skip `--install-daemon`.** Our Ansible role already laid down a
-> *system* systemd unit (`openclaw-gateway.service`). Upstream's
-> `--install-daemon` would install a *user* unit under
-> `/home/openclaw/.config/systemd/user/`, which only runs while the
-> service user has an active login session (or `loginctl
-> enable-linger`). Running it would be a no-op in the worst case and
-> a competing daemon in the worst — so don't.
+### Daemonizing (optional)
 
-After onboarding, restart to pick up the new config:
+Onboarding leaves the gateway running under your foreground shell.
+For a persistent daemon, the cleanest option is upstream's
+`openclaw onboard --install-daemon`, which writes a user-systemd
+unit to `~/.config/systemd/user/openclaw-gateway.service`. The
+role already enabled `loginctl enable-linger openclaw` so the unit
+survives logout. Check status with:
 
 ```bash
-exit                                   # back to claw-admin
-sudo systemctl restart openclaw-gateway
+sudo -u openclaw -i
+systemctl --user status openclaw-gateway
+journalctl --user -u openclaw-gateway -f
 ```
+
+If upstream changes its daemon-installer or you want something
+external (a hand-rolled `/etc/systemd/system/*.service`, tmux,
+supervisor, etc.), the role doesn't lock you in — none of the
+prereqs assume a particular daemonization path.
 
 Test by sending a message to any paired channel; OpenClaw should
 reply.
@@ -143,29 +164,31 @@ reply.
 
 ### Logs
 
+If you took the `--install-daemon` path during onboard:
+
 ```bash
-sudo journalctl -u openclaw-gateway -f
+ssh claw-admin@<vm-ip>
+sudo -u openclaw -i
+journalctl --user -u openclaw-gateway -f
 ```
 
-Verbose by default (the unit passes `--verbose`). Drop to default
-chattiness by removing that flag from the template and re-running
-the role.
+If you're running under tmux/screen or a hand-rolled system unit, log
+location depends on how you wired it up.
 
 ### Upgrading
 
-The role re-installs the npm package every run when
-`openclaw_npm_version: latest` (default). To pin:
+Re-run upstream's install command as the openclaw service user:
 
-```yaml
-# vms/openclaw/ansible/inventory.yml
-openclaw_servers:
-  hosts:
-    openclaw:
-      openclaw_npm_version: "2026.5.13"   # whatever upstream's latest tag is
+```bash
+ssh claw-admin@<vm-ip>
+sudo -u openclaw -i
+npm update -g openclaw        # or whatever upstream's update command is now
+systemctl --user restart openclaw-gateway   # if you took the --install-daemon path
 ```
 
-Then re-run `just ansible openclaw`. The handler restarts the service
-on every npm update.
+The role itself doesn't manage the openclaw version — re-running
+`just ansible openclaw` only updates prereqs (Node, ufw rule, etc.),
+which is rarely the reason to upgrade.
 
 ### Stable IP via DHCP reservation
 
@@ -188,8 +211,9 @@ exit
 scp claw-admin@<vm-ip>:/tmp/openclaw-state-*.tgz ./backups/
 ```
 
-Push to your usual offsite path. The gateway itself is reproducible
-from `npm install -g openclaw`; the binary is not state.
+Push to your usual offsite path. The gateway binary is reproducible
+from `npm install -g openclaw` (or whichever install path upstream
+recommends); only `~/.openclaw/` is state.
 
 ## Destroy and rebuild
 
@@ -201,10 +225,12 @@ from `npm install -g openclaw`; the binary is not state.
 > Restore path:
 >
 > 1. `just apply openclaw` on the rebuilt VM.
-> 2. `just ansible openclaw`.
-> 3. Stop the service: `sudo systemctl stop openclaw-gateway`.
-> 4. Restore: `sudo -u openclaw tar -xzf openclaw-state-<date>.tgz -C /home/openclaw`.
-> 5. `sudo systemctl start openclaw-gateway`.
+> 2. `just ansible openclaw` — gets prereqs in place.
+> 3. Install openclaw per the "Install openclaw" section above.
+> 4. Stop the gateway if `--install-daemon` was used:
+>    `sudo -u openclaw -i systemctl --user stop openclaw-gateway`.
+> 5. Restore: `sudo -u openclaw tar -xzf openclaw-state-<date>.tgz -C /home/openclaw`.
+> 6. Start the gateway (re-run onboard or restart the user-systemd unit).
 >
 > The restored state binds to the same model-provider tokens and
 > channel pairings as the old VM; verify a test message before
@@ -214,7 +240,8 @@ from `npm install -g openclaw`; the binary is not state.
 just destroy openclaw        # only after a workspace backup is offsite
 just apply openclaw
 just ansible openclaw
-# then restore above, or re-run `openclaw onboard` for a fresh setup
+# then install openclaw per "Install openclaw" above, then restore
+# or re-run `openclaw onboard` for a fresh setup
 ```
 
 ## Sizing
@@ -270,7 +297,7 @@ it with mTLS at a reverse proxy or restrict access via Tailscale.
 - `terraform/terraform.tfvars.tpl` — committed, kp:// placeholders.
 - `terraform/terraform.tfvars.example` — committed, manual-fill alternative.
 - `cloud-init/user-data.yaml.tftpl` — identity only.
-- `ansible/site.yml` + `roles/openclaw/` — Node 24 + npm + systemd.
+- `ansible/site.yml` + `roles/openclaw/` — install prereqs (Node 24, service user, ufw); stops short of the openclaw install itself.
 
 ## Related
 

@@ -20,39 +20,27 @@ openclaw_nodesource_repo: "deb [signed-by={{ openclaw_nodesource_keyring }}] htt
 
 # Service user. NOT the admin user from cloud-init (that's claw-admin,
 # used only for ssh + sudo). The daemon runs as a dedicated unprivileged
-# system user so its workspace + secrets live under one home dir and the
-# daemon has no shell.
+# user so its workspace + secrets live under one home dir.
+#
+# Real shell + linger (matching the nemoclaw role's pattern) so the
+# operator can `sudo -u openclaw -i` and run upstream's installer plus
+# `openclaw onboard --install-daemon` (which writes a user-systemd unit
+# under ~/.config/systemd/user — needs linger to survive logout).
 openclaw_service_user: openclaw
 openclaw_service_group: openclaw
 openclaw_service_home: /home/openclaw
+openclaw_service_shell: /bin/bash
+openclaw_enable_linger: true
 
 # Gateway listen port. Default in the openclaw CLI; expose this in
-# defaults so a future multi-instance setup can run two daemons on the
-# same host with distinct ports if needed.
+# defaults so the ufw rule below can stay in sync with whatever port
+# the operator runs the gateway on after running upstream's installer.
 openclaw_gateway_port: 18789
-
-# Whether to install/refresh the openclaw npm package. Set false in
-# inventory if you're managing the binary out-of-band (a checkout
-# install with `pnpm openclaw setup`, say).
-openclaw_install_npm_package: true
-
-# npm package + version spec. `latest` floats with upstream; pin to a
-# concrete release tag (e.g. "2026.5.13") when the lab wants
-# reproducible installs.
-openclaw_npm_package: openclaw
-openclaw_npm_version: latest
-
-# Whether to drop in a system-wide systemd unit and start it. The
-# upstream `openclaw onboard --install-daemon` writes a user-systemd
-# unit (under the operator's home) — we install a system unit
-# instead so the gateway runs whether or not anyone is logged in and
-# survives reboot without `loginctl enable-linger`. Set false to skip
-# the unit and run the gateway under the operator's shell (debugging).
-openclaw_install_systemd_unit: true
-openclaw_service_name: openclaw-gateway
 
 # Whether to open the gateway port through ufw. LAN-only by default —
 # the gateway has no auth at the HTTP layer beyond pairing, so don't
 # expose this to the internet without a Tailscale / reverse-proxy
-# perimeter.
+# perimeter. Pre-opening the port here means the operator's first
+# `openclaw onboard` from inside the VM is reachable from the LAN
+# without an extra ufw step.
 openclaw_ufw_allow_gateway: true

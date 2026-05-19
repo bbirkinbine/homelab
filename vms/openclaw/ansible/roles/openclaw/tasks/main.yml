@@ -1,33 +1,37 @@
 ---
-# Install the OpenClaw gateway from npm and run it as a system service.
-# Stops short of `openclaw onboard` — that's an operator ceremony
-# (interactive channel pairing + model-provider OAuth), see
-# vms/openclaw/README.md "First-onboard ceremony".
+# Prep an Ubuntu 24.04 VM for an operator-run openclaw install. The role
+# stops short of installing the openclaw binary itself — upstream
+# changes the install path often enough (npm-global, curl|sh, container)
+# that pinning one method in IaC becomes a maintenance tax. Instead the
+# role gets the host to a state where `sudo npm i -g openclaw` (or any
+# other upstream-recommended install) Just Works:
+#
+#   * Node 24 on PATH (via NodeSource apt repo)
+#   * `openclaw` system user with a real $HOME under /home/openclaw
+#   * Gateway port pre-opened through ufw
+#   * apt-daily timers active so security patches flow on the long-
+#     running VM
+#
+# See vms/openclaw/README.md "Install openclaw" for the canonical
+# operator install command, and "First-onboard ceremony" for the
+# interactive pairing + OAuth steps after install.
 #
 # Idempotency:
 #   * NodeSource keyring + repo: written via get_url + apt_repository
 #     (both idempotent).
 #   * Service user: ansible.builtin.user with system=true; no-op once
 #     present.
-#   * npm package: `npm install -g openclaw@latest` is run only when
-#     the binary is missing OR openclaw_npm_version is pinned and
-#     differs from the installed version. Floating `latest` is NOT
-#     re-checked on every run — pin a version to make installs
-#     deterministic.
-#   * systemd unit: managed via template; daemon-reload + restart on
-#     change via notify.
 #
 # Check-mode behavior:
 #   The four NodeSource-bootstrap tasks below (apt prereqs, keyrings
 #   dir, archive key, apt_repository) carry `check_mode: false` so they
-#   run live even under --check. Reason: without the keyring + repo
-#   actually written to disk, the downstream `apt: name=nodejs` task
-#   fails with "No package matching 'nodejs' is available" because the
-#   apt cache has no idea NodeSource exists. The trade-off — --check is
-#   no longer purely side-effect-free for the repo bootstrap — is the
-#   same one pbs-hosts/tasks/repo.yml makes, and the bootstrap mutations
-#   are either the desired end state or trivially recoverable (apt
-#   cache regenerated on the next `apt update`). Same convention.
+#   run live even under --check. Without the keyring + repo actually
+#   written to disk, the downstream `apt: name=nodejs` task fails with
+#   "No package matching 'nodejs' is available" because the apt cache
+#   has no idea NodeSource exists. Same convention as pbs-hosts.
+#   The Node major-version assert further down carries
+#   `when: not ansible_check_mode` — there's nothing live to validate
+#   on a dry-run.
 
 - name: Ensure dependencies for the NodeSource apt repo are installed
   ansible.builtin.apt:
@@ -102,16 +106,15 @@
     state: present
     system: true
 
-# System user with a real home dir and `nologin` shell. Real home is
-# important — the openclaw CLI writes config + state under $HOME, and
-# we want that under /home/openclaw rather than /var/lib so the layout
-# matches what `openclaw onboard` documents (i.e. ~/.openclaw).
+# Real home + bash shell so the operator can `sudo -u openclaw -i`
+# cleanly and the openclaw CLI's $HOME-relative config layout
+# (~/.openclaw) lands where upstream's docs expect.
 - name: Create openclaw service user
   ansible.builtin.user:
     name: "{{ openclaw_service_user }}"
     group: "{{ openclaw_service_group }}"
     home: "{{ openclaw_service_home }}"
-    shell: /usr/sbin/nologin
+    shell: "{{ openclaw_service_shell }}"
     create_home: true
     system: true
     state: present
@@ -124,58 +127,23 @@
     group: "{{ openclaw_service_group }}"
     mode: "0750"
 
-# Global npm install. The openclaw README explicitly supports
-# `npm i -g openclaw@latest`. We use the global install (not a
-# per-user one) because the systemd unit runs as the openclaw service
-# user and the binary needs to live at a predictable system path
-# (/usr/bin/openclaw on the NodeSource node package).
-- name: Check whether openclaw is installed at the requested version
-  ansible.builtin.command: openclaw --version
-  register: openclaw_installed_version
-  changed_when: false
-  failed_when: false
-  # Run live even in --check (failed_when: false absorbs "command not
-  # found" on first-time hosts where nodejs/openclaw haven't been
-  # installed yet). Required so the next task's `when:` clause has a
-  # populated .rc to evaluate against, instead of an undefined-attribute
-  # error on the skipped-result variable.
-  check_mode: false
-
-- name: Install or update openclaw npm package globally
-  community.general.npm:
-    name: "{{ openclaw_npm_package }}"
-    version: "{{ openclaw_npm_version if openclaw_npm_version != 'latest' else omit }}"
-    global: true
-    state: "{{ 'latest' if openclaw_npm_version == 'latest' else 'present' }}"
-  when:
-    - openclaw_install_npm_package
-    - openclaw_installed_version.rc != 0 or openclaw_npm_version != 'latest'
-  notify: Restart openclaw-gateway
-
-- name: Render openclaw-gateway systemd unit
-  ansible.builtin.template:
-    src: openclaw-gateway.service.j2
-    dest: "/etc/systemd/system/{{ openclaw_service_name }}.service"
-    owner: root
-    group: root
-    mode: "0644"
-  when: openclaw_install_systemd_unit
-  notify:
-    - Reload systemd
-    - Restart openclaw-gateway
-
-- name: Enable and start openclaw-gateway
-  ansible.builtin.systemd:
-    name: "{{ openclaw_service_name }}"
-    enabled: true
-    state: started
-    daemon_reload: true
-  when: openclaw_install_systemd_unit
+# Without linger, a user-systemd unit installed via
+# `openclaw onboard --install-daemon` only runs while the operator has
+# an active login session — it dies on SSH disconnect. Linger keeps
+# the user's systemd instance alive across logout so the gateway
+# survives.
+- name: Enable systemd linger for service user
+  ansible.builtin.command: "loginctl enable-linger {{ openclaw_service_user }}"
+  args:
+    creates: "/var/lib/systemd/linger/{{ openclaw_service_user }}"
+  when: openclaw_enable_linger
 
 # Gateway HTTP port. The Packer base ships ufw with 22/tcp already
 # allowed; this opens 18789. Keep this LAN-only — the gateway has no
 # native HTTP auth beyond pairing, so don't proxy it to the internet
-# without an mTLS reverse proxy in front.
+# without an mTLS reverse proxy in front. Pre-opening the port here
+# means the operator's `openclaw onboard` (post-install) is reachable
+# from the LAN without an extra ufw step.
 - name: Allow openclaw gateway through ufw
   community.general.ufw:
     rule: allow
@@ -216,31 +184,16 @@
     - apt-daily.timer
     - apt-daily-upgrade.timer
 
-# Final state check. The gateway responds to /healthz on 18789 once
-# up; treat anything other than HTTP 200 as a failure. The uri module
-# returns non-2xx as a failed task with a clear message — preferable
-# to shelling out to curl per ansible-lint's command-instead-of-module
-# rule.
-- name: Confirm openclaw-gateway health endpoint returns 200
-  ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ openclaw_gateway_port }}/healthz"
-    return_content: false
-    status_code: 200
-    timeout: 5
-  register: openclaw_health
-  retries: 6
-  delay: 5
-  until: openclaw_health.status == 200
-  # Skip in --check — nothing is actually listening on the gateway port
-  # during a dry-run. uri executes live by default and would 30s-timeout.
-  when:
-    - openclaw_install_systemd_unit
-    - not ansible_check_mode
-
 - name: Show next-steps reminder
   ansible.builtin.debug:
     msg: >-
-      Gateway is up on :{{ openclaw_gateway_port }} but NOT yet onboarded.
-      SSH to the VM as {{ openclaw_service_user }} (sudo -u {{ openclaw_service_user }})
-      and run `openclaw onboard` to pair channels + authorize a model provider.
-      See vms/openclaw/README.md "First-onboard ceremony".
+      Prereqs are in place: Node {{ openclaw_node_major }} on PATH,
+      service user '{{ openclaw_service_user }}' with $HOME at
+      {{ openclaw_service_home }}, and ufw allows {{ openclaw_gateway_port }}/tcp.
+      SSH to the VM as claw-admin, then follow the upstream install
+      instructions at https://openclaw.dev — typically
+      `sudo npm install -g openclaw`. After install, run
+      `sudo -u {{ openclaw_service_user }} -i openclaw onboard` for the
+      interactive channel + model-provider pairing.
+      See vms/openclaw/README.md "Install openclaw" and "First-onboard ceremony".
+  when: not ansible_check_mode

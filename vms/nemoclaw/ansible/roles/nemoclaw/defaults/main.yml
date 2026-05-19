@@ -51,16 +51,6 @@ nemoclaw_service_home: /home/nemoclaw
 nemoclaw_service_shell: /bin/bash
 nemoclaw_enable_linger: true
 
-# --- nemoclaw npm package ---
-# npm-global install. `latest` floats with upstream's main releases;
-# pin to a concrete version (e.g. "0.1.0") for reproducible installs.
-# NemoClaw is alpha (per upstream's own README banner), so `latest`
-# may break between runs — pinning is the safer default for any lab
-# that's been onboarded.
-nemoclaw_install_npm_package: true
-nemoclaw_npm_package: nemoclaw
-nemoclaw_npm_version: latest
-
 # --- UFW ---
 # By default, NO inbound port is opened beyond SSH. NemoClaw's
 # gateway listens internally; the sandbox container talks to the

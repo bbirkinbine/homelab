@@ -1,23 +1,22 @@
 ---
-# Install the prerequisites for NemoClaw on Ubuntu 24.04:
-#   * Docker (Docker Inc. apt repo + docker-ce + buildx + compose)
-#   * Node 22 (NodeSource apt repo)
-#   * nemoclaw CLI (npm-global, run as the operator at onboard time)
-#   * `nemoclaw` service user with bash + docker-group + linger
+# Prep an Ubuntu 24.04 VM for an operator-run NemoClaw install. The
+# role stops short of installing the nemoclaw binary itself — upstream
+# changes the install path often (npm-global, curl|bash with nvm,
+# container variants) and pinning one method in IaC turns into a
+# maintenance tax. Instead the role gets the host to a state where any
+# upstream-recommended install Just Works:
 #
-# Stops short of `nemoclaw onboard` — that's an operator ceremony
-# (sandbox creation, NVIDIA API key provisioning, channel pairing).
-# See vms/nemoclaw/README.md "First-onboard ceremony".
+#   * Docker (Docker Inc.'s apt repo + docker-ce/buildx/compose),
+#     enabled at boot — NemoClaw's sandbox model expects this.
+#   * Node 22 on PATH (via NodeSource apt repo) — covers the
+#     `npm install -g nemoclaw` install path, and harmless if the
+#     operator goes the upstream `curl | bash` (nvm-based) route.
+#   * `nemoclaw` service user with bash + docker-group + linger, so
+#     `sudo -u nemoclaw -i` and `nemoclaw onboard` Just Work.
 #
-# Trade-off note: upstream's documented install path is
-# `curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash` which uses
-# nvm + a piped shell script. We replace that with NodeSource apt +
-# `npm install -g nemoclaw` for predictability and to avoid piping
-# remote scripts to bash inside our IaC. The npm package name and
-# Node 22+ floor were confirmed against NVIDIA/NemoClaw's package.json
-# and install.sh — see vms/nemoclaw/README.md "Install path" for the
-# rationale and the fallback to the upstream installer if a future
-# release adds setup steps beyond `npm install`.
+# See vms/nemoclaw/README.md "Install nemoclaw" for the canonical
+# operator install command, and "First-onboard ceremony" for the
+# interactive pairing + sandbox-creation steps after install.
 #
 # Check-mode behavior:
 #   The six repo-bootstrap tasks (apt prereqs, keyrings dir, Docker
@@ -25,12 +24,10 @@
 #   they run live even under --check. Without the keyrings + repo
 #   files actually on disk, the downstream `apt: name=docker-ce` and
 #   `apt: name=nodejs` tasks fail with "No package matching <foo> is
-#   available" because the apt cache has no idea those repos exist.
-#   The trade-off — --check is no longer purely side-effect-free for
-#   the repo bootstrap — is the same one pbs-hosts/tasks/repo.yml and
-#   openclaw make. Bootstrap mutations are either the desired end
-#   state or trivially recoverable (apt cache regenerated on the next
-#   `apt update`). Convention shared across all three roles.
+#   available". Same convention as pbs-hosts and openclaw. The Node
+#   major-version assert and the docker smoke check carry
+#   `when: not ansible_check_mode` — nothing live to validate on a
+#   dry-run.
 
 - name: Ensure dependencies for the apt repos are installed
   ansible.builtin.apt:
@@ -173,27 +170,6 @@
     creates: "/var/lib/systemd/linger/{{ nemoclaw_service_user }}"
   when: nemoclaw_enable_linger
 
-# --- nemoclaw npm package ----------------------------------------------------
-
-- name: Check whether nemoclaw is installed at the requested version
-  ansible.builtin.command: nemoclaw --version
-  register: nemoclaw_installed_version
-  changed_when: false
-  failed_when: false
-  # Run live even in --check so the next task's `when:` clause has a
-  # populated .rc to evaluate against. Same rationale as openclaw.
-  check_mode: false
-
-- name: Install or update nemoclaw npm package globally
-  community.general.npm:
-    name: "{{ nemoclaw_npm_package }}"
-    version: "{{ nemoclaw_npm_version if nemoclaw_npm_version != 'latest' else omit }}"
-    global: true
-    state: "{{ 'latest' if nemoclaw_npm_version == 'latest' else 'present' }}"
-  when:
-    - nemoclaw_install_npm_package
-    - nemoclaw_installed_version.rc != 0 or nemoclaw_npm_version != 'latest'
-
 # --- UFW ---------------------------------------------------------------------
 
 - name: Allow Model Router through ufw
@@ -240,10 +216,9 @@
 
 # --- Smoke checks ------------------------------------------------------------
 
-# The three tasks below run live smoke checks against the just-installed
-# stack. Skip them in --check — there's nothing live to verify on a
-# dry-run, and the debug task references the verify tasks' registered
-# stdout (which would be undefined if those skipped naturally).
+# Skip in --check — nothing live to verify on a dry-run. The debug
+# task below references the docker check's stdout, so it gates on the
+# same condition.
 - name: Verify docker engine responds to the service user
   ansible.builtin.command: docker info --format '{% raw %}{{.ServerVersion}}{% endraw %}'
   become: true
@@ -252,23 +227,17 @@
   changed_when: false
   when: not ansible_check_mode
 
-- name: Verify nemoclaw binary is on PATH for the service user
-  ansible.builtin.command: nemoclaw --version
-  become: true
-  become_user: "{{ nemoclaw_service_user }}"
-  register: nemoclaw_cli_check
-  changed_when: false
-  when: not ansible_check_mode
-
 - name: Show next-steps reminder
   ansible.builtin.debug:
     msg: >-
-      docker {{ nemoclaw_docker_check.stdout }} + nemoclaw {{ nemoclaw_cli_check.stdout }} ready.
-      The stack is NOT onboarded — no sandbox, no model provider, no channels.
-      SSH to the VM as {{ ansible_user_id }}, then:
-        sudo -u {{ nemoclaw_service_user }} -i
-        nemoclaw onboard
-      See vms/nemoclaw/README.md "First-onboard ceremony" for the env vars
-      a non-interactive onboard takes (NEMOCLAW_NON_INTERACTIVE,
-      NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE, NEMOCLAW_SANDBOX_NAME, ...).
+      Prereqs are in place: Docker {{ nemoclaw_docker_check.stdout }} reachable
+      from '{{ nemoclaw_service_user }}', Node {{ nemoclaw_node_major }} on PATH,
+      service user '{{ nemoclaw_service_user }}' with $HOME at
+      {{ nemoclaw_service_home }} (linger enabled). SSH to the VM, then follow
+      upstream's install instructions at https://www.nvidia.com/nemoclaw —
+      typically either `curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash`
+      or `sudo npm install -g nemoclaw`. After install run
+      `sudo -u {{ nemoclaw_service_user }} -i nemoclaw onboard` for the
+      interactive sandbox + model-provider + channel setup.
+      See vms/nemoclaw/README.md "Install nemoclaw" and "First-onboard ceremony".
   when: not ansible_check_mode

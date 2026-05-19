@@ -14,9 +14,11 @@ OpenClaw.
 
 > **Alpha software.** NemoClaw is in early preview per
 > [NVIDIA's own README](https://github.com/NVIDIA/NemoClaw/blob/main/README.md).
-> Interfaces and behavior may change without notice. This role
-> targets the alpha state; bump `nemoclaw_npm_version` in inventory
-> to a pinned tag once upstream stabilizes.
+> Interfaces and install paths may change without notice. The role
+> deliberately stops at prereqs (Docker + Node + service user) and
+> leaves the `nemoclaw` install itself to the operator — see "Install
+> nemoclaw" below — so upstream churn doesn't keep breaking this
+> repo's automation.
 
 ## Layout
 
@@ -24,7 +26,7 @@ OpenClaw.
 vms/nemoclaw/
 ├── README.md                  this file
 ├── terraform/                 VM provisioning (clone, size, cloud-init)
-├── ansible/                   role config (Docker + Node 22 + nemoclaw CLI)
+├── ansible/                   role config (Docker + Node 22 + service user)
 └── cloud-init/                first-boot identity (hostname, user, SSH key)
 ```
 
@@ -104,13 +106,15 @@ just plan nemoclaw           # review the plan
 just apply nemoclaw          # create the VM
 just inventory nemoclaw      # write ansible/inventory.yml from tofu output
 just ansible-check nemoclaw  # OPTIONAL: preview the role's diff (see "Previewing with --check first" below)
-just ansible nemoclaw        # install Docker + Node 22 + nemoclaw CLI
+just ansible nemoclaw        # install prereqs: Docker, Node 22, service user
 ```
 
-End state: Docker is running, Node 22 is on PATH, the `nemoclaw` CLI
-is installed globally, and the `nemoclaw` service user exists with
-docker-group + linger. **No sandbox has been created and no model
-provider is configured** — that's the operator ceremony below.
+End state: Docker is running, Node 22 is on PATH, the `nemoclaw`
+service user exists with bash + docker-group + linger. **The
+nemoclaw binary is NOT installed yet** — the role deliberately stops
+at prereqs because upstream's install path moves around (curl|bash
+with nvm, npm-global, containers). The operator runs the install +
+onboard ceremonies below.
 
 ### Previewing with `--check` first
 
@@ -124,12 +128,34 @@ would make, instead of failing at `Install Docker engine` /
 Same convention as pbs-hosts and openclaw.
 
 Post-install validations skip cleanly under `--check`: the Node
-major-version assertion, the `docker info` smoke check, and the
-`nemoclaw --version` smoke check are gated with
-`when: not ansible_check_mode`. There's nothing live to validate on
-a dry-run; asserting installed versions only makes sense after a
-real apply. A re-check after `just ansible nemoclaw` runs all
-validations.
+major-version assertion and the `docker info` smoke check are gated
+with `when: not ansible_check_mode`. Nothing live to validate on a
+dry-run; both run normally on a real apply.
+
+## Install nemoclaw
+
+The role gets you to "ready for any upstream install." Pick whichever
+install path [upstream](https://github.com/NVIDIA/NemoClaw) documents
+at the time you're deploying — typically either:
+
+```bash
+ssh nemo-admin@<vm-ip>
+sudo -u nemoclaw -i           # become the service user
+
+# Upstream's documented path (curl | bash, uses nvm internally):
+curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
+
+# OR, npm-global if you prefer the role's pre-installed Node 22:
+npm install -g nemoclaw
+
+nemoclaw --version            # smoke check
+exit                          # back to nemo-admin
+```
+
+The role's prereqs work with either path. If upstream's install
+moves to a container or some new shape, swap the install command —
+the surrounding prereqs (Docker, Node 22, nemoclaw user with docker
+group + linger) don't care.
 
 ## First-onboard ceremony (operator-driven, one-time)
 
@@ -227,23 +253,30 @@ sudo -u nemoclaw nemoclaw <sandbox-name> status
 
 ### Upgrading
 
-The role re-installs the npm package every run when
-`nemoclaw_npm_version: latest` (default). For alpha software,
-**pin a version** in inventory once you've onboarded — `latest`
-across upgrades will lose you sandbox state:
+The role no longer manages the nemoclaw version — upgrades are
+operator-driven against whatever install path you took. As the
+service user:
 
-```yaml
-# vms/nemoclaw/ansible/inventory.yml
-nemoclaw_servers:
-  hosts:
-    nemoclaw:
-      nemoclaw_npm_version: "0.1.0"   # or whatever tag you onboarded against
+```bash
+ssh nemo-admin@<vm-ip>
+sudo -u nemoclaw -i
+# If you used the upstream installer:
+curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash   # re-running upgrades in place
+# If you used npm-global:
+npm update -g nemoclaw
 ```
+
+For alpha software, pin to a tagged release once you've onboarded
+(upstream's `--version` flag or the installer's pinning option) so
+re-runs don't drag in breaking changes that lose sandbox state.
 
 Upstream's lifecycle note: "use `nemoclaw onboard` when you need to
 create or recreate the OpenShell gateway or sandbox." Don't run
 `openshell self-update` or `npm update -g openshell` directly — that
 path leaves NemoClaw and OpenShell version-mismatched.
+
+Re-running `just ansible nemoclaw` only updates prereqs (Docker
+engine, Node major, ufw); it doesn't touch the nemoclaw install.
 
 ### Stable IP via DHCP reservation
 
@@ -286,7 +319,8 @@ only painful step.
 just destroy nemoclaw        # only after a state backup or accepting re-onboard cost
 just apply nemoclaw
 just ansible nemoclaw
-# then `sudo -u nemoclaw -i nemoclaw onboard`
+# then install nemoclaw per "Install nemoclaw" above, then
+# `sudo -u nemoclaw -i nemoclaw onboard`
 ```
 
 ## Sizing
@@ -322,41 +356,29 @@ as the install path. The script clones the NemoClaw repo at a tagged
 ref, installs Node via nvm, installs the `nemoclaw` npm package, and
 runs `nemoclaw onboard`.
 
-This role replaces the curl-piped installer with:
+This role does NOT do the install itself. It gets the host to a
+state where any of upstream's documented install paths (curl|bash
+with nvm, npm-global against the role's pre-installed Node 22, or a
+future container variant) works without prep:
 
-1. **Docker** from Docker Inc.'s signed apt repo.
-2. **Node 22** from NodeSource's signed apt repo.
-3. **`nemoclaw`** via `npm install -g`.
+1. **Docker** from Docker Inc.'s signed apt repo, enabled at boot.
+2. **Node 22** from NodeSource's signed apt repo (covers the
+   `npm install -g` path; harmless if you take the nvm path —
+   upstream's script just installs alongside).
+3. **`nemoclaw` service user** with bash, docker group, linger.
 
-Trade-offs:
+Trade-offs of the prereq-only shape:
 
-- **Win.** No piped-bash from a remote URL in our IaC. Both apt
-  repos are signed and pinned. Node 22 is the documented minimum;
-  the upstream installer uses nvm which leaves Node out of system
-  PATH and complicates running the CLI as a non-login service user.
-- **Loss.** If a future NemoClaw release adds setup steps in the
-  installer that aren't covered by `npm install` (k3s tweaks,
-  systemd unit drops, etc.), this role will silently miss them.
-  Mitigation: re-read the upstream installer
-  ([NVIDIA/NemoClaw/install.sh](https://github.com/NVIDIA/NemoClaw/blob/main/install.sh))
-  on each `nemoclaw_npm_version` bump and reflect new steps here.
-- **Escape hatch.** If a release ships the kind of setup-script
-  changes that defeat the manual replication, switch to the
-  upstream installer in this role's tasks:
-
-  ```yaml
-  - name: Run upstream NemoClaw installer (fallback path)
-    ansible.builtin.shell:
-      cmd: >-
-        curl -fsSL https://www.nvidia.com/nemoclaw.sh |
-        NEMOCLAW_NON_INTERACTIVE=1 NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 bash
-      creates: "{{ nemoclaw_service_home }}/.nvm/versions/node"
-    become_user: "{{ nemoclaw_service_user }}"
-  ```
-
-  ... and remove the NodeSource + npm-install tasks. We have not
-  done this preemptively because the apt-driven path is materially
-  cleaner today.
+- **Win.** Survives upstream install-path churn — NemoClaw is alpha
+  and the installer has changed multiple times during preview. The
+  role doesn't need a release matching each upstream pivot.
+- **Loss.** Operator runs one extra command after `just ansible
+  nemoclaw` — `sudo -u nemoclaw -i nemoclaw onboard` plus whatever
+  installer-invocation is current upstream. That's the deal.
+- **Future option.** If upstream ever publishes a stable, signed
+  apt/deb repo for NemoClaw, we can fold a `apt: name=nemoclaw` task
+  into the role — same pattern as Docker/Node here. Until then,
+  prereqs only.
 
 ## Security notes
 
@@ -387,7 +409,7 @@ Trade-offs:
 - `terraform/terraform.tfvars.tpl` — committed, kp:// placeholders.
 - `terraform/terraform.tfvars.example` — committed, manual-fill alternative.
 - `cloud-init/user-data.yaml.tftpl` — identity only.
-- `ansible/site.yml` + `roles/nemoclaw/` — Docker + Node 22 + nemoclaw CLI + service user.
+- `ansible/site.yml` + `roles/nemoclaw/` — install prereqs (Docker, Node 22, service user); stops short of the nemoclaw install itself.
 
 ## Related
 
