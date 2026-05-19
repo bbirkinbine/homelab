@@ -18,6 +18,19 @@
 # and install.sh — see vms/nemoclaw/README.md "Install path" for the
 # rationale and the fallback to the upstream installer if a future
 # release adds setup steps beyond `npm install`.
+#
+# Check-mode behavior:
+#   The six repo-bootstrap tasks (apt prereqs, keyrings dir, Docker
+#   key + repo, NodeSource key + repo) carry `check_mode: false` so
+#   they run live even under --check. Without the keyrings + repo
+#   files actually on disk, the downstream `apt: name=docker-ce` and
+#   `apt: name=nodejs` tasks fail with "No package matching <foo> is
+#   available" because the apt cache has no idea those repos exist.
+#   The trade-off — --check is no longer purely side-effect-free for
+#   the repo bootstrap — is the same one pbs-hosts/tasks/repo.yml and
+#   openclaw make. Bootstrap mutations are either the desired end
+#   state or trivially recoverable (apt cache regenerated on the next
+#   `apt update`). Convention shared across all three roles.
 
 - name: Ensure dependencies for the apt repos are installed
   ansible.builtin.apt:
@@ -29,6 +42,7 @@
     update_cache: true
     # No cache_valid_time — see openbao/openclaw notes; the Packer
     # base wipes /var/lib/apt/lists/* but leaves pkgcache.bin recent.
+  check_mode: false
 
 - name: Ensure /etc/apt/keyrings exists
   ansible.builtin.file:
@@ -37,6 +51,7 @@
     owner: root
     group: root
     mode: "0755"
+  check_mode: false
 
 # --- Docker apt repo + install -----------------------------------------------
 
@@ -51,6 +66,7 @@
     owner: root
     group: root
     mode: "0644"
+  check_mode: false
 
 - name: Add Docker apt repository
   ansible.builtin.apt_repository:
@@ -58,6 +74,7 @@
     filename: docker
     state: present
     update_cache: true
+  check_mode: false
 
 - name: Install Docker engine + plugins
   ansible.builtin.apt:
@@ -85,6 +102,7 @@
     owner: root
     group: root
     mode: "0644"
+  check_mode: false
 
 - name: Add NodeSource apt repository
   ansible.builtin.apt_repository:
@@ -92,6 +110,7 @@
     filename: nodesource
     state: present
     update_cache: true
+  check_mode: false
 
 - name: Install nodejs (brings npm)
   ansible.builtin.apt:

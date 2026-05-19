@@ -16,6 +16,18 @@
 #     deterministic.
 #   * systemd unit: managed via template; daemon-reload + restart on
 #     change via notify.
+#
+# Check-mode behavior:
+#   The four NodeSource-bootstrap tasks below (apt prereqs, keyrings
+#   dir, archive key, apt_repository) carry `check_mode: false` so they
+#   run live even under --check. Reason: without the keyring + repo
+#   actually written to disk, the downstream `apt: name=nodejs` task
+#   fails with "No package matching 'nodejs' is available" because the
+#   apt cache has no idea NodeSource exists. The trade-off — --check is
+#   no longer purely side-effect-free for the repo bootstrap — is the
+#   same one pbs-hosts/tasks/repo.yml makes, and the bootstrap mutations
+#   are either the desired end state or trivially recoverable (apt
+#   cache regenerated on the next `apt update`). Same convention.
 
 - name: Ensure dependencies for the NodeSource apt repo are installed
   ansible.builtin.apt:
@@ -29,6 +41,7 @@
     # but leaves /var/cache/apt/pkgcache.bin mtime recent, so
     # cache_valid_time would mask the empty lists and `apt install`
     # would fail on a fresh clone. Same pattern as amp_game / openbao.
+  check_mode: false
 
 - name: Ensure /etc/apt/keyrings exists
   ansible.builtin.file:
@@ -37,6 +50,7 @@
     owner: root
     group: root
     mode: "0755"
+  check_mode: false
 
 # NodeSource publishes their archive key as a binary OpenPGP key. Drop
 # it under keyrings as a stable filename and reference it from the
@@ -49,6 +63,7 @@
     owner: root
     group: root
     mode: "0644"
+  check_mode: false
 
 - name: Add NodeSource apt repository
   ansible.builtin.apt_repository:
@@ -56,6 +71,7 @@
     filename: nodesource
     state: present
     update_cache: true
+  check_mode: false
 
 - name: Install nodejs (brings npm)
   ansible.builtin.apt:

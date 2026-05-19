@@ -256,10 +256,19 @@ For the alpha period, treat `nemoclaw onboard` as cheap enough to
 re-run instead of restoring a backup; channel re-pairings are the
 only painful step.
 
-### Re-run a single Ansible task
+### Check, apply, re-check
+
+The six repo-bootstrap tasks (apt prereqs, keyrings dir, Docker
+key + repo, NodeSource key + repo) carry `check_mode: false` so
+`--check` actually performs the repo bootstrap before dry-running
+everything downstream. That means the first check on a fresh host
+produces a meaningful diff for every change the role would make,
+instead of failing at `Install Docker engine` / `Install nodejs`
+with `No package matching '<pkg>' is available`. Same convention as
+pbs-hosts and openclaw.
 
 ```bash
-just ansible-check nemoclaw   # --check --diff (no changes)
+just ansible-check nemoclaw   # --check --diff (no changes downstream of the repo bootstrap)
 just ansible nemoclaw         # apply
 ```
 
