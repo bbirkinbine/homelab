@@ -85,11 +85,18 @@ The two roles are not mutually exclusive — keep both for the
    macOS Keychain auto-load pattern that survives reboot. Snippets
    storage must also be enabled on `local` (preflight reports the
    cure command if missing).
-5. **An NVIDIA API key OR a non-NVIDIA inference provider.** NemoClaw
-   defaults to NVIDIA Endpoints. You'll paste the key into the
-   `nemoclaw onboard` wizard interactively — nothing in this repo's
-   automation reads it, so have it handy at deploy time but stash it
-   wherever you keep API keys.
+5. **An `NVIDIA_API_KEY` OR a non-NVIDIA inference provider's API key.**
+   NemoClaw defaults to NVIDIA Endpoints. There is **no separate
+   "NemoClaw" API key** — upstream consumes the same `NVIDIA_API_KEY`
+   you'd use against any build.nvidia.com-hosted model. Generate (or
+   reuse) one at [build.nvidia.com](https://build.nvidia.com) under
+   your NVIDIA account; one key works across all NVIDIA-hosted models
+   in the catalog. You'll paste it into the `nemoclaw onboard` wizard
+   interactively — nothing in this repo's automation reads it, so
+   have it handy at deploy time but stash it wherever you keep API
+   keys. If you'd rather route through Anthropic / OpenAI / a local
+   Ollama / the LiteLLM routed pool, swap accordingly during onboard
+   and use that provider's key instead.
 6. **Spare 16 GiB of RAM on the target node.** This is upstream's
    "Recommended" tier and our default. 8 GiB is the documented
    minimum; drop the module's `memory_mb` to 8192 in
@@ -200,20 +207,36 @@ Model        nvidia/nemotron-3-super-120b-a12b (NVIDIA Endpoints)
 ```
 
 For a fully non-interactive onboard (CI / repeatable rebuilds), the
-upstream installer supports env vars:
+upstream installer supports env vars. For the NVIDIA-backed default,
+include `NVIDIA_API_KEY` so the wizard doesn't have to prompt:
 
 ```bash
 sudo -u nemoclaw -i bash -c '
   NEMOCLAW_NON_INTERACTIVE=1 \
   NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 \
   NEMOCLAW_SANDBOX_NAME=homelab \
-  NEMOCLAW_PROVIDER=routed \
+  NVIDIA_API_KEY=<your-build.nvidia.com-key> \
   nemoclaw onboard --non-interactive
 '
 ```
 
-(NVIDIA API key plumbing for non-interactive mode: see upstream's
-[Inference Options](https://docs.nvidia.com/nemoclaw/latest/inference/inference-options.html).)
+Or piped through the installer in one shot (the upstream-recommended
+shape for fully non-interactive deploys):
+
+```bash
+sudo -u nemoclaw -i bash -c '
+  NEMOCLAW_NON_INTERACTIVE=1 \
+  NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1 \
+  NVIDIA_API_KEY=<your-build.nvidia.com-key> \
+  curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
+'
+```
+
+For a non-NVIDIA provider, swap `NVIDIA_API_KEY=` for whichever env
+var that provider's section of upstream's [Inference Options](https://docs.nvidia.com/nemoclaw/latest/inference/inference-options.html)
+documents (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.). For the
+LiteLLM routed pool, add `NEMOCLAW_PROVIDER=routed` and configure
+the pool's per-provider keys post-onboard.
 
 ## Chat with the agent
 
