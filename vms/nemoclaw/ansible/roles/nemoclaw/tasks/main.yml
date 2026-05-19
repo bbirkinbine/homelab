@@ -35,6 +35,13 @@
       - ca-certificates
       - curl
       - gnupg
+      # `acl` provides setfacl, required for Ansible's `become_user`
+      # to an unprivileged user (the nemoclaw service user in the
+      # smoke-check task below). Without it, Ansible falls back to
+      # BSD-style `chmod +a` ACL syntax which GNU coreutils on
+      # Ubuntu doesn't understand, and the task fails with
+      # "chmod: invalid mode 'A+user:nemoclaw:rx:allow'".
+      - acl
     state: present
     update_cache: true
     # No cache_valid_time — see openbao/openclaw notes; the Packer

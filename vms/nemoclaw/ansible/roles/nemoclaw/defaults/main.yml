@@ -25,10 +25,13 @@ nemoclaw_nodesource_repo: "deb [signed-by={{ nemoclaw_nodesource_keyring }}] htt
 # under /etc/apt/keyrings.
 nemoclaw_docker_keyring: /etc/apt/keyrings/docker.asc
 nemoclaw_docker_key_url: "https://download.docker.com/linux/ubuntu/gpg"
-nemoclaw_docker_arch: "{{ ansible_architecture | regex_replace('^x86_64$', 'amd64') | regex_replace('^aarch64$', 'arm64') }}"
+# ansible_facts["…"] form rather than the top-level `ansible_*` vars
+# because ansible-core 2.24 deprecates INJECT_FACTS_AS_VARS — the bare-
+# prefix form prints a noisy DEPRECATION WARNING per role-apply.
+nemoclaw_docker_arch: "{{ ansible_facts['architecture'] | regex_replace('^x86_64$', 'amd64') | regex_replace('^aarch64$', 'arm64') }}"
 nemoclaw_docker_repo: >-
   deb [arch={{ nemoclaw_docker_arch }} signed-by={{ nemoclaw_docker_keyring }}]
-  https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable
+  https://download.docker.com/linux/ubuntu {{ ansible_facts['distribution_release'] }} stable
 nemoclaw_docker_packages:
   - docker-ce
   - docker-ce-cli
