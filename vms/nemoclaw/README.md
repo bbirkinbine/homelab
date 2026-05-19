@@ -314,10 +314,11 @@ Upstream's explicit warnings, captured verbatim from the docs:
   Re-run the installer instead so the install path stays consistent
   with whatever shape upstream is on.
 
-Sandbox state across upgrades is not documented. Plan for "re-run
-`nemoclaw onboard`" being the path back to a healthy stack if an
-upgrade goes sideways, and back up sandbox state first (see
-"Backup the sandbox + state" below) if the state is worth saving.
+Sandbox state across upgrades is not documented. Plan for
+`nemoclaw onboard` being the path back to a healthy stack if an
+upgrade goes sideways. Take a `nemoclaw <sandbox> snapshot create`
+before the upgrade if the agent's workspace state is worth saving —
+see "Backup + restore" below.
 
 Re-running `just ansible nemoclaw` only updates prereqs (Docker
 engine, Node major, ufw); it doesn't touch the nemoclaw install.
@@ -332,11 +333,59 @@ this section should be revisited.
 anything you register against an IP (Tailscale, future reverse
 proxy, channel webhooks routed through OpenShell) will benefit.
 
-### Backup the sandbox + state
+### Backup + restore
 
-NemoClaw stores sandbox state under `/home/nemoclaw/` (Docker
-volumes, k3s state, nemoclaw config). Snapshot before any
-destructive operation:
+NemoClaw stores irreplaceable state in several places — sandbox
+agent state inside the OpenShell sandbox, channel pairings + API
+keys in the OpenShell gateway config, the sandbox image cache
+itself under `/var/lib/docker`. Three layered options, pick what
+fits the failure you're insuring against:
+
+**1. `nemoclaw <sandbox> snapshot create` (recommended for everyday
+rollback).** Upstream's purpose-built per-sandbox snapshot tool.
+Captures "all workspace state directories defined in the agent
+manifest" (for Hermes agents that includes `SOUL.md` and
+`.hermes/state.db`). Archives land under
+`~/.nemoclaw/rebuild-backups/<sandbox-name>/`. Round-trip:
+
+```bash
+ssh nemo-admin@<vm-ip>
+sudo -u nemoclaw -i
+
+nemoclaw <sandbox> snapshot create                     # snapshot the live sandbox
+nemoclaw <sandbox> snapshot create --name before-upgrade   # tag with a label
+nemoclaw <sandbox> snapshot list                       # what's available
+nemoclaw <sandbox> snapshot restore                    # restore the latest
+nemoclaw <sandbox> snapshot restore before-upgrade     # restore by label
+nemoclaw <sandbox> snapshot restore v3                 # restore by version
+nemoclaw <sandbox> snapshot restore 2026-04-14T        # restore by timestamp prefix
+```
+
+See [docs.nvidia.com/nemoclaw/latest/manage-sandboxes/backup-restore.html](https://docs.nvidia.com/nemoclaw/latest/manage-sandboxes/backup-restore.html)
+for the upstream reference.
+
+Snapshots do NOT capture the OpenShell gateway config, channel
+pairings + API keys held by the gateway, the sandbox image cache,
+or anything outside `~/.nemoclaw/`. For those, layer in option 2
+or 3.
+
+**2. Whole-VM PBS snapshot (recommended for catastrophic recovery).**
+The lab's [`pbs-hosts/`](../../pbs-hosts/) Proxmox Backup Server is
+the right tool for "the whole stack is corrupted in a way I can't
+diagnose." A PBS snapshot captures everything — OS, Docker engine,
+`/var/lib/docker` (sandbox images + k3s state), the `nemoclaw` CLI
+under `~/.local`, the OpenShell gateway config under
+`~/.local/state/nemoclaw/`, the gateway-held credentials, and any
+nemoclaw snapshots from option 1. Heavier than `snapshot create`
+and slower to restore for a state-only rollback, but the only
+option that catches the gateway/image/credential layers.
+Configure via Datacenter → Backup in the PVE UI; the role itself
+doesn't manage backup jobs.
+
+**3. Manual tar of `/var/lib/docker` + `/home/nemoclaw/` (escape
+hatch).** If `snapshot create` is broken or PBS isn't configured,
+grab everything directly. Heavyweight — `/var/lib/docker` is
+multi-GB on a host with sandbox images:
 
 ```bash
 ssh nemo-admin@<vm-ip>
@@ -352,16 +401,35 @@ exit
 scp nemo-admin@<vm-ip>:/tmp/nemoclaw-state-*.tgz ./backups/
 ```
 
-`/var/lib/docker` is huge (multi-GiB) — expect 5–10 minute backups.
-For the alpha period, treat `nemoclaw onboard` as cheap enough to
-re-run instead of restoring a backup; channel re-pairings are the
-only painful step.
+Expect 5–10 minute backups. For the alpha period, when the sandbox
+build is fast enough that re-onboarding is cheap, treat that as a
+viable alternative to restoring this archive — the painful step is
+re-pairing channels.
 
 ## Destroy and rebuild
 
 > **WARNING.** Destroying this VM loses the sandbox, its OpenClaw
 > state, channel pairings, and any conversation history. Re-onboard
-> means re-OAuth-ing model providers and re-pairing channels.
+> means re-OAuth-ing model providers and re-pairing channels. Take
+> a backup first — see "Backup + restore" above for the three
+> layered options.
+>
+> **Restore from a `nemoclaw snapshot` archive (sandbox state only):**
+> The archive lives in `~/.nemoclaw/rebuild-backups/` on the source
+> host. After rebuilding the VM (steps 1-4 below) and re-running
+> `nemoclaw onboard` to a sandbox of the same name, copy the
+> archive directory into place on the rebuilt host and
+> `nemoclaw <sandbox> snapshot restore`. Sandbox workspace state
+> comes back; channel pairings + API keys do not (those live in
+> the OpenShell gateway and aren't covered by `snapshot create`).
+>
+> **Restore from a PBS snapshot (whole-stack):** restore the VM in
+> the PVE UI (Datacenter → `<node>` → `<VMID>` → Backup → Restore).
+> The whole stack comes back including Docker images, the gateway
+> config, channel pairings, and any sandbox snapshots — skip steps
+> 2-5 below.
+
+Standard rebuild flow (no restore — re-onboard from scratch):
 
 ```bash
 just destroy nemoclaw        # only after a state backup or accepting re-onboard cost
