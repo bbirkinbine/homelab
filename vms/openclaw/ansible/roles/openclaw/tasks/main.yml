@@ -138,6 +138,52 @@
     creates: "/var/lib/systemd/linger/{{ openclaw_service_user }}"
   when: openclaw_enable_linger
 
+# Grant read access to the user journal so `journalctl --user -u
+# openclaw-gateway` works as the openclaw user itself. Without this,
+# user-unit messages still land in /var/log/journal/ but openclaw
+# can't read its own entries — only root and members of
+# `systemd-journal` / `adm` can. Compatible with this role's "agent
+# runs the machine" trust model (opt-in NOPASSWD sudo below); the
+# journal read access doesn't widen the security envelope when the
+# user can already escalate. Deliberately NOT replicated on
+# `vms/nemoclaw/` — that role is the sandboxed half of the trust
+# split, where `systemd-journal` would leak the whole system journal
+# out of the sandbox.
+- name: Add openclaw service user to systemd-journal group
+  ansible.builtin.user:
+    name: "{{ openclaw_service_user }}"
+    groups: systemd-journal
+    append: true
+
+# `sudo -u openclaw -i` spawns a login shell without going through
+# pam_systemd (Ubuntu's /etc/pam.d/sudo pulls in
+# common-session-noninteractive, which doesn't register a logind
+# session), so $XDG_RUNTIME_DIR stays unset and any
+# `systemctl --user` / `journalctl --user` call in that shell fails
+# with "Failed to connect to bus: No medium found". The
+# user@<uid>.service instance IS running (linger above ensures that)
+# — the shell just isn't pointed at its bus. Drop a guarded export
+# into the service user's .bashrc so the documented operator path
+# (sudo -u openclaw -i, then systemctl --user …) works without a
+# manual export. The guard is a no-op when XDG_RUNTIME_DIR is
+# already set (e.g. when SSH'ing directly as openclaw, where
+# pam_systemd does fire). blockinfile markers keep this coexisting
+# cleanly with whatever `openclaw install.sh` later appends to
+# .bashrc (the upstream installer wires npm PATH there).
+- name: Ensure XDG_RUNTIME_DIR is set in openclaw login shells
+  ansible.builtin.blockinfile:
+    path: "{{ openclaw_service_home }}/.bashrc"
+    create: true
+    owner: "{{ openclaw_service_user }}"
+    group: "{{ openclaw_service_group }}"
+    mode: "0644"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - openclaw XDG_RUNTIME_DIR"
+    block: |
+      # See vms/openclaw/README.md "Troubleshooting" for the rationale.
+      if [ -z "$XDG_RUNTIME_DIR" ] && [ -d "/run/user/$(id -u)" ]; then
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+      fi
+
 # NOPASSWD sudo for the openclaw service user. Deliberate trust call —
 # the common openclaw deployment pattern lets the agent run the whole
 # machine. Flip openclaw_grant_sudo=false in inventory to drop this and

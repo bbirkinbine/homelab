@@ -194,6 +194,43 @@ journalctl --user -u openclaw-gateway -f
 If you're running under tmux/screen or a hand-rolled system unit, log
 location depends on how you wired it up.
 
+### Troubleshooting: `systemctl --user` / `journalctl --user`
+
+Two related gotchas can hit anyone running these as the service user
+via `sudo -u openclaw -i`. The role handles both on a fresh deploy;
+the notes below explain the mechanism in case you hit either symptom
+on an existing host that hasn't re-run Ansible yet (or in a corner
+invocation like `sudo -u openclaw bash -c '...'`, which skips
+`.bashrc`).
+
+- **`Failed to connect to bus: No medium found`.** Ubuntu's
+  `/etc/pam.d/sudo` includes `common-session-noninteractive`, which
+  does NOT invoke `pam_systemd` — so the sudo'd shell never registers
+  with logind, and `$XDG_RUNTIME_DIR` stays unset. Linger is still on
+  and `user@<uid>.service` is still running; the shell just isn't
+  pointed at its bus. The role drops a guarded export into
+  `~openclaw/.bashrc` so a fresh `sudo -u openclaw -i` shell has
+  `XDG_RUNTIME_DIR` set automatically. If you're in an already-open
+  session that started before the role landed, either re-login or
+  set it inline:
+
+  ```bash
+  export XDG_RUNTIME_DIR=/run/user/$(id -u)
+  ```
+
+  Alternative invocation that sidesteps this entirely:
+  `sudo machinectl shell openclaw@.host /bin/bash` — `machinectl`
+  goes through logind and sets the env up correctly. SSH'ing directly
+  as the openclaw user also works (same reason).
+
+- **`No journal files were opened due to insufficient permissions`.**
+  User-unit messages land in `/var/log/journal/` and only members of
+  `systemd-journal` / `adm` can read them. The role adds the openclaw
+  user to `systemd-journal` so `journalctl --user -u openclaw-gateway`
+  works without sudo. If you deployed before this task landed, re-run
+  `just ansible openclaw` and start a fresh login session (group
+  membership only refreshes on a new session).
+
 ### Upgrading
 
 Upstream's canonical upgrade command is `openclaw update`, run by
