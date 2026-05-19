@@ -236,40 +236,98 @@ router — channel webhooks and the macOS/iOS companion apps register
 against an IP, and re-onboarding after every lease rotation is
 friction.
 
-### Backup the workspace
+### Backup + restore
 
 `~/.openclaw/` (on the VM, owned by the openclaw service user) is the
 only irreplaceable state — channel auth tokens, paired allowlists,
-conversation history. Snapshot before any destructive operation:
+conversation history, plugin state. Two layered options, pick what
+fits the failure you're insuring against:
+
+**1. `openclaw backup create` (recommended for everyday rollback).**
+Upstream's purpose-built CLI. Skips live-mutation files that have no
+restoration value (locks, sockets, in-flight session state), captures
+the state dir + active config + credentials + workspace dirs + plugin
+sources, and writes a timestamped `.tar.gz` with a `manifest.json`
+documenting the layout. Run as the openclaw service user:
+
+```bash
+ssh claw-admin@<vm-ip>
+sudo -u openclaw -i
+openclaw backup create                        # writes to current dir
+openclaw backup create --output ~/backups/    # custom destination
+openclaw backup create --verify               # validate the archive
+openclaw backup create --dry-run              # preview without writing
+openclaw backup create --no-include-workspace # skip workspace dirs
+openclaw backup create --only-config          # tiny config-only snapshot
+openclaw backup verify <archive.tar.gz>       # check an existing archive
+```
+
+There's no `openclaw restore` command upstream as of writing.
+Recovery is "extract the archive into the openclaw user's $HOME and
+restart the gateway" — see "Destroy and rebuild" below for the
+full sequence.
+
+**2. Whole-VM PBS snapshot (recommended for catastrophic recovery).**
+The lab's [`pbs-hosts/`](../../pbs-hosts/) Proxmox Backup Server is
+available cluster-wide once a backup job is configured in the PVE UI
+or via `pvesh`. A PBS snapshot captures everything — OS, role-state,
+~/.openclaw, the daemon binary, the service user, the cloud-init
+identity — so recovery is "restore the VM and boot." Heavier than
+`openclaw backup` and slower to restore for a state-only fix, but
+the safety net for "this VM is corrupted in some way I can't
+diagnose." Configure via Datacenter → Backup in the PVE UI; the role
+itself doesn't manage backup jobs.
+
+**3. Manual tar (escape hatch).** If openclaw is broken to the point
+where `openclaw backup create` won't run, grab the state directly:
 
 ```bash
 ssh claw-admin@<vm-ip>
 sudo tar -czf /tmp/openclaw-state-$(date +%F).tgz -C /home/openclaw .openclaw
 sudo chown claw-admin: /tmp/openclaw-state-*.tgz
-exit
 scp claw-admin@<vm-ip>:/tmp/openclaw-state-*.tgz ./backups/
 ```
 
-Push to your usual offsite path. The gateway binary is reproducible
-from `npm install -g openclaw` (or whichever install path upstream
-recommends); only `~/.openclaw/` is state.
+Less precise than the upstream tool (you might capture sockets or
+lock files), but works when nothing else does.
+
+Push your archives to your usual offsite path either way — the
+gateway binary is reproducible from `curl | bash`, only `~/.openclaw/`
+and friends are state.
 
 ## Destroy and rebuild
 
 > **WARNING.** Destroying this VM loses every channel pairing token.
 > Re-onboarding from scratch means re-scanning WhatsApp's QR, re-bot-
-> -token'ing Telegram, re-OAuth'ing Slack/Discord. Take the workspace
-> backup above first if you want a clean restore.
+> -token'ing Telegram, re-OAuth'ing Slack/Discord. Take a backup
+> first if you want a clean restore — see "Backup + restore" above
+> for the three layered options.
 >
-> Restore path:
+> **Restore path from an `openclaw backup create` archive:**
 >
 > 1. `just apply openclaw` on the rebuilt VM.
 > 2. `just ansible openclaw` — gets prereqs in place.
 > 3. Install openclaw per the "Install openclaw" section above.
 > 4. Stop the gateway if `--install-daemon` was used:
 >    `sudo -u openclaw -i systemctl --user stop openclaw-gateway`.
-> 5. Restore: `sudo -u openclaw tar -xzf openclaw-state-<date>.tgz -C /home/openclaw`.
+> 5. Copy the archive to the VM and extract under the openclaw
+>    user's $HOME (no upstream `restore` command — manual extraction
+>    against the `manifest.json` layout):
+>
+>    ```bash
+>    scp openclaw-backup-<date>.tar.gz claw-admin@<vm-ip>:/tmp/
+>    ssh claw-admin@<vm-ip>
+>    sudo -u openclaw -i
+>    cd $HOME && tar -xzf /tmp/openclaw-backup-<date>.tar.gz
+>    ```
+>
 > 6. Start the gateway (re-run onboard or restart the user-systemd unit).
+>
+> **Restore path from a PBS snapshot:** restore the VM in the PVE UI
+> (Datacenter → `<node>` → `<VMID>` → Backup → Restore). The whole VM
+> comes back including the openclaw install and `~/.openclaw/` —
+> skip steps 2-5 above. Useful when the failure mode is "the VM
+> itself is corrupted in a way I can't diagnose."
 >
 > The restored state binds to the same model-provider tokens and
 > channel pairings as the old VM; verify a test message before
