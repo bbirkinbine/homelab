@@ -79,7 +79,7 @@ ceremonies below.
 `just ansible-check openclaw` works on a fresh host. The four
 NodeSource-bootstrap tasks (apt prereqs, keyrings dir, archive
 key, apt_repository) carry `check_mode: false` so `--check`
-actually performs the repo bootstrap before dry-running everything
+runs the repo bootstrap live before dry-running everything
 downstream — produces a meaningful diff for every change the role
 would make, instead of failing at `Install nodejs` with `No package
 matching 'nodejs' is available`. Same convention as pbs-hosts.

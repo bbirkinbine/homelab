@@ -3,14 +3,18 @@
 // What this file owns:
 //   * Cloning the per-node Ubuntu 24.04 base template (9100/9101/9102)
 //     to VM 8032.
-//   * Sizing (2 vCPU, 4 GiB RAM, 32 GiB disk, balloon disabled by
-//     default — see below).
+//   * Sizing (4 vCPU, 16 GiB RAM, 64 GiB disk, balloon disabled).
 //   * Cloud-init drive populated with identity data only (hostname,
 //     admin user, SSH key) — no software install.
 //
 // What this file deliberately does NOT own:
-//   * Node.js install, openclaw npm install, systemd unit. That's
-//     vms/openclaw/ansible/.
+//   * Node.js install + service-user prereqs (ufw rule, linger,
+//     optional NOPASSWD sudo). That's vms/openclaw/ansible/.
+//   * The openclaw binary install (npm-global / curl|bash / etc.)
+//     and any systemd unit for the gateway. The role stops at
+//     prereqs; the operator runs upstream's installer + the
+//     optional `openclaw onboard --install-daemon` path. See
+//     vms/openclaw/README.md "Install openclaw".
 //   * `openclaw onboard` (channel pairing, model OAuth, daemon
 //     registration). That's an operator ceremony — channel auth is
 //     interactive (QR scans for WhatsApp/Telegram, OAuth flows for

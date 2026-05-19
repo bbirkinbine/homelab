@@ -8,9 +8,12 @@
 //     admin user, SSH key) — no software install.
 //
 // What this file deliberately does NOT own:
-//   * Docker install, Node install, nemoclaw npm install, service-user
-//     setup, docker-group membership, linger. That's
+//   * Docker install, Node install, service-user setup,
+//     docker-group membership, linger, ufw rules. That's
 //     vms/nemoclaw/ansible/.
+//   * The nemoclaw binary install (upstream's curl|bash, npm-global,
+//     etc.). The role stops at prereqs; the operator runs upstream's
+//     installer. See vms/nemoclaw/README.md "Install nemoclaw".
 //   * `nemoclaw onboard` (sandbox creation, model-provider auth,
 //     channel pairing). That's an operator ceremony — see
 //     vms/nemoclaw/README.md "First-onboard ceremony".

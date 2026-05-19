@@ -128,7 +128,7 @@ onboard ceremonies below.
 `just ansible-check nemoclaw` works on a fresh host. The six
 repo-bootstrap tasks (apt prereqs, keyrings dir, Docker key + repo,
 NodeSource key + repo) carry `check_mode: false` so `--check`
-actually performs the repo bootstrap before dry-running everything
+runs the repo bootstrap live before dry-running everything
 downstream — produces a meaningful diff for every change the role
 would make, instead of failing at `Install Docker engine` /
 `Install nodejs` with `No package matching '<pkg>' is available`.
@@ -506,7 +506,7 @@ Trade-offs of the prereq-only shape:
 - **Sandbox escape.** OpenShell's Landlock + seccomp + netns is
   defense-in-depth, not a guarantee. Treat the sandbox as semi-
   trusted: don't grant the network policy more egress than the
-  sandbox actually needs.
+  sandbox truly needs.
 - **Network policy approvals.** Default policy + approval flow means
   any new outbound destination from the sandbox surfaces in a TUI
   for explicit allow/deny. Don't reflexively approve — the prompt is
