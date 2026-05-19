@@ -78,17 +78,24 @@
     name: "{{ nemoclaw_docker_packages }}"
     state: present
 
+# Skip in --check: the preceding `apt: name=docker-ce` dry-runs in
+# check mode, so docker.service / containerd.service unit files
+# aren't actually on disk yet — the systemd module then fails with
+# "Could not find the requested service docker: host". Both run live
+# on a real apply.
 - name: Enable and start docker.service
   ansible.builtin.systemd:
     name: docker
     enabled: true
     state: started
+  when: not ansible_check_mode
 
 - name: Enable and start containerd.service
   ansible.builtin.systemd:
     name: containerd
     enabled: true
     state: started
+  when: not ansible_check_mode
 
 # --- NodeSource apt repo + Node 22 install -----------------------------------
 

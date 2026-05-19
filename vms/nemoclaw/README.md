@@ -261,30 +261,47 @@ sudo -u nemoclaw nemoclaw <sandbox-name> status
 
 ### Upgrading
 
-The role no longer manages the nemoclaw version — upgrades are
-operator-driven against whatever install path you took. As the
-service user:
+Upstream **does not document** a formal upgrade command (no
+`nemoclaw update`, no published version-pinning flag) as of this
+README's writing — NemoClaw is alpha and the lifecycle story is
+still settling. The least-friction path that matches what upstream
+*does* say:
 
 ```bash
 ssh nemo-admin@<vm-ip>
 sudo -u nemoclaw -i
-# If you used the upstream installer:
-curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash   # re-running upgrades in place
-# If you used npm-global:
-npm update -g nemoclaw
+# Re-run the installer in place — picks up whatever upstream's
+# latest is at this URL.
+curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash
+# After that, re-onboard if the gateway/sandbox needs to be
+# recreated (upstream's prescribed lifecycle path):
+nemoclaw onboard
 ```
 
-For alpha software, pin to a tagged release once you've onboarded
-(upstream's `--version` flag or the installer's pinning option) so
-re-runs don't drag in breaking changes that lose sandbox state.
+Upstream's explicit warnings, captured verbatim from the docs:
 
-Upstream's lifecycle note: "use `nemoclaw onboard` when you need to
-create or recreate the OpenShell gateway or sandbox." Don't run
-`openshell self-update` or `npm update -g openshell` directly — that
-path leaves NemoClaw and OpenShell version-mismatched.
+- **Use `nemoclaw onboard` to manage OpenShell lifecycle.** When the
+  gateway or sandbox needs to be created or recreated, that's the
+  path — not direct npm/openshell commands.
+- **Avoid `openshell self-update`, `npm update -g openshell`,
+  `openshell gateway start --recreate`, `openshell sandbox create`
+  directly.** Those paths leave NemoClaw and OpenShell version-
+  mismatched.
+- **No `npm update -g nemoclaw` either** — not endorsed by upstream.
+  Re-run the installer instead so the install path stays consistent
+  with whatever shape upstream is on.
+
+Sandbox state across upgrades is not documented. Plan for "re-run
+`nemoclaw onboard`" being the path back to a healthy stack if an
+upgrade goes sideways, and back up sandbox state first (see
+"Backup the sandbox + state" below) if the state is worth saving.
 
 Re-running `just ansible nemoclaw` only updates prereqs (Docker
 engine, Node major, ufw); it doesn't touch the nemoclaw install.
+
+Check [docs.nvidia.com/nemoclaw](https://docs.nvidia.com/nemoclaw/latest/)
+periodically — once upstream publishes a formal update command,
+this section should be revisited.
 
 ### Stable IP via DHCP reservation
 
