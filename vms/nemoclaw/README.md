@@ -111,6 +111,17 @@ is installed globally, and the `nemoclaw` service user exists with
 docker-group + linger. **No sandbox has been created and no model
 provider is configured** — that's the operator ceremony below.
 
+### Previewing with `--check` first
+
+`just ansible-check nemoclaw` works on a fresh host. The six
+repo-bootstrap tasks (apt prereqs, keyrings dir, Docker key + repo,
+NodeSource key + repo) carry `check_mode: false` so `--check`
+actually performs the repo bootstrap before dry-running everything
+downstream — produces a meaningful diff for every change the role
+would make, instead of failing at `Install Docker engine` /
+`Install nodejs` with `No package matching '<pkg>' is available`.
+Same convention as pbs-hosts and openclaw.
+
 ## First-onboard ceremony (operator-driven, one-time)
 
 NemoClaw's onboard is interactive: it asks which sandbox name to
@@ -255,22 +266,6 @@ scp nemo-admin@<vm-ip>:/tmp/nemoclaw-state-*.tgz ./backups/
 For the alpha period, treat `nemoclaw onboard` as cheap enough to
 re-run instead of restoring a backup; channel re-pairings are the
 only painful step.
-
-### Check, apply, re-check
-
-The six repo-bootstrap tasks (apt prereqs, keyrings dir, Docker
-key + repo, NodeSource key + repo) carry `check_mode: false` so
-`--check` actually performs the repo bootstrap before dry-running
-everything downstream. That means the first check on a fresh host
-produces a meaningful diff for every change the role would make,
-instead of failing at `Install Docker engine` / `Install nodejs`
-with `No package matching '<pkg>' is available`. Same convention as
-pbs-hosts and openclaw.
-
-```bash
-just ansible-check nemoclaw   # --check --diff (no changes downstream of the repo bootstrap)
-just ansible nemoclaw         # apply
-```
 
 ## Destroy and rebuild
 

@@ -70,6 +70,16 @@ End state: the gateway is **running but not onboarded** —
 paired and no model provider is authorized. The role deliberately
 does NOT run `openclaw onboard`; that's the operator ceremony below.
 
+### Previewing with `--check` first
+
+`just ansible-check openclaw` works on a fresh host. The four
+NodeSource-bootstrap tasks (apt prereqs, keyrings dir, archive
+key, apt_repository) carry `check_mode: false` so `--check`
+actually performs the repo bootstrap before dry-running everything
+downstream — produces a meaningful diff for every change the role
+would make, instead of failing at `Install nodejs` with `No package
+matching 'nodejs' is available`. Same convention as pbs-hosts.
+
 ## First-onboard ceremony (operator-driven, one-time)
 
 OpenClaw's onboarding is interactive — channel pairings require QR
@@ -171,21 +181,6 @@ scp claw-admin@<vm-ip>:/tmp/openclaw-state-*.tgz ./backups/
 
 Push to your usual offsite path. The gateway itself is reproducible
 from `npm install -g openclaw`; the binary is not state.
-
-### Check, apply, re-check
-
-The four NodeSource-bootstrap tasks (apt prereqs, keyrings dir,
-archive key, apt_repository) carry `check_mode: false` so `--check`
-actually performs the repo bootstrap before dry-running everything
-downstream. That means the first check on a fresh host produces a
-meaningful diff for every change the role would make, instead of
-failing at `Install nodejs` with "No package matching 'nodejs' is
-available". Same convention as pbs-hosts.
-
-```bash
-just ansible-check openclaw   # --check --diff (no changes downstream of the repo bootstrap)
-just ansible openclaw         # apply
-```
 
 ## Destroy and rebuild
 
