@@ -55,13 +55,24 @@ nemoclaw_service_shell: /bin/bash
 nemoclaw_enable_linger: true
 
 # --- UFW ---
-# By default, NO inbound port is opened beyond SSH. NemoClaw's
-# gateway listens internally; the sandbox container talks to the
-# gateway over a local socket; channel webhooks (if any) typically
-# route through the OpenShell channel manager rather than a direct
-# external listener. If you enable the optional Model Router (LiteLLM
-# proxy on :4000) and want to expose it for debugging, flip
-# nemoclaw_ufw_allow_router=true — but :4000 is reachable from inside
-# the sandbox via the gateway, so external access is rarely needed.
+# Two ufw rules cover the stack:
+#
+# 1) OpenShell gateway from Docker bridge (mandatory). The sandbox
+#    containers run on a Docker bridge (typically 172.18.0.0/16) and
+#    talk to the gateway listening on the bridge's host-side IP at
+#    port 8080. The Packer base ships ufw with INPUT default-deny, so
+#    without an explicit allow, `nemoclaw onboard` fails at the
+#    "Sandbox containers cannot reach the gateway" check with a hint
+#    pointing at this rule. 172.16.0.0/12 covers the full Docker
+#    bridge address space (172.16-31), insulating us against Docker
+#    reassigning bridges across versions / restarts. Not optional —
+#    nemoclaw doesn't work without this.
+nemoclaw_openshell_gateway_port: 8080
+nemoclaw_docker_bridge_subnet: "172.16.0.0/12"
+
+# 2) Optional Model Router (LiteLLM proxy on :4000). External access
+#    rarely needed because the sandbox reaches the router internally
+#    via the gateway. Flip to true if you want it exposed for
+#    debugging from the LAN.
 nemoclaw_ufw_allow_router: false
 nemoclaw_router_port: 4000

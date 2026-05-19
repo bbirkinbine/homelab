@@ -389,13 +389,15 @@ Override in `vms/nemoclaw/terraform/main.tf`'s `module "nemoclaw"` call.
 | Port | Protocol | Source | Purpose |
 | --- | --- | --- | --- |
 | 22 | tcp | LAN | SSH (opened by base template) |
-| 4000 | tcp | — | Model Router (LiteLLM proxy) — **disabled by default**; flip `nemoclaw_ufw_allow_router: true` in inventory if you want external access. Sandbox reaches it internally regardless. |
+| 8080 | tcp | Docker bridge (`172.16.0.0/12`) | OpenShell gateway — opened by the role; mandatory for sandbox containers to reach the gateway. Not LAN-exposed. |
+| 4000 | tcp | — | Model Router (LiteLLM proxy) — **disabled by default**; flip `nemoclaw_ufw_allow_router: true` in inventory if you want LAN access. Sandbox reaches it internally regardless. |
 
-No default inbound port for NemoClaw itself. The OpenShell gateway
-listens internally; channel webhooks route through OpenShell's
-channel manager rather than a direct external listener. If you later
-front the sandbox via Tailscale or a reverse proxy, open the
-specific ports those need.
+No LAN-exposed port for NemoClaw itself. The OpenShell gateway is
+reachable only from the Docker bridge (where the sandbox containers
+live); channel webhooks route through OpenShell's channel manager
+rather than a direct external listener. If you later front the
+sandbox via Tailscale or a reverse proxy, open the specific ports
+those need.
 
 ## Install path (trade-off)
 

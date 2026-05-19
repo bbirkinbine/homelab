@@ -193,6 +193,17 @@
 
 # --- UFW ---------------------------------------------------------------------
 
+# Mandatory: the sandbox containers reach the OpenShell gateway over
+# the Docker bridge. Without this rule, `nemoclaw onboard` fails at
+# the preflight gateway-reachability check.
+- name: Allow OpenShell gateway from Docker bridge subnet
+  community.general.ufw:
+    rule: allow
+    from_ip: "{{ nemoclaw_docker_bridge_subnet }}"
+    to_port: "{{ nemoclaw_openshell_gateway_port }}"
+    proto: tcp
+    comment: "NemoClaw OpenShell gateway"
+
 - name: Allow Model Router through ufw
   community.general.ufw:
     rule: allow
