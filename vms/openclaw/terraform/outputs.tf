@@ -19,7 +19,7 @@ output "mac" {
 output "ansible_inventory_hint" {
   description = "Convenience string for `scripts/write-inventory.sh openclaw` to paste into ansible/inventory.yml after the first apply."
   value = format(
-    "openclaw:\n  hosts:\n    openclaw:\n      ansible_host: %s\n      ansible_user: %s\n      ansible_python_interpreter: /usr/bin/python3\n      ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'",
+    "openclaw_servers:\n  hosts:\n    openclaw:\n      ansible_host: %s\n      ansible_user: %s\n      ansible_python_interpreter: /usr/bin/python3\n      ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'",
     coalesce(module.openclaw.ipv4, "<paste-from-tofu-output-or-router>"),
     "claw-admin",
   )

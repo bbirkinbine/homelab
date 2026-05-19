@@ -19,7 +19,7 @@ output "mac" {
 output "ansible_inventory_hint" {
   description = "Convenience string for `scripts/write-inventory.sh nemoclaw` to paste into ansible/inventory.yml after the first apply."
   value = format(
-    "nemoclaw:\n  hosts:\n    nemoclaw:\n      ansible_host: %s\n      ansible_user: %s\n      ansible_python_interpreter: /usr/bin/python3\n      ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'",
+    "nemoclaw_servers:\n  hosts:\n    nemoclaw:\n      ansible_host: %s\n      ansible_user: %s\n      ansible_python_interpreter: /usr/bin/python3\n      ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'",
     coalesce(module.nemoclaw.ipv4, "<paste-from-tofu-output-or-router>"),
     "nemo-admin",
   )
