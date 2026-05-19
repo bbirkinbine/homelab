@@ -135,6 +135,9 @@
     fail_msg: >-
       Installed Node {{ nemoclaw_node_version_raw.stdout | trim }} is older than v{{ nemoclaw_node_major }}.
       Check that /etc/apt/sources.list.d/nodesource.list points at node_{{ nemoclaw_node_major }}.x, then re-run.
+  # Skip in --check: the preceding command: task skips by default in
+  # check mode, leaving stdout empty. Same convention as openclaw.
+  when: not ansible_check_mode
 
 # --- Service user ------------------------------------------------------------
 
@@ -177,6 +180,9 @@
   register: nemoclaw_installed_version
   changed_when: false
   failed_when: false
+  # Run live even in --check so the next task's `when:` clause has a
+  # populated .rc to evaluate against. Same rationale as openclaw.
+  check_mode: false
 
 - name: Install or update nemoclaw npm package globally
   community.general.npm:
@@ -234,12 +240,17 @@
 
 # --- Smoke checks ------------------------------------------------------------
 
+# The three tasks below run live smoke checks against the just-installed
+# stack. Skip them in --check — there's nothing live to verify on a
+# dry-run, and the debug task references the verify tasks' registered
+# stdout (which would be undefined if those skipped naturally).
 - name: Verify docker engine responds to the service user
   ansible.builtin.command: docker info --format '{% raw %}{{.ServerVersion}}{% endraw %}'
   become: true
   become_user: "{{ nemoclaw_service_user }}"
   register: nemoclaw_docker_check
   changed_when: false
+  when: not ansible_check_mode
 
 - name: Verify nemoclaw binary is on PATH for the service user
   ansible.builtin.command: nemoclaw --version
@@ -247,6 +258,7 @@
   become_user: "{{ nemoclaw_service_user }}"
   register: nemoclaw_cli_check
   changed_when: false
+  when: not ansible_check_mode
 
 - name: Show next-steps reminder
   ansible.builtin.debug:
@@ -259,3 +271,4 @@
       See vms/nemoclaw/README.md "First-onboard ceremony" for the env vars
       a non-interactive onboard takes (NEMOCLAW_NON_INTERACTIVE,
       NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE, NEMOCLAW_SANDBOX_NAME, ...).
+  when: not ansible_check_mode

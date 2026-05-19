@@ -123,6 +123,14 @@ would make, instead of failing at `Install Docker engine` /
 `Install nodejs` with `No package matching '<pkg>' is available`.
 Same convention as pbs-hosts and openclaw.
 
+Post-install validations skip cleanly under `--check`: the Node
+major-version assertion, the `docker info` smoke check, and the
+`nemoclaw --version` smoke check are gated with
+`when: not ansible_check_mode`. There's nothing live to validate on
+a dry-run; asserting installed versions only makes sense after a
+real apply. A re-check after `just ansible nemoclaw` runs all
+validations.
+
 ## First-onboard ceremony (operator-driven, one-time)
 
 NemoClaw's onboard is interactive: it asks which sandbox name to

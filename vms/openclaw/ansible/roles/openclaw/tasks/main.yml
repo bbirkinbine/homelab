@@ -90,6 +90,11 @@
     fail_msg: >-
       Installed Node {{ openclaw_node_version_raw.stdout | trim }} is older than v{{ openclaw_node_major }}.
       Check that /etc/apt/sources.list.d/nodesource.list points at node_{{ openclaw_node_major }}.x, then re-run.
+  # Skip in --check: the preceding command: task skips by default in
+  # check mode, leaving stdout empty — the regex would always fail. The
+  # role's bootstrap already verified node_24.x is in sources.list.d; an
+  # asserted version check only makes sense post-install.
+  when: not ansible_check_mode
 
 - name: Create openclaw service group
   ansible.builtin.group:
@@ -129,6 +134,12 @@
   register: openclaw_installed_version
   changed_when: false
   failed_when: false
+  # Run live even in --check (failed_when: false absorbs "command not
+  # found" on first-time hosts where nodejs/openclaw haven't been
+  # installed yet). Required so the next task's `when:` clause has a
+  # populated .rc to evaluate against, instead of an undefined-attribute
+  # error on the skipped-result variable.
+  check_mode: false
 
 - name: Install or update openclaw npm package globally
   community.general.npm:
@@ -220,7 +231,11 @@
   retries: 6
   delay: 5
   until: openclaw_health.status == 200
-  when: openclaw_install_systemd_unit
+  # Skip in --check — nothing is actually listening on the gateway port
+  # during a dry-run. uri executes live by default and would 30s-timeout.
+  when:
+    - openclaw_install_systemd_unit
+    - not ansible_check_mode
 
 - name: Show next-steps reminder
   ansible.builtin.debug:

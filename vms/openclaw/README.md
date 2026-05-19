@@ -81,6 +81,14 @@ downstream — produces a meaningful diff for every change the role
 would make, instead of failing at `Install nodejs` with `No package
 matching 'nodejs' is available`. Same convention as pbs-hosts.
 
+Post-install validations skip cleanly under `--check`: the Node
+major-version assertion and the gateway `/healthz` probe are
+gated with `when: not ansible_check_mode`. The role's bootstrap
+already verifies `node_24.x` is the configured repo; asserting the
+installed version + probing the live endpoint only makes sense
+after a real apply. A re-check after `just ansible openclaw` runs
+all validations.
+
 ## First-onboard ceremony (operator-driven, one-time)
 
 OpenClaw's onboarding is interactive — channel pairings require QR
