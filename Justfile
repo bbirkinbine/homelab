@@ -128,11 +128,23 @@ fmt:
 validate role:
     cd vms/{{role}}/terraform && tofu init -backend=false && tofu validate
 
-# `tofu fmt -check` — fails if any .tf is mis-formatted.
+# `tofu fmt -check` — fails if any tracked .tf is mis-formatted.
+# Scoped to tracked files (via `git ls-files`) so gitignored local
+# terraform.tfvars whitespace drift doesn't fail the check — repo
+# state is what we care about, not the operator's local sizing overrides.
 fmt-check:
-    tofu fmt -check -recursive .
+    git ls-files -- '*.tf' | xargs tofu fmt -check
+
+# Run all role-consistency checks across vms/*/terraform/. See the script
+# header for what's checked. Intended as a pre-PR / pre-merge sanity pass
+# when a change touches multiple role definitions.
+check-roles:
+    @./scripts/check-role-consistency.sh
 
 # Lint + syntax-check the helper scripts. shellcheck must be on PATH.
+# `-S warning` skips info-level findings (e.g. SC2029, which flags
+# every `ssh host "cmd $localvar"` pattern even when client-side
+# expansion is exactly the intent).
 shell-lint:
-    bash -n scripts/preflight.sh scripts/hydrate.sh
-    shellcheck scripts/preflight.sh scripts/hydrate.sh
+    bash -n scripts/preflight.sh scripts/hydrate.sh scripts/check-role-consistency.sh
+    shellcheck -S warning scripts/preflight.sh scripts/hydrate.sh scripts/check-role-consistency.sh
