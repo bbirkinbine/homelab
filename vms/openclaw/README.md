@@ -196,18 +196,38 @@ location depends on how you wired it up.
 
 ### Upgrading
 
-Re-run upstream's install command as the openclaw service user:
+Upstream's canonical upgrade command is `openclaw update`, run by
+openclaw itself. It auto-detects whether you installed via npm or
+git, fetches the latest version, runs `openclaw doctor`, and
+restarts the gateway. See [docs.openclaw.ai/install/updating](https://docs.openclaw.ai/install/updating)
+for the full reference.
 
 ```bash
 ssh claw-admin@<vm-ip>
 sudo -u openclaw -i
-npm update -g openclaw        # or whatever upstream's update command is now
-systemctl --user restart openclaw-gateway   # if you took the --install-daemon path
+
+openclaw update                            # latest stable, in-place
+openclaw update --dry-run                  # preview without applying
+openclaw update --channel beta             # opt into beta channel
+openclaw update --channel dev              # switch to a git-checkout install built from main
+openclaw update --tag <release-tag>        # pin to a specific release
 ```
 
-The role itself doesn't manage the openclaw version — re-running
-`just ansible openclaw` only updates prereqs (Node, ufw rule, etc.),
-which is rarely the reason to upgrade.
+Stable-channel installs auto-apply on a delayed-jitter schedule by
+default. Block auto-updates (e.g., for an incident-response freeze)
+by exporting `OPENCLAW_NO_AUTO_UPDATE=1` in the service user's
+environment.
+
+If `openclaw update` fails after its npm phase, upstream's fallback
+is to re-run the installer:
+
+```bash
+curl -fsSL https://openclaw.ai/install.sh | bash
+```
+
+The role itself does NOT manage the openclaw version — re-running
+`just ansible openclaw` only refreshes prereqs (Node, ufw, the
+sudo toggle), which is rarely the reason to upgrade.
 
 ### Stable IP via DHCP reservation
 
@@ -289,16 +309,31 @@ it with mTLS at a reverse proxy or restrict access via Tailscale.
 
 ## Security notes
 
-- **The openclaw service user has NOPASSWD sudo by default.** Deliberate
-  trust call, not an oversight. The common openclaw deployment pattern
-  lets the agent run the whole VM — install packages, restart services,
-  edit configs — as part of its tool capabilities. If you want the
-  agent strictly sandboxed at the OS level instead, set
-  `openclaw_grant_sudo: false` in inventory and re-run the role; the
-  task tears down the `/etc/sudoers.d/openclaw` drop-in. For an
-  agent-with-real-guardrails posture, see [`vms/nemoclaw/`](../nemoclaw/),
-  which keeps its service user unprivileged and runs OpenClaw inside
-  an OpenShell sandbox with network policy + capability drops.
+> ### Trust-model decision: does the agent get sudo?
+>
+> **By default this role keeps the openclaw service user
+> unprivileged** — no sudo, no escalation path. The role's baseline
+> is least-privilege.
+>
+> **Many openclaw deployments take the opposite stance** and grant
+> the agent NOPASSWD sudo so it can install packages, restart
+> services, and edit configs as part of its tool capabilities (the
+> "let the agent run the whole machine" pattern). If that's what
+> you want, opt in by uncommenting `openclaw_grant_sudo: true` in
+> `ansible/inventory.yml` and re-running `just ansible openclaw`.
+> The role drops `/etc/sudoers.d/openclaw` granting
+> `openclaw ALL=(ALL) NOPASSWD:ALL`.
+>
+> Treat this as a deliberate decision per deployment, not a default.
+> The `ansible/inventory.yml.example` file shows the override site
+> with a comment block; see that for the inventory mechanics.
+>
+> **Want an agent with real guardrails instead?** That's
+> [`vms/nemoclaw/`](../nemoclaw/) — unprivileged service user PLUS
+> OpenShell sandbox with declarative network policy and capability
+> drops. The two roles intentionally occupy different points in the
+> trust-model spectrum.
+
 - **DM pairing policy.** Stock OpenClaw treats unknown senders on
   Telegram/WhatsApp/Signal/Discord/Slack/etc. with a pairing-code
   prompt (`dmPolicy="pairing"`). Don't relax to `dmPolicy="open"`

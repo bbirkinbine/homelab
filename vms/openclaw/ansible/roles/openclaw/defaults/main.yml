@@ -32,15 +32,16 @@ openclaw_service_home: /home/openclaw
 openclaw_service_shell: /bin/bash
 openclaw_enable_linger: true
 
-# NOPASSWD sudo for the openclaw service user. The common openclaw
-# usage pattern lets the agent manage the entire VM (install packages,
-# restart services, edit configs as part of its tool capabilities) —
-# upstream's intended deployment shape on a single-purpose host. Flip
-# this to false on an inventory that wants the agent strictly sandboxed
-# at the OS level. The hardened counterpart is vms/nemoclaw/, which
-# deliberately does NOT grant its service user sudo — see that role's
-# CLAUDE.md / README for the OpenShell sandbox model.
-openclaw_grant_sudo: true
+# NOPASSWD sudo for the openclaw service user. Default OFF — the role
+# treats this as a deliberate trust call the operator must make in
+# inventory, not a silent default. Common openclaw deployments DO grant
+# the agent sudo (the "let the agent run the whole machine" pattern,
+# matching how a lot of people use the upstream CLI), but the role's
+# baseline is least-privilege. To enable, set `openclaw_grant_sudo: true`
+# in inventory.yml and re-run. The hardened alternative is
+# vms/nemoclaw/, which keeps its service user unprivileged AND runs
+# OpenClaw inside an OpenShell sandbox — see that role for the model.
+openclaw_grant_sudo: false
 
 # Gateway listen port. Default in the openclaw CLI; expose this in
 # defaults so the ufw rule below can stay in sync with whatever port

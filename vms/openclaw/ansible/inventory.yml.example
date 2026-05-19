@@ -35,3 +35,21 @@ openclaw_servers:
       # depends on it). Setting this explicitly skips Ansible's
       # interpreter discovery and silences the matching warning.
       ansible_python_interpreter: /usr/bin/python3
+
+      # ---- Trust model toggle (deliberate operator decision) ----
+      #
+      # Uncomment to grant the openclaw service user NOPASSWD sudo —
+      # the "agent runs the whole machine" pattern common in upstream
+      # openclaw deployments (lets the agent install packages, restart
+      # services, edit configs as tool capabilities). Default OFF; the
+      # role keeps the service user unprivileged unless you say so.
+      # See README.md "Security notes" for the full trust-model
+      # discussion + the vms/nemoclaw/ hardened alternative.
+      #
+      # NOTE: `just inventory openclaw` regenerates THIS file from
+      # tofu output and will clobber a manually-added line here.
+      # After re-running it, re-add the override before re-running
+      # `just ansible openclaw`. (Or pin it durably in a group_vars/
+      # file alongside this inventory if you'd rather not re-edit.)
+      #
+      # openclaw_grant_sudo: true
