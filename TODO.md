@@ -11,6 +11,38 @@ once landed.
 
 ## Open
 
+### Add network device monitoring — TRENDnet switch + main Orbi router
+
+The lab's network gear is in the hardware inventory (vault:
+`Homelab Inventory.md` § Network) but `vms/monitoring/` doesn't scrape
+either device. Two devices, two different stories:
+
+- **TRENDnet TEG-3102WS switch** (8× 2.5GBASE-T + 2× 10G SFP+,
+  web-managed, **SNMPv2c-capable**). Fits the existing pattern
+  cleanly: `snmp_exporter` running on the monitoring VM, scraping
+  port counters / interface state / chassis temp via SNMP. Use the
+  `{% if monitoring_<x>_target %}` optional-scrape-target convention
+  (DCGM and NUT both follow it — see `monitoring_dcgm_target` /
+  `monitoring_nut_target` in
+  [vms/monitoring/ansible/roles/monitoring/defaults/main.yml](vms/monitoring/ansible/roles/monitoring/defaults/main.yml)).
+  Grafana dashboard: snmp_exporter community dashboards exist; pin a
+  revision.
+- **Netgear Orbi RBR50** (LAN router + Wi-Fi, internet uplink from
+  the AT&T fiber gateway, UPS-backed by the homelab BR1500MS2). Less
+  clear path. Netgear consumer firmware does **not** expose SNMP;
+  community scrapers parse the web UI or telnet console. Before
+  building a fragile HTML-parser-as-exporter, evaluate a
+  `blackbox_exporter` ICMP probe from the monitoring VM against the
+  Orbi's LAN IP + the WAN address — that answers "is the path up"
+  (the 90% case) without the parser brittleness. Promote to a full
+  Orbi-as-target build only after a real outage where ICMP-up wasn't
+  enough signal.
+
+Trigger that makes it urgent: not urgent. Quality-of-life — would
+catch a switch-port flap or a WAN bounce that's currently invisible
+to Prometheus. Bump priority after any incident where the lack of
+network-layer telemetry slowed a post-mortem.
+
 ### Rebuild Ubuntu 24.04 base template to activate apt-lists retention
 
 `packer/ubuntu-24-04-base/provision/99-cleanup.sh` was updated to stop
