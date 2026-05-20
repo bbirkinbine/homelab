@@ -57,6 +57,7 @@ Operator-side build hosts (macOS for `proxmox-iso` targets, T480 + Ubuntu for th
 | Bootstrap secrets | KeePassXC + YubiKey HMAC | `scripts/hydrate.sh` resolves `kp://` placeholders in `terraform.tfvars.tpl` at apply time |
 | Runtime secrets | OpenBao (Shamir-sealed) | In-cluster KV / PKI store for service-to-service secrets; see [ADR-0002](docs/decisions/0002-openbao-seal-shamir-not-hsm.md) and [`vms/openbao/`](vms/openbao/README.md) |
 | AI / LLM | Ollama | Local model serving on the [eGPU RTX 3090](docs/proxmox-gpu-passthrough.md) (24 GB VRAM) attached to `pve12t`; see [`vms/llm/`](vms/llm/README.md) |
+| Observability | Prometheus + Grafana | Scrapes `node_exporter` (all hosts) + `prometheus-pve-exporter` (per-VM CPU/RAM/disk-IO) + natrontech `pbs-exporter` (backup health); see [`vms/monitoring/`](vms/monitoring/README.md) |
 | Build hosts | macOS / Ubuntu | Mac drives all `proxmox-iso` builds; T480 drives the Windows `virtualbox-iso` target |
 | Design rationale | ADRs in [`docs/decisions/`](docs/decisions/) | Append-only records for non-obvious choices |
 
