@@ -26,6 +26,25 @@ vms/monitoring/
 
 ## Prerequisites
 
+### Credentials checklist (KeePassXC)
+
+Three KeePassXC entries this role reads or has the operator paste.
+Confirm they exist before starting; details for creating each are in
+the steps below, and the repo-wide index lives at
+[`docs/credentials-index.md`](../../docs/credentials-index.md).
+
+| KeePassXC path | Field | What | Created by |
+| --- | --- | --- | --- |
+| `Homelab/Tofu/proxmox-api-token` | Password | `tofu@pve!apply=<secret>` (provisioning) | already minted (shared with all roles) |
+| `Homelab/Prometheus/proxmox-api-token` | Password | `prometheus@pve!exporter=<secret>` (PVE metrics) | step 4 below |
+| `Homelab/Prometheus/pbs-api-token` | Password | `prometheus@pbs!exporter:<secret>` (PBS metrics — note `:` separator) | step 5 below |
+
+Workstation SSH pubkey at `Homelab/Tofu/workstation-ssh-pubkey` (Notes
+field) is also consumed via the shared tofu hydrate flow — should
+already be in place from any prior VM role you've deployed.
+
+### Steps
+
 1. **Workstation tooling.** `brew install opentofu just keepassxc ansible`.
    First-time setup in [`docs/opentofu-setup.md`](../../docs/opentofu-setup.md).
 2. **Packer base template.** VM 9100/9101/9102 must exist on the target
