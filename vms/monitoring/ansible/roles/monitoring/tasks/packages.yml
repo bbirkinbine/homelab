@@ -10,6 +10,13 @@
       - python3-pip
       # Pulled by pbs-exporter task to fetch + verify the upstream tarball
       - ca-certificates
+      # POSIX ACL tooling — required by Ansible when `become_user` switches
+      # to an unprivileged user (the pve_exporter pip task runs as
+      # prometheus-pve-exporter). Without `setfacl`, ansible falls back to
+      # macOS-style `chmod +a` on the controller side and bombs out with
+      # "chmod: invalid mode: 'A+user:...'". See:
+      # https://docs.ansible.com/ansible-core/2.20/playbook_guide/playbooks_privilege_escalation.html#risks-of-becoming-an-unprivileged-user
+      - acl
     state: present
     update_cache: true
     cache_valid_time: 3600
