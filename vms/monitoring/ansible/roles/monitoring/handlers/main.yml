@@ -1,0 +1,34 @@
+---
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart prometheus
+  ansible.builtin.systemd:
+    name: prometheus
+    state: restarted
+
+- name: Restart grafana
+  ansible.builtin.systemd:
+    name: grafana-server
+    state: restarted
+
+- name: Restart prometheus-node-exporter
+  ansible.builtin.systemd:
+    name: prometheus-node-exporter
+    state: restarted
+
+# Exporters that read API-token configs the operator hand-pastes in the
+# post-Ansible ceremony. The role intentionally does NOT notify these on
+# first run (templates lay down placeholder configs); the operator
+# restarts them once tokens are pasted. Listed here so subsequent
+# config-only edits (scrape interval, target additions) trigger correctly.
+- name: Restart prometheus-pve-exporter
+  ansible.builtin.systemd:
+    name: prometheus-pve-exporter
+    state: restarted
+
+- name: Restart prometheus-pbs-exporter
+  ansible.builtin.systemd:
+    name: prometheus-pbs-exporter
+    state: restarted

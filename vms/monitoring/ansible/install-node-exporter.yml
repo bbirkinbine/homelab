@@ -1,0 +1,84 @@
+---
+# Install prometheus-node-exporter on the PVE cluster nodes + pbs01.
+#
+# Lives under vms/monitoring/ansible/ (not vms/monitoring/ansible/roles/monitoring/)
+# because the targets are *hosts*, not the monitoring VM itself — the
+# monitoring role handles node_exporter on the monitoring VM via apt.
+#
+# Why a standalone play instead of folding into pve-host / pbs-host
+# Ansible roles: the design doc says "don't write the Ansible until the
+# manual install works end-to-end. The first pass teaches you what the
+# role needs to do; the second pass is the role." This is the first pass.
+# Folding into pve-host + pbs-host happens on a follow-up branch once
+# this has run cleanly.
+#
+# Usage from repo root (the union pattern picks up both groups when
+# both inventories are passed):
+#
+#     ansible-playbook \
+#       -i pve-hosts/ansible/inventory.yml \
+#       -i pbs-hosts/ansible/inventory.yml \
+#       vms/monitoring/ansible/install-node-exporter.yml
+#
+# Idempotent — re-running is a no-op once green.
+
+- name: Install prometheus-node-exporter on PVE + PBS hosts
+  hosts: "pve_hosts:pbs_hosts"
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Install prometheus-node-exporter
+      ansible.builtin.apt:
+        name: prometheus-node-exporter
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Enable and start prometheus-node-exporter
+      ansible.builtin.systemd:
+        name: prometheus-node-exporter
+        enabled: true
+        state: started
+
+    # The PVE + PBS host firewalls (managed by the pve-host /
+    # pbs-host roles) ship a default-deny inbound posture from
+    # outside-cluster sources. node_exporter needs to be reachable
+    # from the monitoring VM, which lives on the same LAN as the
+    # hosts. Adding the rule here keeps this play's blast radius
+    # contained — pve-host's own firewall.yml is the long-term
+    # home, but that fold-in is the follow-up branch.
+    - name: Allow node_exporter through the host firewall (PVE nodes)
+      ansible.builtin.command:
+        cmd: pve-firewall localnet
+      changed_when: false
+      register: pve_firewall_state
+      when: "'pve_hosts' in group_names"
+      check_mode: false
+
+    - name: Open node_exporter port via pve-firewall (PVE nodes)
+      ansible.builtin.lineinfile:
+        path: /etc/pve/firewall/cluster.fw
+        line: "IN ACCEPT -p tcp --dport 9100 # prometheus-node-exporter from monitoring VM"
+        insertafter: "^\\[RULES\\]"
+        create: false
+        state: present
+      when: "'pve_hosts' in group_names"
+      register: pve_firewall_rule
+
+    - name: Reload pve-firewall when the rule changed
+      ansible.builtin.command:
+        cmd: pve-firewall restart
+      when:
+        - "'pve_hosts' in group_names"
+        - pve_firewall_rule is defined
+        - pve_firewall_rule.changed
+      changed_when: true
+
+    - name: Allow node_exporter through ufw (PBS host)
+      community.general.ufw:
+        rule: allow
+        port: "9100"
+        proto: tcp
+        comment: "prometheus-node-exporter from monitoring VM"
+      when: "'pbs_hosts' in group_names"

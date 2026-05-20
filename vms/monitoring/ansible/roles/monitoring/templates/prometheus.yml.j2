@@ -1,0 +1,64 @@
+---
+# Managed by Ansible — vms/monitoring/ansible/roles/monitoring/templates/prometheus.yml.j2
+# Edits here will be overwritten on the next `just ansible monitoring`.
+
+global:
+  scrape_interval: {{ monitoring_prometheus_scrape_interval }}
+  evaluation_interval: {{ monitoring_prometheus_evaluation_interval }}
+  external_labels:
+    cluster: homelab
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: node_exporter
+    static_configs:
+{% for t in monitoring_node_exporter_targets %}
+      - targets: ['{{ t.host }}:9100']
+        labels:
+          instance: '{{ t.instance }}'
+{% endfor %}
+
+  # prometheus-pve-exporter exposes a per-node target via the `target`
+  # query parameter — Prometheus relabels the `__address__` into the
+  # exporter's HTTP endpoint and forwards `target=<node>` for the exporter
+  # to scrape. Pattern documented in the upstream README's "Multi-target
+  # configuration" section.
+  - job_name: pve
+    metrics_path: /pve
+    params:
+      module: [default]
+      cluster: ['1']
+      node: ['1']
+    static_configs:
+      - targets:
+{% for n in monitoring_pve_targets %}
+          - '{{ n }}'
+{% endfor %}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:{{ monitoring_pve_exporter_port }}
+
+  # natrontech pbs-exporter — single-host today; same multi-target shape
+  # if you ever add pbs02.
+  - job_name: pbs
+    metrics_path: /pbs
+    static_configs:
+      - targets:
+          - '{{ monitoring_pbs_target }}'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:{{ monitoring_pbs_exporter_port }}
+
+# Alert rules and Alertmanager wiring land in a follow-up (§5 step 8 of
+# the design doc) — out of scope for the MVP.

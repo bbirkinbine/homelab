@@ -1,0 +1,30 @@
+---
+- name: Install Prometheus, Grafana, node_exporter, and pve-exporter build deps
+  ansible.builtin.apt:
+    name:
+      - prometheus
+      - prometheus-node-exporter
+      - grafana
+      # Build deps for prometheus-pve-exporter's pip install (cffi/cryptography wheels)
+      - python3-venv
+      - python3-pip
+      # Pulled by pbs-exporter task to fetch + verify the upstream tarball
+      - ca-certificates
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable and start prometheus-node-exporter
+  ansible.builtin.systemd:
+    name: prometheus-node-exporter
+    enabled: true
+    state: started
+
+- name: Enable and start grafana-server
+  ansible.builtin.systemd:
+    name: grafana-server
+    enabled: true
+    state: started
+  # The Debian package's default /etc/grafana/grafana.ini is fine for MVP
+  # (binds 0.0.0.0:3000, SQLite state, no auth changes). Provisioning
+  # files in config.yml will be picked up on next restart via handler.

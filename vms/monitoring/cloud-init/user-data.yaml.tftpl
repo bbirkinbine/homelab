@@ -1,0 +1,31 @@
+#cloud-config
+#
+# monitoring VM — first-boot identity ONLY.
+#
+# Rendered by templatefile() in vms/monitoring/terraform/main.tf. Cloud-init
+# placeholders below use Terraform's $${var} interpolation (the doubled `$$`
+# is the escape that hides the literal `$${var}` form from templatefile
+# itself), NOT shell or cloud-init's own variable syntax — cloud-init does
+# not interpret anything in this file; Terraform substitutes everything
+# before upload.
+#
+# Per the 2026-04-25 provisioning-layer model (see vault doc
+# `Provisioning Layers — Packer, Terraform, cloud-init, Ansible.md`),
+# cloud-init's job here is narrow:
+#   1. Set the hostname.
+#   2. Create the admin user with sudo + SSH key.
+#
+# Everything else — package installs, ufw rules, systemd units,
+# service config, idempotent repairs — is Ansible's job. Cloud-init
+# runs ONCE per instance-id; Ansible can re-run idempotently, so
+# anything that might need to change later belongs there.
+
+hostname: ${hostname}
+
+users:
+  - name: ${admin_username}
+    groups: [sudo]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - "${ssh_public_key}"

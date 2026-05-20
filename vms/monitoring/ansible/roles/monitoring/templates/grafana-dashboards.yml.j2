@@ -1,0 +1,27 @@
+---
+# Grafana dashboards provider — watches a directory for *.json files and
+# loads/refreshes them every `updateIntervalSeconds`. Dashboards land in
+# the directory either by:
+#   - operator UI import (Grafana writes JSON to /var/lib/grafana/dashboards/)
+#   - operator drops JSON files there manually (e.g. grafana.com downloads)
+#
+# Three dashboards to import via the UI at first deploy:
+#   - 1860  — Node Exporter Full
+#   - 10347 — Proxmox via Prometheus (verify the modern fork at apply time)
+#   - 19641 — Proxmox Backup Server (natrontech, matches pbs-exporter)
+#
+# See vms/monitoring/README.md "Import dashboards" for the click-path.
+
+apiVersion: 1
+
+providers:
+  - name: homelab
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: {{ monitoring_grafana_dashboards_dir }}
+      foldersFromFilesStructure: true

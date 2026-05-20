@@ -1,0 +1,22 @@
+[Unit]
+Description=Prometheus PBS Exporter (natrontech)
+Documentation=https://github.com/natrontech/pbs-exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ monitoring_pbs_exporter_user }}
+Group={{ monitoring_pbs_exporter_group }}
+EnvironmentFile={{ monitoring_pbs_exporter_env }}
+ExecStart={{ monitoring_pbs_exporter_bin }}
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

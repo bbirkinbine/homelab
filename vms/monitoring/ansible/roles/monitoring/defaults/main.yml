@@ -1,0 +1,81 @@
+---
+# Defaults for the monitoring role.
+#
+# The big-picture design is in [[Homelab Monitoring — Prometheus, Grafana, and
+# the MVP Dashboard]] (vault). Operator-facing flow is in vms/monitoring/README.md.
+
+# --- Scrape targets ---------------------------------------------------------
+# Inventories that prometheus.yml will scrape. Keep them as plain hostnames
+# (not IPs) so DNS / /etc/hosts changes propagate without re-templating. The
+# monitoring VM's own /etc/hosts ships LAN entries for these via the
+# pve-host role's hosts_file.yml output — if you haven't bootstrapped the
+# PVE/PBS hosts yet, override here with IPs.
+
+monitoring_node_exporter_targets:
+  - host: monitoring
+    instance: monitoring
+  - host: pve12t
+    instance: pve12t
+  - host: pve13m
+    instance: pve13m
+  - host: pve13t
+    instance: pve13t
+  - host: pbs01
+    instance: pbs01
+
+# Where pve_exporter pulls from. One target per cluster node so a node-local
+# outage doesn't blind the whole cluster view. The exporter scrapes the API
+# per-target, so a token valid against any node works against all of them
+# (pmxcfs replicates user.cfg cluster-wide).
+monitoring_pve_targets:
+  - pve12t
+  - pve13m
+  - pve13t
+
+# Where pbs_exporter pulls from. Single-host today per project_pbs01_baseline.
+monitoring_pbs_target: pbs01
+
+# --- Prometheus -------------------------------------------------------------
+
+monitoring_prometheus_scrape_interval: 15s
+monitoring_prometheus_evaluation_interval: 15s
+
+# Retention. Default 15d matches Prometheus's own default; bump to 30d/90d
+# after the MVP has run a couple of weeks (design doc §9). Storage cost is
+# small — the 64 GB boot disk covers 90d at this scrape rate comfortably.
+monitoring_prometheus_retention_time: 15d
+
+# --- prometheus-pve-exporter ------------------------------------------------
+# Upstream provides no apt package (PyPI + Docker only — verified against
+# github.com/prometheus-pve/prometheus-pve-exporter). The role installs into
+# a dedicated venv so the system python is left untouched.
+
+monitoring_pve_exporter_user: prometheus-pve-exporter
+monitoring_pve_exporter_group: prometheus-pve-exporter
+monitoring_pve_exporter_venv: /opt/prometheus-pve-exporter
+monitoring_pve_exporter_config: /etc/prometheus/pve.yml
+monitoring_pve_exporter_port: 9221
+# Pin the version. Bump deliberately + re-test; do not auto-track latest.
+monitoring_pve_exporter_version: "3.6.1"
+
+# --- prometheus-pbs-exporter (natrontech/pbs-exporter) ----------------------
+# Verified against github.com/natrontech/pbs-exporter — actively maintained
+# (v0.9.0 Apr 2026); prebuilt linux/amd64 tarball; env-var configuration.
+
+monitoring_pbs_exporter_user: prometheus-pbs-exporter
+monitoring_pbs_exporter_group: prometheus-pbs-exporter
+monitoring_pbs_exporter_bin: /usr/local/bin/pbs-exporter
+monitoring_pbs_exporter_env: /etc/prometheus/pbs-exporter.env
+monitoring_pbs_exporter_port: 10019
+monitoring_pbs_exporter_version: "0.9.0"
+monitoring_pbs_exporter_endpoint: "https://pbs01:8007"
+# verify_ssl=false because PBS uses a self-signed cert by default; flip to
+# true once the PKI engine in OpenBao starts issuing real certs.
+monitoring_pbs_exporter_verify_ssl: false
+
+# --- Grafana ----------------------------------------------------------------
+
+monitoring_grafana_port: 3000
+monitoring_grafana_datasources_dir: /etc/grafana/provisioning/datasources
+monitoring_grafana_dashboards_provisioning_dir: /etc/grafana/provisioning/dashboards
+monitoring_grafana_dashboards_dir: /var/lib/grafana/dashboards

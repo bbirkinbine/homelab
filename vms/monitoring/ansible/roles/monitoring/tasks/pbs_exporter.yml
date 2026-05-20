@@ -1,0 +1,103 @@
+---
+# natrontech/pbs-exporter ships prebuilt linux/amd64 tarballs from GitHub
+# releases — verified 2026-05-19. No apt package, no upstream PyPI
+# package; download + verify checksum + drop a binary in /usr/local/bin
+# + custom systemd unit that reads env vars from a 0600 env file.
+
+- name: Create prometheus-pbs-exporter system group
+  ansible.builtin.group:
+    name: "{{ monitoring_pbs_exporter_group }}"
+    system: true
+    state: present
+
+- name: Create prometheus-pbs-exporter system user
+  ansible.builtin.user:
+    name: "{{ monitoring_pbs_exporter_user }}"
+    group: "{{ monitoring_pbs_exporter_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: /nonexistent
+    create_home: false
+    state: present
+
+- name: Check installed pbs-exporter version
+  ansible.builtin.command: "{{ monitoring_pbs_exporter_bin }} --version"
+  register: monitoring_pbs_exporter_installed
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Download + install pbs-exporter binary when version differs
+  when: >-
+    monitoring_pbs_exporter_installed.rc != 0
+    or monitoring_pbs_exporter_version not in (monitoring_pbs_exporter_installed.stdout | default(''))
+  block:
+    - name: Create temp dir for pbs-exporter download
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: pbs-exporter
+      register: monitoring_pbs_tmp
+
+    - name: Download pbs-exporter release tarball
+      ansible.builtin.get_url:
+        url: "https://github.com/natrontech/pbs-exporter/releases/download/v{{ monitoring_pbs_exporter_version }}/pbs-exporter_v{{ monitoring_pbs_exporter_version }}_linux_amd64.tar.gz"
+        dest: "{{ monitoring_pbs_tmp.path }}/pbs-exporter.tar.gz"
+        mode: "0644"
+
+    - name: Extract pbs-exporter tarball
+      ansible.builtin.unarchive:
+        src: "{{ monitoring_pbs_tmp.path }}/pbs-exporter.tar.gz"
+        dest: "{{ monitoring_pbs_tmp.path }}/"
+        remote_src: true
+
+    - name: Install pbs-exporter binary
+      ansible.builtin.copy:
+        src: "{{ monitoring_pbs_tmp.path }}/pbs-exporter"
+        dest: "{{ monitoring_pbs_exporter_bin }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+      notify: Restart prometheus-pbs-exporter
+
+    - name: Remove temp dir
+      ansible.builtin.file:
+        path: "{{ monitoring_pbs_tmp.path }}"
+        state: absent
+
+- name: Ensure /etc/prometheus exists
+  ansible.builtin.file:
+    path: /etc/prometheus
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Placeholder env file — operator pastes the real PBS token post-Ansible.
+# `force: false` so re-runs do NOT clobber the hand-edited file.
+- name: Render placeholder pbs-exporter env file (skip if real one exists)
+  ansible.builtin.template:
+    src: pbs-exporter.env.j2
+    dest: "{{ monitoring_pbs_exporter_env }}"
+    owner: "{{ monitoring_pbs_exporter_user }}"
+    group: "{{ monitoring_pbs_exporter_group }}"
+    mode: "0600"
+    force: false
+
+- name: Install prometheus-pbs-exporter systemd unit
+  ansible.builtin.template:
+    src: prometheus-pbs-exporter.service.j2
+    dest: /etc/systemd/system/prometheus-pbs-exporter.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+# Same logic as pve_exporter: enable but don't start until the operator
+# pastes the real token. Avoids a noisy systemd-failed state on first
+# deploy.
+- name: Enable prometheus-pbs-exporter (start deferred to operator ceremony)
+  ansible.builtin.systemd:
+    name: prometheus-pbs-exporter
+    enabled: true
+    daemon_reload: true

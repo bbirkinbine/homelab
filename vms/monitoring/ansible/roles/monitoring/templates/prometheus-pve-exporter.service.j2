@@ -1,0 +1,26 @@
+[Unit]
+Description=Prometheus PVE Exporter
+Documentation=https://github.com/prometheus-pve/prometheus-pve-exporter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ monitoring_pve_exporter_user }}
+Group={{ monitoring_pve_exporter_group }}
+ExecStart={{ monitoring_pve_exporter_venv }}/bin/pve_exporter \
+    --config.file={{ monitoring_pve_exporter_config }} \
+    --web.listen-address=":{{ monitoring_pve_exporter_port }}"
+Restart=on-failure
+RestartSec=5
+
+# Hardening — the exporter only reads its config file and talks HTTP/S
+# out; lock everything else down.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths={{ monitoring_pve_exporter_venv }} {{ monitoring_pve_exporter_config }}
+
+[Install]
+WantedBy=multi-user.target
