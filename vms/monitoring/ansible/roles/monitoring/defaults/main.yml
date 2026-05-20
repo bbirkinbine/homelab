@@ -76,6 +76,19 @@ monitoring_pbs_exporter_endpoint: "https://pbs01:8007"
 # PBS_INSECURE (NOT PBS_VERIFY_SSL — easy to confuse).
 monitoring_pbs_exporter_insecure: true
 
+# --- DCGM exporter (NVIDIA GPU metrics) -------------------------------------
+# Optional scrape target. NVIDIA DCGM Exporter runs as an operator-deployed
+# Docker container ON THE llm VM (see vms/llm/README.md "Expose GPU metrics
+# to Prometheus" step) — not part of any role install, because the LLM VM is
+# the only GPU host and DCGM is a single docker run on top of the role's
+# Docker + NVIDIA Container Toolkit prereqs.
+#
+# Set to empty string to skip the scrape job and dashboard provisioning
+# entirely (e.g., before the DCGM container is up, or if the llm VM is
+# down for maintenance). Re-enable + `just ansible monitoring` to start
+# scraping again.
+monitoring_dcgm_target: "llm:9400"
+
 # --- /etc/hosts -------------------------------------------------------------
 # Override for the auto-built /etc/hosts entries. By default the role
 # pulls `pve_lan_ip` / `pbs_lan_ip` from the pve-hosts + pbs-hosts
@@ -119,6 +132,13 @@ monitoring_dashboards:
     url: https://grafana.com/api/dashboards/10347/revisions/5/download
   - file_name: pbs-exporter.json
     url: "https://raw.githubusercontent.com/natrontech/pbs-exporter/v{{ monitoring_pbs_exporter_version }}/grafana-dashboard/pbs-exporter.json"
+  # NVIDIA DCGM Exporter Dashboard (grafana.com 12239, rev 2). Authored by
+  # NVIDIA for Kubernetes DCGM deployments — the GPU-centric panels
+  # (utilization, memory, power, temp, clocks) work fine against the bare-
+  # Docker DCGM deployment on the llm VM, but K8s-label-filtered panels
+  # (namespace/pod) will be empty. Acceptable for a single-host setup.
+  - file_name: "12239.json"
+    url: https://grafana.com/api/dashboards/12239/revisions/2/download
 
 # Files left in monitoring_grafana_dashboards_dir by previous deploys
 # that should be removed (idempotently). Add new entries here when

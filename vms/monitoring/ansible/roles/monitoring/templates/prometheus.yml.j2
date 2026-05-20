@@ -64,5 +64,17 @@ scrape_configs:
         labels:
           instance: '{{ monitoring_pbs_target }}'
 
+{% if monitoring_dcgm_target %}
+  # NVIDIA DCGM Exporter on the llm VM. The container is operator-deployed
+  # (see vms/llm/README.md "Expose GPU metrics to Prometheus") — set
+  # monitoring_dcgm_target to "" in defaults to skip this scrape job until
+  # the container is up, otherwise Prometheus will mark the target as DOWN.
+  - job_name: dcgm-exporter
+    static_configs:
+      - targets: ['{{ monitoring_dcgm_target }}']
+        labels:
+          instance: llm
+{% endif %}
+
 # Alert rules and Alertmanager wiring land in a follow-up (§5 step 8 of
 # the design doc) — out of scope for the MVP.

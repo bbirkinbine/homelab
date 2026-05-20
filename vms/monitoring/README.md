@@ -159,6 +159,7 @@ dir every 30s and loads them — no UI step needed.
 | [grafana.com 1860](https://grafana.com/grafana/dashboards/1860) (Node Exporter Full) | CPU/RAM/disk/network/fans/temps for every `node_exporter` target |
 | [grafana.com 10347](https://grafana.com/grafana/dashboards/10347) (Proxmox via Prometheus) | **Per-VM CPU/RAM/disk-IO** — the dashboard that answers the RAM-trend question |
 | [natrontech/pbs-exporter `grafana-dashboard/pbs-exporter.json`](https://github.com/natrontech/pbs-exporter/tree/main/grafana-dashboard) | Datastore usage, last-backup ages, verify status — pinned to the same tag as the exporter binary |
+| [grafana.com 12239](https://grafana.com/grafana/dashboards/12239) (NVIDIA DCGM Exporter) | GPU util/memory/power/temp/clocks from the llm VM's 3090 — only populated when `monitoring_dcgm_target` is set AND the DCGM container is running on the llm VM (see [`vms/llm/README.md`](../llm/README.md) "Expose GPU metrics to Prometheus"). Authored for K8s deployments; K8s-label-filtered panels (namespace/pod) will be empty on this single-host setup |
 
 To pick up a newer revision, edit `monitoring_dashboards[].url` in
 [ansible/roles/monitoring/defaults/main.yml](ansible/roles/monitoring/defaults/main.yml)
@@ -187,6 +188,7 @@ this order:
    | `node_exporter` | 5 — monitoring, pve12t, pve13m, pve13t, pbs01 |
    | `pve` | 3 — pve12t, pve13m, pve13t (scraped via the pve-exporter multi-target relabel) |
    | `pbs-exporter` | 1 — pbs01 (job name matches natrontech's dashboard convention; see prometheus.yml.j2 header) |
+   | `dcgm-exporter` | 1 — llm (only if `monitoring_dcgm_target` is non-empty AND the DCGM container is up on the llm VM; will report DOWN otherwise) |
    | `prometheus` | 1 — self-scrape on localhost:9090 |
 
 2. **`http://<vm-ip>:3000`** — Grafana loads (initial login `admin` /

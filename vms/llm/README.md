@@ -230,6 +230,39 @@ docker run -d --restart unless-stopped \
 
 Then open `http://<vm-ip>:8080` in a browser.
 
+### 6. (Optional) Expose GPU metrics to Prometheus
+
+Ollama doesn't expose Prometheus metrics yet (upstream issue open), so
+GPU-level metrics from NVIDIA DCGM are the proxy for inference
+visibility — GPU util, framebuffer memory, power, temp, clocks. Runs
+as a Docker container on this VM; the monitoring VM scrapes it on
+`:9400`.
+
+Port 9400 is pre-opened by the role's `llm_ufw_ports`. The container
+needs `--gpus all` which uses the NVIDIA Container Toolkit the role
+already installed:
+
+```bash
+ssh llm-admin@<vm-ip>
+docker run -d --restart unless-stopped --gpus all \
+  --name dcgm-exporter -p 9400:9400 \
+  nvcr.io/nvidia/k8s/dcgm-exporter:3.3.5-3.4.1-ubuntu22.04
+```
+
+Verify metrics are flowing:
+
+```bash
+curl -s http://localhost:9400/metrics | grep -E '^DCGM_FI_DEV_(GPU_UTIL|FB_USED|POWER_USAGE|GPU_TEMP)'
+```
+
+Expect four non-zero gauges. Then the monitoring VM picks it up
+automatically — see [`vms/monitoring/README.md`](../monitoring/README.md)
+"Dashboards" (grafana.com 12239) and "Verify" (the `dcgm-exporter`
+scrape job row). If the monitoring scrape is showing DOWN, set
+`monitoring_dcgm_target` to empty string in
+[ansible/roles/monitoring/defaults/main.yml](../monitoring/ansible/roles/monitoring/defaults/main.yml)
+and re-apply to silence it until DCGM is back up.
+
 ## Operations
 
 ### Find the VM's IP
@@ -339,6 +372,7 @@ override per-deployment in `terraform.tfvars`.
 | 22 | tcp | LAN | SSH (allowed by base template) |
 | 11434 | tcp | LAN | Ollama API |
 | 8080 | tcp | LAN | Open WebUI (only when the container is running) |
+| 9400 | tcp | LAN | DCGM Exporter — Prometheus GPU metrics (only when the container is running) |
 
 UFW gates inside the VM. Perimeter firewall (router) is what gates
 external access — **keep this VM LAN-only unless you front it with

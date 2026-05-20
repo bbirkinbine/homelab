@@ -3,14 +3,16 @@
 # host_vars if a deployment diverges from the canonical setup
 # (eGPU-passthrough Ollama on Ubuntu 24.04).
 
-# UFW ports opened on the VM. 11434 = Ollama API; 8080 = Open WebUI.
-# Opened by this role even though both apps are installed manually
-# post-role (see README "Post-deploy" — Ollama install and Open WebUI
+# UFW ports opened on the VM. 11434 = Ollama API; 8080 = Open WebUI;
+# 9400 = NVIDIA DCGM Exporter (Prometheus GPU metrics). Opened by this
+# role even though all three apps are installed manually post-role (see
+# README "Post-deploy" — Ollama install, Open WebUI container, DCGM
 # container are operator steps). Pre-opening avoids a second ufw round-
 # trip after the manual installs.
 llm_ufw_ports:
   - { port: 11434, comment: "Ollama API" }
   - { port: 8080, comment: "Open WebUI (optional)" }
+  - { port: 9400, comment: "DCGM exporter (Prometheus GPU metrics, optional)" }
 
 # Whether to install nvtop (htop-for-GPUs). Tiny package, useful for
 # `watch -n1 nvtop` when sanity-checking inference throughput. Skip
