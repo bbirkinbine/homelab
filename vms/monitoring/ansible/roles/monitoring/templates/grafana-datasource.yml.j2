@@ -5,6 +5,17 @@
 
 apiVersion: 1
 
+# Run before the datasources block. Removes any pre-existing entry by
+# name so a UID change (or any other config change that Grafana can't
+# reconcile in-place) doesn't fail provisioning with
+# "Datasource provisioning error: data source not found". The
+# datasources block immediately re-creates it from the spec below.
+# Safe because editable: false above keeps operators from making local
+# changes that would be worth preserving.
+deleteDatasources:
+  - name: {{ monitoring_grafana_datasource_name }}
+    orgId: 1
+
 datasources:
   - name: {{ monitoring_grafana_datasource_name }}
     # Pin the UID to a stable lowercase value. Several community dashboards
