@@ -50,9 +50,13 @@
         dest: "{{ monitoring_pbs_tmp.path }}/"
         remote_src: true
 
+    # Upstream's tarball ships the binary as `pbs-exporter-linux-amd64`
+    # (not `pbs-exporter`), alongside CHANGELOG/LICENSE/README at the
+    # tar root. Renaming-on-install gives us the canonical
+    # /usr/local/bin/pbs-exporter path the systemd unit expects.
     - name: Install pbs-exporter binary
       ansible.builtin.copy:
-        src: "{{ monitoring_pbs_tmp.path }}/pbs-exporter"
+        src: "{{ monitoring_pbs_tmp.path }}/pbs-exporter-linux-amd64"
         dest: "{{ monitoring_pbs_exporter_bin }}"
         remote_src: true
         owner: root
