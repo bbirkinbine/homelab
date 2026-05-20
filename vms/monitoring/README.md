@@ -177,11 +177,23 @@ coexist with the role-managed ones.
 The user-facing goal of this role is per-VM RAM trends. Verify in
 this order:
 
-1. **`http://<vm-ip>:9090/targets`** — every target reports `UP`. Expect
-   7 endpoints: 5 `node_exporter` jobs (monitoring + 3 PVE + pbs01),
-   plus pve + pbs jobs.
-2. **`http://<vm-ip>:3000`** — Grafana loads, the Prometheus datasource
-   shows healthy under Connections → Data sources.
+1. **`http://<vm-ip>:9090/classic/targets`** — every target reports `UP`.
+   The Debian/Ubuntu prometheus 2.x package serves the legacy UI under
+   `/classic/`, not at the root (the bare `/targets` route 404s). Expect
+   10 endpoints across 4 scrape jobs:
+
+   | Job | Targets |
+   | --- | --- |
+   | `node_exporter` | 5 — monitoring, pve12t, pve13m, pve13t, pbs01 |
+   | `pve` | 3 — pve12t, pve13m, pve13t (scraped via the pve-exporter multi-target relabel) |
+   | `pbs-exporter` | 1 — pbs01 (job name matches natrontech's dashboard convention; see prometheus.yml.j2 header) |
+   | `prometheus` | 1 — self-scrape on localhost:9090 |
+
+2. **`http://<vm-ip>:3000`** — Grafana loads (initial login `admin` /
+   the bootstrap password set in `Homelab/Prometheus/grafana-admin`).
+   Connections → Data sources shows **Prometheus** healthy with
+   `uid: prometheus` (pinned in the provisioner so community dashboards
+   that hardcode that UID work without rewriting).
 3. **Day 0 — primary-goal smoke test.** In Grafana Explore, query
    `pve_memory_usage_bytes{id=~"qemu/.*"}` — confirm one series per
    running cluster VM with a numeric value below the matching
