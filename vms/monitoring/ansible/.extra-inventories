@@ -1,0 +1,15 @@
+# Extra inventory paths the monitoring play loads alongside its own
+# inventory.yml. Picked up by `just ansible monitoring` (and ansible-check)
+# via the .extra-inventories hook in the Justfile.
+#
+# Why: monitoring scrapes node_exporter on the PVE cluster + pbs01, and
+# pbs-exporter's PBS_ENDPOINT also resolves a hostname. Loading these
+# inventories at play time means the role can read pve_lan_ip /
+# pbs_lan_ip from hostvars to build /etc/hosts entries — IPs stay
+# single-sourced in the host-level inventories, no duplication into
+# vms/monitoring/ansible/inventory.yml.
+#
+# Format: one repo-relative inventory path per line. Lines starting
+# with # are ignored.
+pve-hosts/ansible/inventory.yml
+pbs-hosts/ansible/inventory.yml

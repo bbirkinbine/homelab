@@ -1,0 +1,41 @@
+---
+# The Packer base ships ufw with 22/tcp already allowed (per packer/
+# ubuntu-24-04-base/provision/20-harden.sh). Open the rest of the
+# monitoring stack's listening ports — Grafana, Prometheus, and the
+# three exporters Prometheus scrapes locally are reachable from the
+# LAN so anyone on the workstation network can hit them.
+
+- name: Allow Grafana through ufw
+  community.general.ufw:
+    rule: allow
+    port: "{{ monitoring_grafana_port }}"
+    proto: tcp
+    comment: "Grafana UI"
+
+- name: Allow Prometheus through ufw
+  community.general.ufw:
+    rule: allow
+    port: "9090"
+    proto: tcp
+    comment: "Prometheus UI / API"
+
+- name: Allow node_exporter through ufw
+  community.general.ufw:
+    rule: allow
+    port: "9100"
+    proto: tcp
+    comment: "prometheus-node-exporter (local + remote scrape)"
+
+- name: Allow prometheus-pve-exporter through ufw
+  community.general.ufw:
+    rule: allow
+    port: "{{ monitoring_pve_exporter_port }}"
+    proto: tcp
+    comment: "prometheus-pve-exporter"
+
+- name: Allow prometheus-pbs-exporter through ufw
+  community.general.ufw:
+    rule: allow
+    port: "{{ monitoring_pbs_exporter_port }}"
+    proto: tcp
+    comment: "prometheus-pbs-exporter"

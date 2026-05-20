@@ -1,0 +1,42 @@
+---
+# Tasks for the monitoring role — Prometheus + Grafana + exporters.
+#
+# Runs against the inventory's `monitoring_servers` group, `become: true`.
+# The role assumes a fresh Ubuntu 24.04 VM from packer/ubuntu-24-04-base.
+#
+# Order matters: cloud-init must finish before apt, repos before packages,
+# packages before per-service config. Exporters that take API-token
+# configs lay down PLACEHOLDER values — the operator hand-pastes the
+# real tokens post-Ansible (see vms/monitoring/README.md "Operator
+# ceremony"). This matches the trust-anchor pattern used by openbao
+# (the repo never sees the token in cleartext).
+
+- name: Wait for cloud-init to finish
+  ansible.builtin.command: cloud-init status --wait
+  changed_when: false
+  # Avoids dpkg-lock races against apt-daily / unattended-upgrades that
+  # may still be running on first contact.
+
+- name: Maintain /etc/hosts entries for scrape targets
+  ansible.builtin.import_tasks: hosts_file.yml
+
+- name: Add Grafana apt repository
+  ansible.builtin.import_tasks: repos.yml
+
+- name: Install Prometheus + Grafana + node_exporter packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Install prometheus-pve-exporter (pip in dedicated venv)
+  ansible.builtin.import_tasks: pve_exporter.yml
+
+- name: Install prometheus-pbs-exporter (natrontech tarball)
+  ansible.builtin.import_tasks: pbs_exporter.yml
+
+- name: Render Prometheus + Grafana configuration
+  ansible.builtin.import_tasks: config.yml
+
+- name: Provision community Grafana dashboards
+  ansible.builtin.import_tasks: dashboards.yml
+
+- name: Open Prometheus + Grafana ports through ufw
+  ansible.builtin.import_tasks: firewall.yml

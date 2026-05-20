@@ -63,12 +63,34 @@ inventory role:
     @./scripts/write-inventory.sh {{role}}
 
 # Run the role's site.yml against vms/<role>/ansible/inventory.yml.
+#
+# Opt-in cross-inventory loading: if the role's ansible/ dir contains a
+# .extra-inventories file (one inventory path per line, repo-relative),
+# each path is added as an extra `-i` flag BEFORE the role's own
+# inventory.yml. Lets a role (e.g. monitoring) read hostvars from
+# pve-hosts / pbs-hosts inventories without duplicating IPs.
 ansible role:
-    cd vms/{{role}}/ansible && ansible-playbook -i inventory.yml site.yml
+    cd vms/{{role}}/ansible && \
+      extra_inv="" ; \
+      if [ -f .extra-inventories ]; then \
+        while IFS= read -r p; do \
+          [ -z "$p" ] || [ "${p#\#}" != "$p" ] && continue ; \
+          extra_inv="$extra_inv -i ../../../$p" ; \
+        done < .extra-inventories ; \
+      fi ; \
+      ansible-playbook $extra_inv -i inventory.yml site.yml
 
 # Same, but --check --diff (no changes applied, drift report only).
 ansible-check role:
-    cd vms/{{role}}/ansible && ansible-playbook -i inventory.yml site.yml --check --diff
+    cd vms/{{role}}/ansible && \
+      extra_inv="" ; \
+      if [ -f .extra-inventories ]; then \
+        while IFS= read -r p; do \
+          [ -z "$p" ] || [ "${p#\#}" != "$p" ] && continue ; \
+          extra_inv="$extra_inv -i ../../../$p" ; \
+        done < .extra-inventories ; \
+      fi ; \
+      ansible-playbook $extra_inv -i inventory.yml site.yml --check --diff
 
 # --- pve-hosts (layer 0) -----------------------------------------------------
 #

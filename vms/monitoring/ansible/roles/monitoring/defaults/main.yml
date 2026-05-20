@@ -1,0 +1,129 @@
+---
+# Defaults for the monitoring role.
+#
+# The big-picture design is in [[Homelab Monitoring — Prometheus, Grafana, and
+# the MVP Dashboard]] (vault). Operator-facing flow is in vms/monitoring/README.md.
+
+# --- Scrape targets ---------------------------------------------------------
+# Inventories that prometheus.yml will scrape. Keep them as plain hostnames
+# (not IPs) so DNS / /etc/hosts changes propagate without re-templating. The
+# monitoring VM's own /etc/hosts ships LAN entries for these via the
+# pve-host role's hosts_file.yml output — if you haven't bootstrapped the
+# PVE/PBS hosts yet, override here with IPs.
+
+monitoring_node_exporter_targets:
+  - host: monitoring
+    instance: monitoring
+  - host: pve12t
+    instance: pve12t
+  - host: pve13m
+    instance: pve13m
+  - host: pve13t
+    instance: pve13t
+  - host: pbs01
+    instance: pbs01
+
+# Where pve_exporter pulls from. One target per cluster node so a node-local
+# outage doesn't blind the whole cluster view. The exporter scrapes the API
+# per-target, so a token valid against any node works against all of them
+# (pmxcfs replicates user.cfg cluster-wide).
+monitoring_pve_targets:
+  - pve12t
+  - pve13m
+  - pve13t
+
+# Where pbs_exporter pulls from. Single-host today per project_pbs01_baseline.
+monitoring_pbs_target: pbs01
+
+# --- Prometheus -------------------------------------------------------------
+
+monitoring_prometheus_scrape_interval: 15s
+monitoring_prometheus_evaluation_interval: 15s
+
+# Retention. Default 15d matches Prometheus's own default; bump to 30d/90d
+# after the MVP has run a couple of weeks (design doc §9). Storage cost is
+# small — the 64 GB boot disk covers 90d at this scrape rate comfortably.
+monitoring_prometheus_retention_time: 15d
+
+# --- prometheus-pve-exporter ------------------------------------------------
+# Upstream provides no apt package (PyPI + Docker only — verified against
+# github.com/prometheus-pve/prometheus-pve-exporter). The role installs into
+# a dedicated venv so the system python is left untouched.
+
+monitoring_pve_exporter_user: prometheus-pve-exporter
+monitoring_pve_exporter_group: prometheus-pve-exporter
+monitoring_pve_exporter_venv: /opt/prometheus-pve-exporter
+monitoring_pve_exporter_config: /etc/prometheus/pve.yml
+monitoring_pve_exporter_port: 9221
+# Pin the version. Bump deliberately + re-test; do not auto-track latest.
+# Available versions visible at https://pypi.org/project/prometheus-pve-exporter/#history.
+monitoring_pve_exporter_version: "3.9.0"
+
+# --- prometheus-pbs-exporter (natrontech/pbs-exporter) ----------------------
+# Verified against github.com/natrontech/pbs-exporter — actively maintained
+# (v0.9.0 Apr 2026); prebuilt linux/amd64 tarball; env-var configuration.
+
+monitoring_pbs_exporter_user: prometheus-pbs-exporter
+monitoring_pbs_exporter_group: prometheus-pbs-exporter
+monitoring_pbs_exporter_bin: /usr/local/bin/pbs-exporter
+monitoring_pbs_exporter_env: /etc/prometheus/pbs-exporter.env
+monitoring_pbs_exporter_port: 10019
+monitoring_pbs_exporter_version: "0.9.0"
+monitoring_pbs_exporter_endpoint: "https://pbs01:8007"
+# Skip TLS verification — PBS uses a self-signed cert by default. Flip
+# to false once OpenBao's PKI engine starts issuing real certs and the
+# PBS host is reconfigured to use them. The exporter env var is
+# PBS_INSECURE (NOT PBS_VERIFY_SSL — easy to confuse).
+monitoring_pbs_exporter_insecure: true
+
+# --- /etc/hosts -------------------------------------------------------------
+# Override for the auto-built /etc/hosts entries. By default the role
+# pulls `pve_lan_ip` / `pbs_lan_ip` from the pve-hosts + pbs-hosts
+# inventories (loaded via vms/monitoring/ansible/.extra-inventories).
+# Set this list in inventory.yml only if you're deploying without those
+# sidecar inventories OR you want to override the auto-built entries.
+#
+# Shape (used both here and as the override):
+#   monitoring_lan_hosts:
+#     - { name: pve12t, ip: 192.0.2.227 }
+#     - { name: pbs01,  ip: 192.0.2.250 }
+monitoring_lan_hosts: []
+
+# --- Grafana ----------------------------------------------------------------
+
+monitoring_grafana_port: 3000
+monitoring_grafana_datasource_name: Prometheus
+# Lowercase. Pinned so community dashboards that hardcode
+# `"uid": "prometheus"` (natrontech/pbs-exporter is one — they hardcode
+# the UID rather than using the ${DS_PROMETHEUS} input convention) find
+# the datasource without manual rewriting.
+monitoring_grafana_datasource_uid: prometheus
+monitoring_grafana_datasources_dir: /etc/grafana/provisioning/datasources
+monitoring_grafana_dashboards_provisioning_dir: /etc/grafana/provisioning/dashboards
+monitoring_grafana_dashboards_dir: /var/lib/grafana/dashboards
+
+# Community dashboards provisioned into monitoring_grafana_dashboards_dir.
+# Grafana's file provider re-scans the dir every 30s (config.yml) and
+# auto-loads new/updated JSON. The file_name is what lands on disk;
+# Grafana's internal dashboard title comes from the JSON itself.
+#
+# Pin grafana.com revisions deliberately — look up the latest with
+#   curl -sf https://grafana.com/api/dashboards/<id> | jq .revision
+# and bump + re-test panels when you want a newer version. The
+# pbs-exporter dashboard is pinned to the same git tag as the
+# matching exporter binary so it stays in lockstep on schema changes.
+monitoring_dashboards:
+  - file_name: "1860.json"
+    url: https://grafana.com/api/dashboards/1860/revisions/45/download
+  - file_name: "10347.json"
+    url: https://grafana.com/api/dashboards/10347/revisions/5/download
+  - file_name: pbs-exporter.json
+    url: "https://raw.githubusercontent.com/natrontech/pbs-exporter/v{{ monitoring_pbs_exporter_version }}/grafana-dashboard/pbs-exporter.json"
+
+# Files left in monitoring_grafana_dashboards_dir by previous deploys
+# that should be removed (idempotently). Add new entries here when
+# retiring a dashboard; the role unlinks them on next apply.
+monitoring_dashboards_to_remove:
+  # Was originally pinned for the PBS slot before upstream verification —
+  # turned out to be a Ceph "OSS statistics" dashboard, no PBS metrics.
+  - 19641.json

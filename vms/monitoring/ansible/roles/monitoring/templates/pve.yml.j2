@@ -1,0 +1,19 @@
+# /etc/prometheus/pve.yml — auth config for prometheus-pve-exporter.
+#
+# PLACEHOLDER values below. The operator pastes the real token + secret
+# after Ansible finishes, then:
+#
+#     sudo systemctl start prometheus-pve-exporter
+#
+# Schema documented at github.com/prometheus-pve/prometheus-pve-exporter
+# under "Authentication". Use the *_NAME / *_VALUE token form, not
+# username/password.
+#
+# Re-running `just ansible monitoring` will NOT clobber this file once
+# the placeholder is replaced — the template task uses `force: false`.
+
+default:
+  user: prometheus@pve
+  token_name: exporter
+  token_value: REPLACE_ME_WITH_TOKEN_SECRET_FROM_KEEPASSXC
+  verify_ssl: false  # Proxmox API is self-signed; flip when OpenBao PKI lands.

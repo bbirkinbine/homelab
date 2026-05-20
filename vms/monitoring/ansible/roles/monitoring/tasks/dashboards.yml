@@ -1,0 +1,73 @@
+---
+# Provision community Grafana dashboards into the file-watched dir.
+# Grafana's dashboards provider (configured by config.yml) re-scans
+# the dir every 30s and auto-loads new/updated JSON — no grafana-server
+# restart required.
+#
+# Why we fetch + write rather than committing JSONs to the repo:
+#   * Dashboards run to thousands of lines apiece; committing them
+#     into the repo would dwarf the role's actual logic.
+#   * The pin + substitution flow keeps the repo focused on which
+#     upstream dashboards we use, not on their bodies.
+#
+# Why uri + copy + replace, rather than get_url:
+#   * Each dashboard's JSON declares an "input" templated as
+#     ${DS_PROMETHEUS} — Grafana's UI-import flow substitutes this
+#     at import time. The file provider does NOT do that substitution,
+#     so dropping the file as-downloaded leaves panels referencing a
+#     literal "${DS_PROMETHEUS}" datasource that doesn't exist.
+#   * We replace ${DS_PROMETHEUS} with the actual provisioned
+#     datasource name (monitoring_grafana_datasource_name) before
+#     writing. copy's idempotency check makes re-runs a no-op when
+#     the upstream is unchanged.
+
+- name: Remove stale community dashboards left by prior deploys
+  ansible.builtin.file:
+    path: "{{ monitoring_grafana_dashboards_dir }}/{{ item }}"
+    state: absent
+  loop: "{{ monitoring_dashboards_to_remove }}"
+
+- name: Download community dashboard JSON
+  ansible.builtin.uri:
+    url: "{{ item.url }}"
+    return_content: true
+    status_code: 200
+  loop: "{{ monitoring_dashboards }}"
+  loop_control:
+    label: "{{ item.file_name }}"
+  register: monitoring_dashboard_downloads
+  check_mode: false
+  changed_when: false # idempotency tracked on the copy task below
+
+- name: Install dashboard JSON (rewriting datasource placeholders to the pinned UID)
+  ansible.builtin.copy:
+    # Grafana.com dashboards declare datasource references as
+    # `{"type": "prometheus", "uid": "${DS_PROMETHEUS}"}` — that placeholder
+    # is the dashboard input slot the import-flow substitutes. The file
+    # provider does NOT run that substitution, so we do it here.
+    #
+    # Substituting to the pinned datasource UID (lowercase `prometheus`)
+    # instead of the name makes the rewritten dashboards work AND
+    # natrontech-style dashboards that hardcode `"uid": "prometheus"`
+    # work, all against the same provisioned datasource.
+    #
+    # Both case variants appear in the wild: dashboard 1860 (Node Exporter
+    # Full) uses lowercase `${ds_prometheus}`; 10347 uses uppercase
+    # `${DS_PROMETHEUS}`. We rewrite both.
+    content: >-
+      {{
+        dash.content
+        | replace('${DS_PROMETHEUS}', monitoring_grafana_datasource_uid)
+        | replace('${ds_prometheus}', monitoring_grafana_datasource_uid)
+      }}
+    dest: "{{ monitoring_grafana_dashboards_dir }}/{{ dash.item.file_name }}"
+    owner: grafana
+    group: grafana
+    mode: "0644"
+  loop: "{{ monitoring_dashboard_downloads.results }}"
+  loop_control:
+    loop_var: dash
+    label: "{{ dash.item.file_name }}"
+  # No notify — the provisioner picks up changes on its own 30s scan.
+  # Restarting grafana-server here would clear active operator
+  # sessions for no benefit.

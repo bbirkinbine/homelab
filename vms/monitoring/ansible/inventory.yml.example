@@ -1,0 +1,49 @@
+---
+# vms/monitoring/ansible/inventory.yml.example
+#
+# This file documents the inventory shape. The actual inventory.yml is
+# gitignored and is populated automatically by:
+#
+#   just inventory monitoring
+#
+# That recipe runs scripts/write-inventory.sh, which reads
+# `tofu output ansible_inventory_hint` and writes the result here as
+# vms/monitoring/ansible/inventory.yml. It refuses to write if the
+# qemu-guest-agent hasn't reported the VM's IP yet — wait ~30s after
+# `just apply monitoring` and retry.
+#
+# IP stability: pin a DHCP reservation per service VM on the router
+# (by MAC, visible via `tofu output mac`). Without that, the lease can
+# rotate and the inventory.yml's `ansible_host` goes stale; you'd have
+# to re-run `just inventory monitoring` after each rotation.
+#
+# Group `monitoring_servers` (plural) vs the host `monitoring` (singular):
+# Ansible 2.16+ warns when a group and a host share the same name;
+# pluralizing the group sidesteps that.
+
+monitoring_servers:
+  hosts:
+    monitoring:
+      # Populated by `just inventory monitoring` from `tofu output ipv4`.
+      # If the agent hasn't reported yet (output is null), look up the
+      # lease on your router by MAC (from `tofu output mac`) or
+      # hostname (`monitoring`).
+      ansible_host: 10.0.0.X
+
+      # First-boot user created by cloud-init (matches the value of
+      # var.admin_username in terraform.tfvars).
+      ansible_user: monitoring-admin
+
+      # The Packer base image ships /usr/bin/python3 (cloud-init
+      # depends on it). Setting this explicitly skips Ansible's
+      # interpreter discovery and silences the matching warning.
+      ansible_python_interpreter: /usr/bin/python3
+
+      # NOTE on /etc/hosts: scrape-target IPs are pulled automatically
+      # from the pve-hosts + pbs-hosts inventories (loaded by the
+      # sidecar `vms/monitoring/ansible/.extra-inventories`). If you're
+      # running this role without those inventories, set the override
+      # below instead — see defaults/main.yml for the shape.
+      # monitoring_lan_hosts:
+      #   - { name: pve12t, ip: 192.0.2.227 }
+      #   - { name: pbs01,  ip: 192.0.2.250 }

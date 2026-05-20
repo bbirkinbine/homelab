@@ -1,0 +1,33 @@
+---
+# Managed by Ansible — auto-provisioned at grafana-server startup.
+# Grafana docs: docs.grafana.org → Administration → Provisioning →
+# Data sources.
+
+apiVersion: 1
+
+# Run before the datasources block. Removes any pre-existing entry by
+# name so a UID change (or any other config change that Grafana can't
+# reconcile in-place) doesn't fail provisioning with
+# "Datasource provisioning error: data source not found". The
+# datasources block immediately re-creates it from the spec below.
+# Safe because editable: false above keeps operators from making local
+# changes that would be worth preserving.
+deleteDatasources:
+  - name: {{ monitoring_grafana_datasource_name }}
+    orgId: 1
+
+datasources:
+  - name: {{ monitoring_grafana_datasource_name }}
+    # Pin the UID to a stable lowercase value. Several community dashboards
+    # (notably natrontech/pbs-exporter) hardcode `"uid": "prometheus"` in
+    # their queries rather than using ${DS_PROMETHEUS}, so panels show "No
+    # data" against a Grafana-assigned random UID. Pinning here lets those
+    # dashboards work without per-dashboard rewriting.
+    uid: {{ monitoring_grafana_datasource_uid }}
+    type: prometheus
+    access: proxy
+    url: http://localhost:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: {{ monitoring_prometheus_scrape_interval }}

@@ -1,0 +1,82 @@
+---
+# prometheus-pve-exporter is PyPI-only upstream (no apt package — verified
+# 2026-05-19 against github.com/prometheus-pve/prometheus-pve-exporter).
+# Install into a dedicated venv owned by a dedicated service user so the
+# system Python tree stays untouched and the auth file is mode 0600
+# under that user.
+
+- name: Create prometheus-pve-exporter system group
+  ansible.builtin.group:
+    name: "{{ monitoring_pve_exporter_group }}"
+    system: true
+    state: present
+
+- name: Create prometheus-pve-exporter system user
+  ansible.builtin.user:
+    name: "{{ monitoring_pve_exporter_user }}"
+    group: "{{ monitoring_pve_exporter_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ monitoring_pve_exporter_venv }}"
+    create_home: false
+    state: present
+
+- name: Create venv directory
+  ansible.builtin.file:
+    path: "{{ monitoring_pve_exporter_venv }}"
+    state: directory
+    owner: "{{ monitoring_pve_exporter_user }}"
+    group: "{{ monitoring_pve_exporter_group }}"
+    mode: "0755"
+
+- name: Install prometheus-pve-exporter into venv
+  ansible.builtin.pip:
+    name: "prometheus-pve-exporter=={{ monitoring_pve_exporter_version }}"
+    virtualenv: "{{ monitoring_pve_exporter_venv }}"
+    virtualenv_command: python3 -m venv
+    state: present
+  become_user: "{{ monitoring_pve_exporter_user }}"
+
+- name: Ensure /etc/prometheus exists
+  ansible.builtin.file:
+    path: /etc/prometheus
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Placeholder pve.yml — operator pastes the real token post-Ansible per
+# vms/monitoring/README.md "Operator ceremony". `force: false` so a
+# subsequent re-run of the role does NOT clobber the hand-edited file.
+- name: Render placeholder /etc/prometheus/pve.yml (skip if real one exists)
+  ansible.builtin.template:
+    src: pve.yml.j2
+    dest: "{{ monitoring_pve_exporter_config }}"
+    owner: "{{ monitoring_pve_exporter_user }}"
+    group: "{{ monitoring_pve_exporter_group }}"
+    mode: "0600"
+    force: false
+
+- name: Install prometheus-pve-exporter systemd unit
+  ansible.builtin.template:
+    src: prometheus-pve-exporter.service.j2
+    dest: /etc/systemd/system/prometheus-pve-exporter.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd
+
+# Enable but do NOT start on first deploy — the placeholder pve.yml will
+# fail auth. Operator starts the service after the ceremony. On
+# subsequent runs (where pve.yml already has a real token), the handler
+# above restarts it on systemd-unit changes; no-op if it's already up.
+#
+# Skip in --check on the first deploy: the template task above doesn't
+# actually write the unit file in check mode, so systemd has nothing
+# to find. Real runs hit this normally.
+- name: Enable prometheus-pve-exporter (start deferred to operator ceremony)
+  ansible.builtin.systemd:
+    name: prometheus-pve-exporter
+    enabled: true
+    daemon_reload: true
+  when: not ansible_check_mode

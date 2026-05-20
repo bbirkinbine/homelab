@@ -1,0 +1,42 @@
+---
+# Prometheus + Grafana config. Prometheus' scrape config knows all our
+# targets; Grafana gets a provisioned Prometheus datasource and a
+# dashboards provisioning hook that points at a directory the operator
+# drops dashboard JSON files into (community dashboards via UI import
+# stay in that same directory after Grafana's first save).
+
+- name: Render /etc/prometheus/prometheus.yml
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: /etc/prometheus/prometheus.yml
+    owner: root
+    group: prometheus
+    mode: "0640"
+    validate: "promtool check config %s"
+  notify: Restart prometheus
+
+- name: Provision Grafana Prometheus datasource
+  ansible.builtin.template:
+    src: grafana-datasource.yml.j2
+    dest: "{{ monitoring_grafana_datasources_dir }}/prometheus.yml"
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: Restart grafana
+
+- name: Create Grafana dashboards directory
+  ansible.builtin.file:
+    path: "{{ monitoring_grafana_dashboards_dir }}"
+    state: directory
+    owner: grafana
+    group: grafana
+    mode: "0755"
+
+- name: Provision Grafana dashboards provider (watches dashboards dir)
+  ansible.builtin.template:
+    src: grafana-dashboards.yml.j2
+    dest: "{{ monitoring_grafana_dashboards_provisioning_dir }}/homelab.yml"
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: Restart grafana
