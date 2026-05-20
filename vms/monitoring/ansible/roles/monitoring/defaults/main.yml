@@ -56,7 +56,8 @@ monitoring_pve_exporter_venv: /opt/prometheus-pve-exporter
 monitoring_pve_exporter_config: /etc/prometheus/pve.yml
 monitoring_pve_exporter_port: 9221
 # Pin the version. Bump deliberately + re-test; do not auto-track latest.
-monitoring_pve_exporter_version: "3.6.1"
+# Available versions visible at https://pypi.org/project/prometheus-pve-exporter/#history.
+monitoring_pve_exporter_version: "3.9.0"
 
 # --- prometheus-pbs-exporter (natrontech/pbs-exporter) ----------------------
 # Verified against github.com/natrontech/pbs-exporter — actively maintained

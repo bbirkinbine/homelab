@@ -70,8 +70,13 @@
 # fail auth. Operator starts the service after the ceremony. On
 # subsequent runs (where pve.yml already has a real token), the handler
 # above restarts it on systemd-unit changes; no-op if it's already up.
+#
+# Skip in --check on the first deploy: the template task above doesn't
+# actually write the unit file in check mode, so systemd has nothing
+# to find. Real runs hit this normally.
 - name: Enable prometheus-pve-exporter (start deferred to operator ceremony)
   ansible.builtin.systemd:
     name: prometheus-pve-exporter
     enabled: true
     daemon_reload: true
+  when: not ansible_check_mode

@@ -95,9 +95,11 @@
 
 # Same logic as pve_exporter: enable but don't start until the operator
 # pastes the real token. Avoids a noisy systemd-failed state on first
-# deploy.
+# deploy. --check skipped because the unit file doesn't land on disk
+# under --check, so systemd can't find it.
 - name: Enable prometheus-pbs-exporter (start deferred to operator ceremony)
   ansible.builtin.systemd:
     name: prometheus-pbs-exporter
     enabled: true
     daemon_reload: true
+  when: not ansible_check_mode
