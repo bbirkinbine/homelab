@@ -74,6 +74,24 @@ monitoring_pbs_exporter_endpoint: "https://pbs01:8007"
 # true once the PKI engine in OpenBao starts issuing real certs.
 monitoring_pbs_exporter_verify_ssl: false
 
+# --- /etc/hosts -------------------------------------------------------------
+# LAN host→IP mapping for the monitoring VM's /etc/hosts. Required when
+# the router (or whatever's doing DNS on your LAN) doesn't resolve the
+# cluster + PBS hostnames — most homelab routers serve DHCP reservations
+# but not corresponding DNS records, so plan on populating this in
+# inventory.yml unless you've explicitly set up Pi-hole / Unbound / etc.
+#
+# Leave empty to skip /etc/hosts management entirely (role assumes
+# you've got DNS / mDNS covering the same set of names).
+#
+# Example shape (committed inventory.yml.example carries this):
+#   monitoring_lan_hosts:
+#     - { name: pve12t, ip: 192.0.2.227 }
+#     - { name: pve13m, ip: 192.0.2.163 }
+#     - { name: pve13t, ip: 192.0.2.240 }
+#     - { name: pbs01,  ip: 192.0.2.250 }
+monitoring_lan_hosts: []
+
 # --- Grafana ----------------------------------------------------------------
 
 monitoring_grafana_port: 3000

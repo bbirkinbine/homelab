@@ -38,3 +38,15 @@ monitoring_servers:
       # depends on it). Setting this explicitly skips Ansible's
       # interpreter discovery and silences the matching warning.
       ansible_python_interpreter: /usr/bin/python3
+
+      # LAN host→IP mapping for /etc/hosts on the monitoring VM.
+      # Skip this block (or set to []) if your LAN DNS resolves the
+      # 4 scrape-target hostnames (pve12t / pve13m / pve13t / pbs01).
+      # Most homelab routers don't — populate with the IPs your DHCP
+      # reservations pin (visible in `qm config` / the PBS UI / your
+      # router's reservation list).
+      monitoring_lan_hosts:
+        - { name: pve12t, ip: 192.0.2.227 }   # RFC 5737 docs range — replace
+        - { name: pve13m, ip: 192.0.2.163 }   # RFC 5737 docs range — replace
+        - { name: pve13t, ip: 192.0.2.240 }   # RFC 5737 docs range — replace
+        - { name: pbs01,  ip: 192.0.2.250 }   # RFC 5737 docs range — replace

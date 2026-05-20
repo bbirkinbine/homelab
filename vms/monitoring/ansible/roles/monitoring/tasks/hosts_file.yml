@@ -1,0 +1,18 @@
+---
+# Maintain /etc/hosts entries for scrape targets the monitoring VM
+# needs to reach by name (prometheus-node-exporter on each PVE node +
+# pbs01; pbs-exporter's PBS_ENDPOINT also uses the hostname). Skipped
+# entirely when monitoring_lan_hosts is empty — assumes LAN DNS is
+# covering the same set of names. See defaults/main.yml for the
+# variable shape and rationale.
+
+- name: Maintain /etc/hosts entries for scrape targets
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    block: |
+      {% for h in monitoring_lan_hosts %}
+      {{ h.ip }}   {{ h.name }}
+      {% endfor %}
+    marker: "# {mark} ANSIBLE MANAGED — monitoring role scrape targets"
+    create: false
+  when: monitoring_lan_hosts | length > 0

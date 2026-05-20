@@ -17,6 +17,9 @@
   # Avoids dpkg-lock races against apt-daily / unattended-upgrades that
   # may still be running on first contact.
 
+- name: Maintain /etc/hosts entries for scrape targets
+  ansible.builtin.import_tasks: hosts_file.yml
+
 - name: Add Grafana apt repository
   ansible.builtin.import_tasks: repos.yml
 
