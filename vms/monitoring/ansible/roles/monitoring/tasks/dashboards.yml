@@ -75,3 +75,20 @@
   # No notify — the provisioner picks up changes on its own 30s scan.
   # Restarting grafana-server here would clear active operator
   # sessions for no benefit.
+
+# Lab-local dashboards live as Jinja2-templated JSON under templates/dashboards/
+# rather than as URLs in monitoring_dashboards. The template render swaps the
+# datasource UID inline, so the file provider sees a fully-resolved dashboard
+# — same end state as the regex_replace flow used for community dashboards.
+- name: Install lab-local Grafana dashboards
+  ansible.builtin.template:
+    src: "dashboards/{{ item }}"
+    dest: "{{ monitoring_grafana_dashboards_dir }}/{{ item | regex_replace('\\.j2$', '') }}"
+    owner: grafana
+    group: grafana
+    mode: "0644"
+  loop:
+    # UPS Power & Energy — derives watts as nut_load × nominal capacity since
+    # CyberPower BR-series UPSes don't expose ups.realpower directly. Pairs
+    # with the nut_real_power_derived_watts recording rule.
+    - ups-power.json.j2

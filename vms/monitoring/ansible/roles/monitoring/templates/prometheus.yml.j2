@@ -8,6 +8,12 @@ global:
   external_labels:
     cluster: homelab
 
+# Recording rules — see prometheus-rules.yml.j2. Currently used to
+# materialize `nut_real_power_derived_watts` (load% × nominal capacity)
+# since CyberPower BR-series UPSes don't expose ups.realpower directly.
+rule_files:
+  - /etc/prometheus/rules/homelab.yml
+
 scrape_configs:
   - job_name: prometheus
     static_configs:

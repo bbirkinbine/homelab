@@ -1,0 +1,36 @@
+---
+# Managed by Ansible — vms/monitoring/ansible/roles/monitoring/templates/prometheus-rules.yml.j2
+# Edits here will be overwritten on the next `just ansible monitoring`.
+#
+# Prometheus recording rules. Recording rules evaluate a PromQL expression
+# on `evaluation_interval` (15s here) and store the result as a new time
+# series, so dashboards / alert rules don't have to re-evaluate the
+# expression on every query. Useful when an expression appears in many
+# places, or when it's needed for long-range queries where re-computing
+# at panel time is expensive.
+
+groups: {% if not monitoring_nut_target %}[]{% endif %}
+
+{% if monitoring_nut_target %}
+  # CyberPower BR-series UPSes (BR1000MS, BR1500MS2, ...) do NOT expose
+  # `ups.realpower` — the usbhid-ups driver surfaces only `ups.load`
+  # (fraction, 0-1) and `ups.realpower.nominal` (the unit's rated wattage).
+  # Higher-tier CyberPower (CP/PR series) and APC Smart-UPS expose
+  # realpower directly; entry-level BR units don't. We derive watts by
+  # multiplying load against nominal capacity, which the unit DOES
+  # report.
+  #
+  # Referencing `nut_real_power_nominal_watts` rather than hardcoding the
+  # wattage means a UPS swap (e.g. BR1000MS → BR1500MS2, 600W → 900W) is
+  # picked up automatically on the first scrape after the new unit
+  # comes online — no role change required.
+  #
+  # `nut_load` is fractional (0-1) per HON95's exporter, so the product
+  # is watts directly. Confirmed against `nut_battery_charge` in dashboard
+  # 14371 which multiplies by 100 for the percent display.
+  - name: nut_derived
+    interval: 15s
+    rules:
+      - record: nut_real_power_derived_watts
+        expr: nut_load * nut_real_power_nominal_watts
+{% endif %}

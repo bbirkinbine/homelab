@@ -1,0 +1,271 @@
+{
+  "title": "UPS Power & Energy (homelab)",
+  "uid": "homelab-ups-power",
+  "tags": ["homelab", "ups", "power"],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "timezone": "",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "liveNow": false,
+  "weekStart": "",
+  "style": "dark",
+  "templating": {
+    "list": [
+      {
+        "name": "ups",
+        "label": "UPS",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+        "definition": "label_values(nut_load, ups)",
+        "query": { "query": "label_values(nut_load, ups)", "refId": "StandardVariableQuery" },
+        "regex": "",
+        "multi": false,
+        "includeAll": false,
+        "current": { "selected": false, "text": "", "value": "" },
+        "refresh": 1,
+        "sort": 1,
+        "options": [],
+        "hide": 0,
+        "skipUrlSync": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Power consumed (now)",
+      "description": "Derived as nut_load × nut_real_power_nominal_watts — BR-series UPSes don't expose ups.realpower directly. Recording rule nut_real_power_derived_watts.",
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "nut_real_power_derived_watts{ups=~\"$ups\"}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt",
+          "decimals": 0,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 400 },
+              { "color": "red", "value": 700 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "UPS load",
+      "description": "Fraction of the UPS's rated capacity in use. Goes red past 80% — sustained operation that close to the nominal is a sign the unit is undersized.",
+      "gridPos": { "x": 8, "y": 0, "w": 8, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "nut_load{ups=~\"$ups\"} * 100",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 0,
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 60 },
+              { "color": "red", "value": 80 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "UPS rated capacity",
+      "description": "The UPS's nominal real-power rating (ups.realpower.nominal). Useful as a swap indicator — when the BR1000MS is replaced with the BR1500MS2, this should jump 600W → 900W on the first scrape after the new unit is online.",
+      "gridPos": { "x": 16, "y": 0, "w": 8, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "nut_real_power_nominal_watts{ups=~\"$ups\"}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "blue" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Energy consumed (last 24h)",
+      "description": "Approximated as the 24h time-average of derived watts × 24 / 1000 → kWh. Trapezoidal-rule approximation, not a true integration — accuracy is ~scrape_interval × signal volatility. For relatively steady draw (idle homelab) the figure is within a couple percent.",
+      "gridPos": { "x": 0, "y": 5, "w": 12, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "avg_over_time(nut_real_power_derived_watts{ups=~\"$ups\"}[24h]) * 24 / 1000",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth",
+          "decimals": 2,
+          "color": { "mode": "fixed", "fixedColor": "purple" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Energy consumed (last 7d, avg / day)",
+      "description": "Average daily kWh across the trailing 7 days. Only meaningful once Prometheus retention exceeds 7 days (default 15d, configurable via monitoring_prometheus_retention_time).",
+      "gridPos": { "x": 12, "y": 5, "w": 12, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "avg_over_time(nut_real_power_derived_watts{ups=~\"$ups\"}[7d]) * 24 / 1000",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "kwatth",
+          "decimals": 2,
+          "color": { "mode": "fixed", "fixedColor": "purple" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Power over time",
+      "description": "Derived watts (nut_real_power_derived_watts) over the selected range. Spikes correlate with workload — sustained GPU inference, video transcode, large rsyncs. The flat baseline approximates idle homelab draw.",
+      "gridPos": { "x": 0, "y": 10, "w": 24, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "nut_real_power_derived_watts{ups=~\"$ups\"}",
+          "refId": "A",
+          "legendFormat": "{% raw %}{{ups}}{% endraw %}",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" }
+        },
+        {
+          "expr": "nut_real_power_nominal_watts{ups=~\"$ups\"}",
+          "refId": "B",
+          "legendFormat": "nominal ({% raw %}{{ups}}{% endraw %})",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt",
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "axisPlacement": "auto"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "nominal.*" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "custom.fillOpacity", "value": 0 },
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    }
+  ]
+}

@@ -164,6 +164,7 @@ dir every 30s and loads them — no UI step needed.
 | [natrontech/pbs-exporter `grafana-dashboard/pbs-exporter.json`](https://github.com/natrontech/pbs-exporter/tree/main/grafana-dashboard) | Datastore usage, last-backup ages, verify status — pinned to the same tag as the exporter binary |
 | [grafana.com 12239](https://grafana.com/grafana/dashboards/12239) (NVIDIA DCGM Exporter) | GPU util/memory/power/temp/clocks from the llm VM's 3090 — only populated when `monitoring_dcgm_target` is set AND the DCGM container is running on the llm VM (see [`vms/llm/README.md`](../llm/README.md) "Expose GPU metrics to Prometheus"). Authored for K8s deployments; K8s-label-filtered panels (namespace/pod) will be empty on this single-host setup |
 | [grafana.com 14371](https://grafana.com/grafana/dashboards/14371) (Prometheus NUT Exporter, HON95) | UPS metrics — battery charge/runtime, input voltage, load %, status (OL/OB), temp. Populated when `monitoring_nut_target` is set AND the NUT server on the Asustor NAS accepts remote reads (ADM → Services → UPS → enable network UPS). Multi-target via `?target=` (relabel pattern); the `ups` dashboard dropdown auto-populates from whatever NUT reports |
+| `homelab-ups-power` (lab-local — `templates/dashboards/ups-power.json.j2`) | UPS power & energy derived from `nut_load × nut_real_power_nominal_watts` (CyberPower BR-series doesn't expose `ups.realpower` directly — HON95 emits the metric but the underlying driver doesn't surface the variable on BR1000MS / BR1500MS2). Stat panels for current watts / UPS load / rated capacity / 24h kWh / 7d avg kWh, plus a time-series with the nominal-capacity ceiling overlaid. Pairs with the `nut_real_power_derived_watts` recording rule (see [Recording rules](#recording-rules)). |
 
 To pick up a newer revision, edit `monitoring_dashboards[].url` in
 [ansible/roles/monitoring/defaults/main.yml](ansible/roles/monitoring/defaults/main.yml)
@@ -176,6 +177,27 @@ also tracks its dashboard.
 Operators can ALSO import additional dashboards via the UI — Grafana
 writes those to the same dir (`allowUiUpdates: true`) and they
 coexist with the role-managed ones.
+
+## Recording rules
+
+Prometheus recording rules live in `/etc/prometheus/rules/homelab.yml`
+(rendered from
+[`templates/prometheus-rules.yml.j2`](ansible/roles/monitoring/templates/prometheus-rules.yml.j2)).
+Today the file declares one rule:
+
+| Recorded metric | Expression | Why |
+| --- | --- | --- |
+| `nut_real_power_derived_watts` | `nut_load * nut_real_power_nominal_watts` | CyberPower BR-series UPSes (BR1000MS, BR1500MS2, …) don't expose `ups.realpower` over USB — the `usbhid-ups` driver only surfaces `ups.load` (fraction) and `ups.realpower.nominal` (rated W). HON95 emits both as Prometheus metrics; multiplying gives watts. Materializing it as a recording rule means dashboards / future alerts can reference a single primitive and queries don't recompute the multiply at panel time. |
+
+The expression references `nut_real_power_nominal_watts`, not a hardcoded
+wattage — swapping the UPS (e.g. BR1000MS → BR1500MS2, 600W → 900W) is
+picked up automatically on the first scrape after the new unit comes
+online. No role re-deploy needed.
+
+To add a new rule, edit `prometheus-rules.yml.j2` and re-run
+`just ansible monitoring` — `promtool check rules` runs as a validate
+step on the template task, so a syntactically bad rule won't land on
+disk.
 
 ## Verify (end-to-end)
 
@@ -223,6 +245,14 @@ this order:
    role up for in the first place — see the design-doc rationale in
    `Homelab Inventory.md` § UPS for what the BR1000MS's 600W ceiling
    means against the lab's worst-case draw.
+6. **(If nut-exporter is up)** Confirm the derived-watts recording rule
+   is materializing: in Grafana Explore, query
+   `nut_real_power_derived_watts{ups="asustor"}` — single series, in
+   watts, equal to `nut_load * nut_real_power_nominal_watts`. Then open
+   the **UPS Power & Energy (homelab)** dashboard. After ~24h of
+   uptime the "Energy consumed (last 24h)" stat reflects the lab's
+   actual daily kWh; before that it's just an extrapolation of the
+   shorter window.
 
 ## Operations
 
