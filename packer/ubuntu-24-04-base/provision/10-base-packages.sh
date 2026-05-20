@@ -44,6 +44,18 @@ echo "==> apt clean"
 apt-get autoremove -y --purge
 apt-get clean
 
+# Set vim.tiny as the system-wide default editor. Without this,
+# /usr/bin/editor (used by sudoedit, visudo, crontab -e, debian-style
+# git config defaults, etc.) lands on nano — auto mode picks nano on
+# its priority 40, ahead of vim.tiny's 15. vim.tiny is plenty for the
+# occasional config edit and we already ship it; not pulling in the
+# full vim package (~50 MB) for every VM in the lab. On any role that
+# wants vim.basic instead, install `vim` and re-run
+# `update-alternatives --set editor /usr/bin/vim.basic`. Flip back to
+# nano with `update-alternatives --auto editor` if ever needed.
+echo "==> set vim.tiny as the default editor"
+update-alternatives --set editor /usr/bin/vim.tiny
+
 echo "==> enable services that should run on every role"
 systemctl enable --now qemu-guest-agent
 systemctl enable --now chrony
