@@ -279,6 +279,12 @@ mapping by name — see [`vms/llm/README.md`](../vms/llm/README.md)
 /cluster/mapping/pci ...` operator step). `scripts/preflight.sh`
 refuses to proceed if any prerequisite is missing.
 
+The `tofu@pve` token also needs a scoped `PVEMappingUser` ACL on the
+mapping path before `just apply llm` will succeed (else it 403s on
+`Mapping.Use`) — see [*Scoped ACLs for resource
+mappings*](proxmox-tofu-permissions.md#scoped-acls-for-resource-mappings)
+in the tofu perms doc.
+
 ## Thunderbolt eGPU specifics
 
 Thunderbolt PCIe enumeration happens *during* host boot, not before

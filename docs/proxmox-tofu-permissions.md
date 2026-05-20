@@ -108,13 +108,18 @@ stands alone.
 | `Sys.Audit` | Read node info — `/nodes/<node>/status` is hit on every plan. |
 | `SDN.Use` | **PVE 9+ only.** Attach the NIC to vmbr0 (the implicit `localnetwork` SDN zone). |
 
-**Not granted:** `VM.Config.CDROM` (no ISO attach), `VM.Console` (no
-VNC keystroke delivery), `Sys.Modify` / `Sys.Console` (no host
-edits), `VM.Migrate`, `VM.Backup`, `VM.Snapshot*`, `Realm.*`,
-`User.Modify`, `Permissions.Modify`, `Pool.*`, `Mapping.*`. The
-explicit omissions match the Packer doc's rationale — the principle
-is "the smallest privilege set that makes the build succeed and no
-more."
+**Not granted in the base `Tofu` role:** `VM.Config.CDROM` (no ISO
+attach), `VM.Console` (no VNC keystroke delivery), `Sys.Modify` /
+`Sys.Console` (no host edits), `VM.Migrate`, `VM.Backup`,
+`VM.Snapshot*`, `Realm.*`, `User.Modify`, `Permissions.Modify`,
+`Pool.*`, `Mapping.*`. The explicit omissions match the Packer doc's
+rationale — the principle is "the smallest privilege set that makes
+the build succeed and no more."
+
+`Mapping.*` is the exception that gets granted **scoped per-mapping**
+via the built-in `PVEMappingUser` role when a VM role references a
+cluster resource mapping — see [*Scoped ACLs for resource
+mappings*](#scoped-acls-for-resource-mappings) below.
 
 ## Adding a privilege
 
@@ -126,6 +131,51 @@ pveum role modify Tofu --append -privs "<NewPriv>"
 
 Update this doc when you do. Drift between the doc and the live ACL is
 the whole reason the file exists.
+
+## Scoped ACLs for resource mappings
+
+Some VM roles reference a cluster-wide Proxmox resource mapping rather
+than embedding a raw device path — `vms/llm/` references PCI mapping
+`rtx-3090` for eGPU passthrough via the shared module's
+`hostpci_devices` input (the raw-path alternative requires root password
+auth, which is incompatible with API tokens — see
+`modules/proxmox-vm/variables.tf`).
+
+On first apply, this surfaces as:
+
+```text
+Error: HTTP 403 - Permission check failed (/mapping/pci/rtx-3090, Mapping.Use)
+```
+
+The fix is a **scoped ACL** — grant the built-in `PVEMappingUser` role
+(which carries `Mapping.Audit` + `Mapping.Use`) only on the specific
+mapping path:
+
+```bash
+ssh root@pve12t 'pveum aclmod /mapping/pci/rtx-3090 \
+  -user tofu@pve -role PVEMappingUser'
+```
+
+Verify:
+
+```bash
+ssh root@pve12t 'pveum acl list | grep mapping'
+# /mapping/pci/rtx-3090   PVEMappingUser   user   tofu@pve   1
+```
+
+The scope matters. A global `Mapping.*` grant on the base `Tofu` role
+would let the token use *any* future mapping — e.g. a USB-HSM mapping
+intended only for `vms/rootca/`. Scoped ACLs keep each mapping's
+consumers explicit.
+
+### Current scoped grants
+
+| Path | Role | Used by | Reason |
+| --- | --- | --- | --- |
+| `/mapping/pci/rtx-3090` | `PVEMappingUser` | `vms/llm/` | eGPU passthrough (RTX 3090 over TB on `pve12t`) — see [`proxmox-gpu-passthrough.md`](proxmox-gpu-passthrough.md) |
+
+When a new role references a mapping, add a row here and the matching
+`pveum aclmod` command above.
 
 ## Rotating the token
 
