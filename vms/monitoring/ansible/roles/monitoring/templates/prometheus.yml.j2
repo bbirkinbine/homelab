@@ -45,20 +45,19 @@ scrape_configs:
       - target_label: __address__
         replacement: 127.0.0.1:{{ monitoring_pve_exporter_port }}
 
-  # natrontech pbs-exporter — single-host today; same multi-target shape
-  # if you ever add pbs02.
+  # natrontech pbs-exporter — single-host. PBS_ENDPOINT in the env
+  # file points it at pbs01, so /metrics with no query params is the
+  # right shape. The relabel-multi-target pattern (used for pve_exporter
+  # above) doesn't apply here because pbs-exporter's `target=` syntax
+  # is `target=http://host:port`, not bare hostname, and is ignored
+  # when PBS_ENDPOINT is set. If we ever add pbs02, configure a second
+  # exporter instance with a different port.
   - job_name: pbs
-    metrics_path: /pbs
     static_configs:
       - targets:
-          - '{{ monitoring_pbs_target }}'
-    relabel_configs:
-      - source_labels: [__address__]
-        target_label: __param_target
-      - source_labels: [__param_target]
-        target_label: instance
-      - target_label: __address__
-        replacement: 127.0.0.1:{{ monitoring_pbs_exporter_port }}
+          - '127.0.0.1:{{ monitoring_pbs_exporter_port }}'
+        labels:
+          instance: '{{ monitoring_pbs_target }}'
 
 # Alert rules and Alertmanager wiring land in a follow-up (§5 step 8 of
 # the design doc) — out of scope for the MVP.

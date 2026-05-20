@@ -70,9 +70,11 @@ monitoring_pbs_exporter_env: /etc/prometheus/pbs-exporter.env
 monitoring_pbs_exporter_port: 10019
 monitoring_pbs_exporter_version: "0.9.0"
 monitoring_pbs_exporter_endpoint: "https://pbs01:8007"
-# verify_ssl=false because PBS uses a self-signed cert by default; flip to
-# true once the PKI engine in OpenBao starts issuing real certs.
-monitoring_pbs_exporter_verify_ssl: false
+# Skip TLS verification — PBS uses a self-signed cert by default. Flip
+# to false once OpenBao's PKI engine starts issuing real certs and the
+# PBS host is reconfigured to use them. The exporter env var is
+# PBS_INSECURE (NOT PBS_VERIFY_SSL — easy to confuse).
+monitoring_pbs_exporter_insecure: true
 
 # --- /etc/hosts -------------------------------------------------------------
 # Override for the auto-built /etc/hosts entries. By default the role
