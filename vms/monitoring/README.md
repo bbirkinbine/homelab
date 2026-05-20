@@ -146,24 +146,31 @@ and value, then `systemctl restart` the affected exporter.
 Re-running `just ansible monitoring` later will NOT clobber these
 hand-edited files — the templates that lay them down use `force: false`.
 
-## Import dashboards
+## Dashboards (provisioned by Ansible)
 
-In the Grafana UI at `http://<vm-ip>:3000` (initial login admin/admin →
-change the password), Dashboards → Import → enter dashboard ID → Load →
-select the **Prometheus** datasource → Import. Three to import on
-first deploy:
+The role's `dashboards.yml` task fetches three community dashboards on
+every `just ansible monitoring`, substitutes `${DS_PROMETHEUS}` for the
+provisioned datasource name, and drops them into
+`/var/lib/grafana/dashboards/`. Grafana's file provider re-scans the
+dir every 30s and loads them — no UI step needed.
 
-| Grafana ID | Name | What it shows |
-| --- | --- | --- |
-| 1860 | Node Exporter Full | CPU, RAM, disk, network, fans, temps for every node_exporter target |
-| 10347 | Proxmox via Prometheus | Per-VM CPU/RAM/disk-IO; cluster + storage pool view |
-| 19641 | Proxmox Backup Server | Datastore usage, snapshot age, verify status (pairs with natrontech/pbs-exporter) |
+| Source (pinned) | What it shows |
+| --- | --- |
+| [grafana.com 1860](https://grafana.com/grafana/dashboards/1860) (Node Exporter Full) | CPU/RAM/disk/network/fans/temps for every `node_exporter` target |
+| [grafana.com 10347](https://grafana.com/grafana/dashboards/10347) (Proxmox via Prometheus) | **Per-VM CPU/RAM/disk-IO** — the dashboard that answers the RAM-trend question |
+| [natrontech/pbs-exporter `grafana-dashboard/pbs-exporter.json`](https://github.com/natrontech/pbs-exporter/tree/main/grafana-dashboard) | Datastore usage, last-backup ages, verify status — pinned to the same tag as the exporter binary |
 
-Dashboards land in `/var/lib/grafana/dashboards/` once Grafana saves
-them; the provisioning provider this role installs watches that dir,
-so subsequent reboots reload them automatically. Bump dashboard
-revisions later via the UI's "Reimport" action — pin manually if a
-newer rev breaks panels you care about.
+To pick up a newer revision, edit `monitoring_dashboards[].url` in
+[ansible/roles/monitoring/defaults/main.yml](ansible/roles/monitoring/defaults/main.yml)
+(look up the latest grafana.com revision with
+`curl -sf https://grafana.com/api/dashboards/<id> | jq .revision`)
+and re-run `just ansible monitoring`. The PBS dashboard URL templates
+on `monitoring_pbs_exporter_version`, so bumping the exporter version
+also tracks its dashboard.
+
+Operators can ALSO import additional dashboards via the UI — Grafana
+writes those to the same dir (`allowUiUpdates: true`) and they
+coexist with the role-managed ones.
 
 ## Verify (end-to-end)
 

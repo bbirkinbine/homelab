@@ -35,5 +35,8 @@
 - name: Render Prometheus + Grafana configuration
   ansible.builtin.import_tasks: config.yml
 
+- name: Provision community Grafana dashboards
+  ansible.builtin.import_tasks: dashboards.yml
+
 - name: Open Prometheus + Grafana ports through ufw
   ansible.builtin.import_tasks: firewall.yml

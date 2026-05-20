@@ -1,16 +1,9 @@
 ---
 # Grafana dashboards provider — watches a directory for *.json files and
-# loads/refreshes them every `updateIntervalSeconds`. Dashboards land in
-# the directory either by:
-#   - operator UI import (Grafana writes JSON to /var/lib/grafana/dashboards/)
-#   - operator drops JSON files there manually (e.g. grafana.com downloads)
-#
-# Three dashboards to import via the UI at first deploy:
-#   - 1860  — Node Exporter Full
-#   - 10347 — Proxmox via Prometheus (verify the modern fork at apply time)
-#   - 19641 — Proxmox Backup Server (natrontech, matches pbs-exporter)
-#
-# See vms/monitoring/README.md "Import dashboards" for the click-path.
+# loads/refreshes them every `updateIntervalSeconds`. The canonical set
+# (Node Exporter Full, Proxmox via Prometheus, natrontech PBS) is
+# downloaded + substituted + dropped here by tasks/dashboards.yml.
+# Operator UI imports also land in this directory (allowUiUpdates: true).
 
 apiVersion: 1
 

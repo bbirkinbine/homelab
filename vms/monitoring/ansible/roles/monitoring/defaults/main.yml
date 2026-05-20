@@ -92,6 +92,33 @@ monitoring_lan_hosts: []
 # --- Grafana ----------------------------------------------------------------
 
 monitoring_grafana_port: 3000
+monitoring_grafana_datasource_name: Prometheus
 monitoring_grafana_datasources_dir: /etc/grafana/provisioning/datasources
 monitoring_grafana_dashboards_provisioning_dir: /etc/grafana/provisioning/dashboards
 monitoring_grafana_dashboards_dir: /var/lib/grafana/dashboards
+
+# Community dashboards provisioned into monitoring_grafana_dashboards_dir.
+# Grafana's file provider re-scans the dir every 30s (config.yml) and
+# auto-loads new/updated JSON. The file_name is what lands on disk;
+# Grafana's internal dashboard title comes from the JSON itself.
+#
+# Pin grafana.com revisions deliberately — look up the latest with
+#   curl -sf https://grafana.com/api/dashboards/<id> | jq .revision
+# and bump + re-test panels when you want a newer version. The
+# pbs-exporter dashboard is pinned to the same git tag as the
+# matching exporter binary so it stays in lockstep on schema changes.
+monitoring_dashboards:
+  - file_name: "1860.json"
+    url: https://grafana.com/api/dashboards/1860/revisions/45/download
+  - file_name: "10347.json"
+    url: https://grafana.com/api/dashboards/10347/revisions/5/download
+  - file_name: pbs-exporter.json
+    url: "https://raw.githubusercontent.com/natrontech/pbs-exporter/v{{ monitoring_pbs_exporter_version }}/grafana-dashboard/pbs-exporter.json"
+
+# Files left in monitoring_grafana_dashboards_dir by previous deploys
+# that should be removed (idempotently). Add new entries here when
+# retiring a dashboard; the role unlinks them on next apply.
+monitoring_dashboards_to_remove:
+  # Was originally pinned for the PBS slot before upstream verification —
+  # turned out to be a Ceph "OSS statistics" dashboard, no PBS metrics.
+  - 19641.json
