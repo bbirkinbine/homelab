@@ -66,7 +66,7 @@ Operator-side build hosts (macOS for `proxmox-iso` targets, T480 + Ubuntu for th
 - **Standing up the lab from bare metal?** [docs/0-scratch-build-order.md](docs/0-scratch-build-order.md) — master walkthrough across four phases.
 - **Deploying a VM?** [docs/deploying-vms.md](docs/deploying-vms.md) — role-class chooser and repeatable flow.
 - **Template builds?** [packer/ubuntu-24-04-base/README.md](packer/ubuntu-24-04-base/README.md) and [packer/windows-11-base/README.md](packer/windows-11-base/README.md).
-- **Per-role example?** [vms/openbao/README.md](vms/openbao/README.md) — canonical OpenTofu + Ansible shape.
+- **Building a new role?** [vms/_template/](vms/_template/README.md) — scaffold to copy. [vms/openbao/](vms/openbao/README.md) is a fully-deployed example you can cross-reference.
 - **Why we picked X?** [docs/decisions/](docs/decisions/) — read the index for the rationale trail.
 
 ## Acknowledgements
