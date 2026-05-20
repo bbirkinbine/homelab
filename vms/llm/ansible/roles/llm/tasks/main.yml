@@ -5,16 +5,22 @@
 # cloud-init), `become: true` from site.yml.
 #
 # Cloud-init has already done: hostname, admin user + SSH key, sudo.
-# This role installs the rest: NVIDIA server-branch driver, Docker,
-# NVIDIA Container Toolkit, Ollama, ufw rules, unattended-upgrades.
-# Reboots once after the NVIDIA driver install so the kernel module
-# loads cleanly (Ollama detects the GPU at startup, so its first
-# `systemctl start` must happen with the driver live).
+# This role installs the OS-level prereqs for serving LLMs on a
+# passthrough GPU: NVIDIA server-branch driver, Docker, NVIDIA Container
+# Toolkit, ufw rules, unattended-upgrades. Reboots once at end of play
+# so the NVIDIA kernel module is live for subsequent operator work.
 #
-# Ported from the legacy /usr/local/sbin/llm-provision.sh that used to
-# run from cloud-init runcmd. Functionally equivalent, but idempotent
-# under Ansible re-runs — see the apt / get_url / ansible.builtin.copy
-# tasks below for the state-checking patterns.
+# Ollama itself is installed manually post-role — NOT here. The upstream
+# install.sh's GPU-detection logic falls through to installing
+# `cuda-drivers` from NVIDIA's CUDA apt repo whenever its `nvidia-smi`
+# check races the kernel module init or fails for any other reason. That
+# conflicts with the server-branch driver this role installs (different
+# driver lineage, can't coexist) and breaks dpkg mid-transaction. There
+# is no upstream env var to skip the CUDA branch.
+#
+# Same prereq-only pattern as the openbao / openclaw / nemoclaw roles.
+# See vms/llm/README.md "Post-deploy" section for the operator steps
+# that install Ollama (and optionally Open WebUI).
 
 - name: Wait for cloud-init to finish
   ansible.builtin.command: cloud-init status --wait
@@ -42,7 +48,10 @@
       - "linux-headers-{{ ansible_kernel }}"
     state: present
     update_cache: true
-    cache_valid_time: 3600
+    # No cache_valid_time — Packer base wipes pkgcache.bin (the binary
+    # index ansible's apt module stat()s for cache age), so
+    # update_cache: true fires on every play. cache_valid_time would
+    # mask that. Pattern established by amp_game / openbao / rootca.
   # Long timeout — apt-get on a fresh Packer base can take a while if
   # the security mirror is slow.
   register: llm_prereqs_apt
@@ -76,6 +85,24 @@
   changed_when: llm_driver_install.rc == 0
   notify: Reboot for NVIDIA kernel module
 
+# ubuntu-drivers invokes `apt install --no-install-recommends`, which
+# excludes nvidia-utils-XXX-server — the package that provides
+# /usr/bin/nvidia-smi. The compute libraries work without it (the kernel
+# module loads, libcuda is present, Ollama runs), but operators expect
+# nvidia-smi for sanity-checking. Backfill it by detecting the installed
+# branch number from the nvidia-compute-utils-*-server package that
+# ubuntu-drivers DID install, then apt-installing the matching utils.
+- name: Backfill nvidia-utils-<branch>-server (provides nvidia-smi)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    branch=$(dpkg-query -W -f '${Package}\n' 'nvidia-compute-utils-*-server' 2>/dev/null \
+             | head -1 | sed -E 's/nvidia-compute-utils-([0-9]+)-server/\1/')
+    [ -n "$branch" ] || { echo "no nvidia-compute-utils-*-server installed" >&2; exit 1; }
+    apt-get install -y "nvidia-utils-${branch}-server"
+  args:
+    executable: /bin/bash
+    creates: /usr/bin/nvidia-smi
+
 # --- Docker ----------------------------------------------------------------
 
 - name: Install Docker + compose-v2 (Ubuntu repos)
@@ -85,7 +112,18 @@
       - docker-compose-v2
     state: present
     update_cache: true
-    cache_valid_time: 3600
+    # No cache_valid_time — see prereqs task above.
+
+# Add the connecting admin user to the docker group so `docker run`
+# works without sudo (needed for the operator-installed Open WebUI step
+# in README "Post-deploy"). Safe in this role's threat model — the
+# admin user already has NOPASSWD sudo from cloud-init, so docker-group
+# membership isn't an escalation. Takes effect on next login.
+- name: Add admin user to docker group
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: true
 
 # --- NVIDIA Container Toolkit ----------------------------------------------
 # Adds GPU access to Docker containers. Required for any LLM-in-container
@@ -120,6 +158,9 @@
       curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
         | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
         > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+    # pipefail is bash-only; Ansible's shell module defaults to /bin/sh
+    # (dash on Ubuntu), which rejects `set -o pipefail`.
+    executable: /bin/bash
     creates: /etc/apt/sources.list.d/nvidia-container-toolkit.list
 
 - name: Install nvidia-container-toolkit
@@ -134,55 +175,11 @@
     creates: /etc/docker/daemon.json
   notify: Restart docker
 
-# --- Ollama ----------------------------------------------------------------
-# Upstream ships an official installer script (curl | sh) that handles
-# the apt-vs-tarball decision per OS and creates the systemd unit. We
-# guard with `creates:` so re-runs are no-ops once /usr/local/bin/ollama
-# exists. To upgrade Ollama, delete the binary first (the role's README
-# documents this).
-
-- name: Check whether ollama is already installed
-  ansible.builtin.command: which ollama
-  register: llm_ollama_check
-  changed_when: false
-  failed_when: false
-
-- name: Install Ollama (upstream curl|sh installer)
-  ansible.builtin.shell:
-    cmd: curl -fsSL https://ollama.com/install.sh | sh
-    creates: /usr/local/bin/ollama
-  when: llm_ollama_check.rc != 0
-
-- name: Ensure ollama systemd drop-in directory exists
-  ansible.builtin.file:
-    path: /etc/systemd/system/ollama.service.d
-    state: directory
-    owner: root
-    group: root
-    mode: "0755"
-
-- name: Drop ollama systemd override (listen address)
-  ansible.builtin.copy:
-    dest: /etc/systemd/system/ollama.service.d/override.conf
-    owner: root
-    group: root
-    mode: "0644"
-    content: |
-      [Service]
-      Environment="OLLAMA_HOST={{ llm_ollama_listen }}"
-  notify:
-    - Reload systemd
-    - Restart ollama
-
-- name: Enable (but don't start yet) the ollama service
-  ansible.builtin.systemd:
-    name: ollama
-    enabled: true
-  # First start happens AFTER the NVIDIA reboot, so the driver is live
-  # when Ollama probes the GPU. The reboot handler at the end of the
-  # play forces this ordering.
-
 # --- ufw -------------------------------------------------------------------
+# Ports 11434 + 8080 are opened proactively even though Ollama and Open
+# WebUI are installed manually post-role. The operator knows the future
+# app surface; opening the ports here avoids a second ufw round-trip
+# when those apps come up.
 
 - name: Allow LLM-stack ports through ufw
   community.general.ufw:

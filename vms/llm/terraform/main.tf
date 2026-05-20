@@ -15,10 +15,13 @@
 //   * Cloud-init drive populated with identity data only.
 //
 // What this file deliberately does NOT own:
-//   * NVIDIA driver, Docker, NVIDIA Container Toolkit, Ollama install.
-//     That's vms/llm/ansible/roles/llm/. Ported from the legacy
-//     /usr/local/sbin/llm-provision.sh that used to run from cloud-init
-//     runcmd; idempotent re-runs are now Ansible's job.
+//   * NVIDIA driver, Docker, NVIDIA Container Toolkit, ufw, unattended-
+//     upgrades. That's vms/llm/ansible/roles/llm/. Ported from the
+//     legacy /usr/local/sbin/llm-provision.sh that used to run from
+//     cloud-init runcmd; idempotent re-runs are now Ansible's job.
+//   * Ollama install. Operator step post-role — see vms/llm/README.md
+//     "Post-deploy" for the rationale (upstream installer's GPU detection
+//     races the post-reboot kernel module init under automation).
 //   * Cluster-side PCI mapping creation. Lives in /etc/pve/ (cluster
 //     state); one-time pvesh / UI step. See README.
 //   * Model pulling (`ollama pull`). Operator ceremony — see

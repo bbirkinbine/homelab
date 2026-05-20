@@ -2,7 +2,7 @@
 galaxy_info:
   role_name: llm
   author: brian.birkinbine
-  description: "Install the NVIDIA server-branch driver, Docker, NVIDIA Container Toolkit, and Ollama on Ubuntu 24.04 for an eGPU-passthrough LLM VM."
+  description: "Install OS-level prereqs for an eGPU-passthrough LLM VM on Ubuntu 24.04: NVIDIA server-branch driver, Docker, NVIDIA Container Toolkit, ufw rules, unattended-upgrades. Ollama itself is operator-installed post-role."
   license: MIT
   min_ansible_version: "2.15"
   platforms:

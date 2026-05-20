@@ -11,7 +11,33 @@ once landed.
 
 ## Open
 
-(none)
+### Rebuild Ubuntu 24.04 base template to activate apt-lists retention
+
+`packer/ubuntu-24-04-base/provision/99-cleanup.sh` was updated to stop
+wiping `/var/lib/apt/lists/*` so cloned VMs carry the build-time
+package index — required to make `ansible-playbook --check`
+(`just ansible-check <role>`) work against freshly-cloned VMs without
+a prior manual `apt update`. The script change is committed; the
+behavior only manifests after a `build-pve.sh` rebuild of the Ubuntu
+base.
+
+Trigger that makes it urgent: any operator workflow that depends on
+`just ansible-check <role>` succeeding on first bring-up. Currently
+sidestepped by running `just ansible <role>` (real apply) directly,
+which fires `update_cache: true` and populates lists/ from scratch.
+
+Steps (from the Mac, per `packer/ubuntu-24-04-base/README.md` and
+ADR-0006 per-node template VMID conventions):
+
+1. `cd packer/ubuntu-24-04-base/`
+2. Rebuild on each node — templates are per-node with distinct VMIDs
+   (`9100` on pve12t, `9101` on pve13m, `9102` on pve13t):
+   - `./build-pve.sh pve12t`
+   - `./build-pve.sh pve13m`
+   - `./build-pve.sh pve13t`
+3. Existing VMs (openbao, monitoring, etc.) are unaffected — they
+   already cloned from the prior template. Only new role deploys
+   pick up the updated base.
 
 ## Done
 

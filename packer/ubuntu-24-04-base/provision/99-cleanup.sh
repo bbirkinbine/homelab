@@ -22,14 +22,22 @@ echo "==> apt clean"
 export DEBIAN_FRONTEND=noninteractive
 apt-get autoremove -y --purge
 apt-get clean
-rm -rf /var/lib/apt/lists/*
-# Also drop the parsed pkgcache. `apt-get clean` only removes downloaded
-# .deb files in /var/cache/apt/archives/; pkgcache.bin + srcpkgcache.bin
-# (the binary index ansible's apt module stat()s to decide cache age)
-# survive with a recent mtime from the build's `apt update`. If we leave
-# them, ansible's `cache_valid_time` check on a fresh clone says "cache
-# is fresh — skip apt update" and the subsequent `apt install` fails
-# because the actual lists at /var/lib/apt/lists/ are empty.
+# /var/lib/apt/lists/* is intentionally NOT wiped. Carrying the
+# build-time package index in the template means freshly-cloned VMs
+# can serve `apt-cache policy <pkg>` lookups without a prior
+# `apt update` — which unblocks `ansible-playbook --check` on first
+# bring-up (--check refuses to mutate state, so it can't run apt
+# update itself; with empty lists, dry-run package lookups fail).
+# The lists are stale at clone time (minutes-to-weeks old depending
+# on when the base was built), but every role's apt task sets
+# update_cache: true without cache_valid_time — so real applies
+# always refresh.
+#
+# pkgcache.bin + srcpkgcache.bin ARE wiped: they're the binary index
+# ansible's apt module stat()s for cache age. Leaving them with a
+# recent mtime would mask the staleness of lists/ if a future role
+# ever reintroduced cache_valid_time. Belt-and-suspenders against the
+# May 2026 bug class (see commit 07d8c2a for the original incident).
 rm -f /var/cache/apt/pkgcache.bin /var/cache/apt/srcpkgcache.bin
 
 echo "==> truncate logs"

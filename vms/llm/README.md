@@ -3,9 +3,12 @@
 VM for running local LLMs (Ollama, optionally Open WebUI as a chat front-end)
 on an eGPU-passthrough RTX 3090 attached to `pve12t` via Thunderbolt
 (Razer Core X enclosure). Cloned at deploy time from the
-`ubuntu-24-04-base` Packer template; Ansible installs the NVIDIA
-server-branch driver, Docker, NVIDIA Container Toolkit, and Ollama,
-then reboots so the kernel module loads cleanly.
+`ubuntu-24-04-base` Packer template; Ansible installs the OS-level
+prereqs (NVIDIA server-branch driver, Docker, NVIDIA Container Toolkit,
+ufw rules, unattended-upgrades) and reboots so the kernel module loads
+cleanly. **Ollama itself is installed manually post-role** — same
+prereq-only pattern as the openbao / openclaw / nemoclaw roles; see
+[Post-deploy](#post-deploy) for the operator steps.
 
 Hardware-pinned to `pve12t`. The Thunderbolt enclosure physically lives
 on that node, and the eGPU's PCI mapping references `pve12t`; live
@@ -33,9 +36,9 @@ vms/llm/
 │   ├── inventory.yml.example  inventory shape (committed)
 │   ├── inventory.yml          your IPs (GITIGNORED; written by `just inventory llm`)
 │   └── roles/llm/
-│       ├── defaults/main.yml  overridable vars (ollama listen, ufw ports)
-│       ├── tasks/main.yml     the actual work (driver, Docker, NCT, Ollama)
-│       ├── handlers/main.yml  restart docker, restart ollama, reboot
+│       ├── defaults/main.yml  overridable vars (nvtop toggle, ufw ports, reboot toggle)
+│       ├── tasks/main.yml     the actual work (driver, Docker, NCT, ufw, unattended-upgrades)
+│       ├── handlers/main.yml  restart docker, reload ufw, reboot
 │       ├── templates/         empty (.gitkeep)
 │       ├── files/             empty (.gitkeep)
 │       └── meta/main.yml      Galaxy metadata + collection deps
@@ -97,6 +100,20 @@ varies by host — `for d in /sys/kernel/iommu_groups/*/devices/*; do n=${d#*/io
 If the eGPU enclosure or Thunderbolt port ever changes, update the
 **mapping** (not `terraform.tfvars`) so the role config stays stable.
 
+### Tofu token ACL on the mapping
+
+The `tofu@pve` token needs `Mapping.Use` on this mapping path or
+`just apply llm` 403s. The base `Tofu` role omits `Mapping.*` by
+design — grant it scoped per-mapping:
+
+```bash
+ssh root@pve12t 'pveum aclmod /mapping/pci/rtx-3090 \
+  -user tofu@pve -role PVEMappingUser'
+```
+
+Full rationale in [*Scoped ACLs for resource
+mappings*](../../docs/proxmox-tofu-permissions.md#scoped-acls-for-resource-mappings).
+
 ## Deploy
 
 From repo root:
@@ -108,53 +125,110 @@ just check llm               # preflight (ssh, Proxmox API, template, snippets)
 just plan llm                # review the plan
 just apply llm               # create the VM
 just inventory llm           # write ansible/inventory.yml from tofu output (waits on guest-agent)
-just ansible llm             # install: NVIDIA driver, Docker, NCT, Ollama (+ reboot)
+just ansible llm             # install: NVIDIA driver, Docker, NCT, ufw (+ reboot)
 ```
 
-End state: VM up, NVIDIA driver loaded, Docker running, Ollama running
-on `:11434`, ufw allowing the LLM-stack ports. **No models pulled yet**
-— that's the post-deploy operator step.
+End state: VM up, NVIDIA driver loaded, Docker + NVIDIA Container
+Toolkit running, ufw allowing the LLM-stack ports. **Ollama is not
+installed yet** — see Post-deploy step 2.
 
 ## Post-deploy
 
-1. **Confirm the GPU is visible inside the VM:**
+### 1. Confirm the GPU is visible inside the VM
 
-   ```bash
-   ssh llm-admin@<vm-ip> nvidia-smi
-   ```
+```bash
+ssh llm-admin@<vm-ip> nvidia-smi
+```
 
-   Should show the 3090 with 24 GB VRAM and driver 570.x. If it reports
-   "No devices were found", the most common cause is that the post-driver
-   reboot raced something — re-run the playbook (`just ansible llm`)
-   and check `dmesg | grep -i nvidia` on the VM.
+Should show the 3090 with 24 GB VRAM and driver 595.x or newer. If it
+reports "No devices were found", the most common cause is that the
+post-driver reboot raced something — re-run the playbook
+(`just ansible llm`) and check `dmesg | grep -i nvidia` on the VM.
+**This must be working before step 2** — see the warning there.
 
-2. **Pull a model and run it:**
+### 2. Install Ollama
 
-   ```bash
-   ssh llm-admin@<vm-ip>
-   ollama pull llama3.1:8b
-   ollama run  llama3.1:8b
-   ```
+Ollama is installed manually, NOT via Ansible. The upstream installer
+script (`curl | sh`) has a GPU-detection step that calls `nvidia-smi`
+and falls through to installing `cuda-drivers` from NVIDIA's CUDA apt
+repo if that call returns non-zero (e.g. transient race with the
+post-reboot kernel module init). Those `cuda-drivers` packages conflict
+with this role's `ubuntu-drivers --gpgpu` server-branch install and
+break dpkg mid-transaction. From a non-interactive Ansible context this
+race is hard to avoid; from an interactive operator session post-role
+the kernel module is settled and `nvidia-smi` returns cleanly, so the
+installer skips its CUDA branch correctly.
 
-   Ollama listens on `0.0.0.0:11434`, so any LAN client can hit
-   `http://<vm-ip>:11434` directly. The role's `defaults/main.yml`
-   exposes `llm_ollama_listen` if you ever need to bind to a specific
-   interface.
+> **Confirm `nvidia-smi` from step 1 works before running the installer.**
+> If it doesn't, the installer will pull conflicting `cuda-drivers` and
+> wedge dpkg. Fix the driver / passthrough first.
 
-3. **(Optional) Run Open WebUI as a chat frontend:**
+```bash
+ssh llm-admin@<vm-ip>
+curl -fsSL https://ollama.com/install.sh | sh
+```
 
-   ```bash
-   ssh llm-admin@<vm-ip>
-   docker run -d --restart unless-stopped \
-     -p 8080:8080 \
-     -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
-     --add-host=host.docker.internal:host-gateway \
-     -v open-webui:/app/backend/data \
-     --name open-webui \
-     ghcr.io/open-webui/open-webui:main
-   ```
+This creates the `ollama` system user (home `/usr/share/ollama`), drops
+`/etc/systemd/system/ollama.service`, and enables + starts the service
+on port 11434 (loopback by default).
 
-   Then open `http://<vm-ip>:8080` in a browser.
+### 3. Expose Ollama to the LAN
+
+By default Ollama listens on `127.0.0.1:11434`. To let Open WebUI on
+the same host or other LAN clients reach it:
+
+```bash
+sudo mkdir -p /etc/systemd/system/ollama.service.d
+sudo tee /etc/systemd/system/ollama.service.d/override.conf >/dev/null <<'EOF'
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+```
+
+UFW already permits 11434 from the LAN (see the Ports table below).
+**Don't expose this beyond LAN without an auth proxy** — the Ollama API
+has no built-in authentication.
+
+### 4. Smoke-test with a small model
+
+Pull a small model to confirm end-to-end GPU inference:
+
+```bash
+ssh llm-admin@<vm-ip>
+ollama pull llama3.2:3b           # ~2 GB
+ollama run  llama3.2:3b "say hi"
+```
+
+In another SSH session, run `nvtop` during the response — GPU util
+should spike and settle back to idle.
+
+After the smoke test, pull whatever you actually want from the
+[Ollama library](https://ollama.com/library). The 3090's 24 GB VRAM
+fits up to ~70B at Q4 quant; bigger models spill to CPU and slow
+dramatically.
+
+### 5. (Optional) Run Open WebUI as a chat frontend
+
+The role adds `llm-admin` to the `docker` group, but group membership
+only takes effect on a NEW login session — if you're still in the SSH
+session from step 4, `exit` and re-`ssh` before running the docker
+command below. Otherwise `docker run` will fail with `permission denied
+while trying to connect to the docker API`.
+
+```bash
+ssh llm-admin@<vm-ip>
+docker run -d --restart unless-stopped \
+  -p 8080:8080 \
+  -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
+  --add-host=host.docker.internal:host-gateway \
+  -v open-webui:/app/backend/data \
+  --name open-webui \
+  ghcr.io/open-webui/open-webui:main
+```
+
+Then open `http://<vm-ip>:8080` in a browser.
 
 ## Operations
 
@@ -184,8 +258,8 @@ just ansible llm             # apply
 ```
 
 The tasks are idempotent — apt installs use `state: present`, GPG keys
-and apt sources use `creates:` guards, Ollama install is gated on
-`/usr/local/bin/ollama` not existing. Re-running is safe.
+and apt sources use `creates:` guards. Re-running is safe; it won't
+touch Ollama (that's a manual operator step — see Post-deploy).
 
 ### Bump the NVIDIA driver
 

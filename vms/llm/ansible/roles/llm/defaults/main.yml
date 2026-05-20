@@ -3,16 +3,11 @@
 # host_vars if a deployment diverges from the canonical setup
 # (eGPU-passthrough Ollama on Ubuntu 24.04).
 
-# Ollama listen address. 0.0.0.0:11434 means any LAN client (Open WebUI
-# container on the same host, other workstations on the LAN) can hit
-# the API directly. UFW restricts which sources can reach the port.
-# If you ever expose this VM beyond LAN, FRONT IT with auth — the
-# Ollama API has no built-in authentication.
-llm_ollama_listen: "0.0.0.0:11434"
-
-# UFW ports opened on the VM. 11434 = Ollama API; 8080 = Open WebUI
-# (only relevant if you run the Open WebUI container documented in
-# the README "Optional: Open WebUI" section).
+# UFW ports opened on the VM. 11434 = Ollama API; 8080 = Open WebUI.
+# Opened by this role even though both apps are installed manually
+# post-role (see README "Post-deploy" — Ollama install and Open WebUI
+# container are operator steps). Pre-opening avoids a second ufw round-
+# trip after the manual installs.
 llm_ufw_ports:
   - { port: 11434, comment: "Ollama API" }
   - { port: 8080, comment: "Open WebUI (optional)" }
