@@ -1,24 +1,36 @@
-# Proxmox API permissions for `prometheus-pve-exporter`
+# Proxmox API permissions for the monitoring stack
 
-This document records how to provision the `prometheus@pve` user, the
-`PVEAuditor` role grant, and the API token that the
-[`prometheus-pve-exporter`](https://github.com/prometheus-pve/prometheus-pve-exporter)
-running on [`vms/monitoring/`](../vms/monitoring/) uses to scrape per-VM
-and cluster-wide metrics from the Proxmox API.
+The monitoring VM (`vms/monitoring/`) needs **two** independent
+read-only API tokens — one for each exporter:
 
-Sibling of [`proxmox-permissions.md`](proxmox-permissions.md) (Packer)
-and [`proxmox-tofu-permissions.md`](proxmox-tofu-permissions.md)
-(OpenTofu). Unlike those two — both of which use a custom least-privilege
-role because they have *mutation* surface — the monitoring exporter is
-strictly read-only, so the built-in `PVEAuditor` role is the natural
-fit and matches upstream's recommendation.
+| Part | Token | Bootstrap target | Below |
+| --- | --- | --- | --- |
+| **1** | `prometheus@pve!exporter` for [`prometheus-pve-exporter`](https://github.com/prometheus-pve/prometheus-pve-exporter) | Any one PVE node (replicates cluster-wide via pmxcfs) | [PVE — bootstrap](#part-1--pve-bootstrap) |
+| **2** | `prometheus@pbs!exporter` for [`natrontech/pbs-exporter`](https://github.com/natrontech/pbs-exporter) | `pbs01` directly | [PBS — bootstrap](#part-2--pbs-bootstrap) |
+
+Both halves are independent — you can run them in either order, and
+the tokens have no awareness of each other. Both go into KeePassXC
+under `Homelab/Prometheus/`, then get hand-pasted into the monitoring
+VM in the operator ceremony documented at
+[`vms/monitoring/README.md`](../vms/monitoring/README.md).
+
+This file is sibling to [`proxmox-permissions.md`](proxmox-permissions.md)
+(Packer) and [`proxmox-tofu-permissions.md`](proxmox-tofu-permissions.md)
+(OpenTofu). Both of those use custom least-privilege roles because
+their tokens *mutate* state; the monitoring exporters are strictly
+read-only, so PVEAuditor / Audit (built-in roles) are the right
+fit and match upstream's recommendation.
+
+---
+
+## Part 1 — PVE bootstrap
 
 The three nodes are clustered (`homelab`), so `/etc/pve/user.cfg` is
 replicated cluster-wide via pmxcfs. **Run the steps below once on any
 node** — SSH into whichever is convenient (`pve12t`, `pve13m`, `pve13t`)
 and the user, ACL, and token will land on all three.
 
-## TL;DR — cluster-wide setup
+### TL;DR — cluster-wide setup
 
 SSH in as `root` on any one node and run:
 
@@ -45,7 +57,7 @@ Stash that combined string in KeePassXC under
 `Homelab/Prometheus/proxmox-api-token` so the operator ceremony in
 [`vms/monitoring/README.md`](../vms/monitoring/README.md) can paste it.
 
-## Verifying the token
+### Verifying the PVE token
 
 From your workstation:
 
@@ -59,7 +71,7 @@ Expect a JSON object whose `data` array enumerates every VM, container,
 node, and storage pool. `401` → token id/secret wrong. `403` → ACL
 missing (re-check the `aclmod` step).
 
-## Why PVEAuditor (not a custom role)
+### Why PVEAuditor (not a custom role)
 
 `PVEAuditor` grants `VM.Audit`, `Sys.Audit`, `Datastore.Audit`,
 `SDN.Audit`, `Mapping.Audit`, `Permissions.Read`, `Group.Allocate`,
@@ -75,7 +87,7 @@ one, the upstream recommendation in the
 [`prometheus-pve-exporter` README](https://github.com/prometheus-pve/prometheus-pve-exporter)
 is to use `PVEAuditor`, and we follow it.
 
-## Rotating the token
+### Rotating the PVE token
 
 ```bash
 pveum user token remove prometheus@pve exporter
@@ -90,7 +102,7 @@ sudoedit /etc/prometheus/pve.yml          # paste the new token_value
 sudo systemctl restart prometheus-pve-exporter
 ```
 
-## Tearing down
+### Tearing down the PVE token
 
 ```bash
 pveum user token remove prometheus@pve exporter
@@ -98,7 +110,7 @@ pveum aclmod / -user prometheus@pve -role PVEAuditor -delete
 pveum user delete prometheus@pve
 ```
 
-## Web UI equivalent
+### PVE Web UI equivalent
 
 1. **Datacenter → Permissions → Users** → Add → user `prometheus`,
    realm `pve`.
@@ -108,16 +120,17 @@ pveum user delete prometheus@pve
    `prometheus@pve`, token ID `exporter`, **uncheck "Privilege
    Separation"**, copy the secret on creation (one-time reveal).
 
-## Coexistence with the other Proxmox API users
+### Coexistence with the other PVE API users
 
 `packer@pve`, `tofu@pve`, and `prometheus@pve` are independent users
 with separate tokens, ACLs, and roles. Nothing requires one to know
 about another. Separation keeps the blast radius small if any single
-token leaks.
+token leaks. (`prometheus@pbs` lives on a different host and is
+unrelated — see Part 2 below.)
 
 ---
 
-## PBS API permissions for `prometheus-pbs-exporter`
+## Part 2 — PBS bootstrap
 
 Separate token for the PBS-side of the monitoring stack
 ([natrontech/pbs-exporter](https://github.com/natrontech/pbs-exporter)).
