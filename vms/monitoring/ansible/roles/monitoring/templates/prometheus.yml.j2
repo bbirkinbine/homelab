@@ -76,5 +76,30 @@ scrape_configs:
           instance: llm
 {% endif %}
 
+{% if monitoring_nut_target %}
+  # HON95's prometheus-nut-exporter is a multi-target exporter: it runs on
+  # this VM at 127.0.0.1:{{ monitoring_nut_exporter_port }} and accepts a
+  # ?target=<host:port> query parameter pointing at the NUT server. We use
+  # the same relabel pattern as the pve job above — Prometheus rewrites
+  # __address__ from the configured target into the exporter's local
+  # endpoint, forwarding the original as `?target=`. The exporter then
+  # opens an upsd TCP connection to that target and returns nut_* metrics
+  # for every UPS defined on that server.
+  - job_name: nut-exporter
+    metrics_path: /nut
+    static_configs:
+      - targets:
+          - '{{ monitoring_nut_target }}'
+        labels:
+          instance: '{{ monitoring_nut_instance_label }}'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:{{ monitoring_nut_exporter_port }}
+{% endif %}
+
 # Alert rules and Alertmanager wiring land in a follow-up (§5 step 8 of
 # the design doc) — out of scope for the MVP.

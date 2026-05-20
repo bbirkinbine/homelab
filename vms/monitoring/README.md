@@ -1,8 +1,11 @@
 # vms/monitoring
 
-Prometheus + Grafana + `prometheus-pve-exporter` + `prometheus-pbs-exporter`
-on Ubuntu 24.04, scraping `prometheus-node-exporter` on every cluster
-host. Class A (cluster-mobile) per [`docs/deploying-vms.md`](../../docs/deploying-vms.md).
+Prometheus + Grafana + `prometheus-pve-exporter` + `prometheus-pbs-exporter` +
+`prometheus-nut-exporter` (HON95, runs as a Docker container — `docker.io` is
+installed by this role for that single consumer; future containerized
+exporters can reuse the daemon) on Ubuntu 24.04, scraping
+`prometheus-node-exporter` on every cluster host. Class A (cluster-mobile)
+per [`docs/deploying-vms.md`](../../docs/deploying-vms.md).
 
 The primary use case is **historical per-VM RAM utilization trends** —
 the data needed to decide whether RAM allocations are sized right.
@@ -160,6 +163,7 @@ dir every 30s and loads them — no UI step needed.
 | [grafana.com 10347](https://grafana.com/grafana/dashboards/10347) (Proxmox via Prometheus) | **Per-VM CPU/RAM/disk-IO** — the dashboard that answers the RAM-trend question |
 | [natrontech/pbs-exporter `grafana-dashboard/pbs-exporter.json`](https://github.com/natrontech/pbs-exporter/tree/main/grafana-dashboard) | Datastore usage, last-backup ages, verify status — pinned to the same tag as the exporter binary |
 | [grafana.com 12239](https://grafana.com/grafana/dashboards/12239) (NVIDIA DCGM Exporter) | GPU util/memory/power/temp/clocks from the llm VM's 3090 — only populated when `monitoring_dcgm_target` is set AND the DCGM container is running on the llm VM (see [`vms/llm/README.md`](../llm/README.md) "Expose GPU metrics to Prometheus"). Authored for K8s deployments; K8s-label-filtered panels (namespace/pod) will be empty on this single-host setup |
+| [grafana.com 14371](https://grafana.com/grafana/dashboards/14371) (Prometheus NUT Exporter, HON95) | UPS metrics — battery charge/runtime, input voltage, load %, status (OL/OB), temp. Populated when `monitoring_nut_target` is set AND the NUT server on the Asustor NAS accepts remote reads (ADM → Services → UPS → enable network UPS). Multi-target via `?target=` (relabel pattern); the `ups` dashboard dropdown auto-populates from whatever NUT reports |
 
 To pick up a newer revision, edit `monitoring_dashboards[].url` in
 [ansible/roles/monitoring/defaults/main.yml](ansible/roles/monitoring/defaults/main.yml)
@@ -181,7 +185,11 @@ this order:
 1. **`http://<vm-ip>:9090/classic/targets`** — every target reports `UP`.
    The Debian/Ubuntu prometheus 2.x package serves the legacy UI under
    `/classic/`, not at the root (the bare `/targets` route 404s). Expect
-   10 endpoints across 4 scrape jobs:
+   10 endpoints across 4 always-on jobs, plus 1 endpoint each for the
+   two optional jobs (`dcgm-exporter`, `nut-exporter`) when their
+   corresponding `monitoring_<x>_target` variables are non-empty AND the
+   upstream services (DCGM container on llm VM, network UPS in ADM)
+   are actually up:
 
    | Job | Targets |
    | --- | --- |
@@ -189,6 +197,7 @@ this order:
    | `pve` | 3 — pve12t, pve13m, pve13t (scraped via the pve-exporter multi-target relabel) |
    | `pbs-exporter` | 1 — pbs01 (job name matches natrontech's dashboard convention; see prometheus.yml.j2 header) |
    | `dcgm-exporter` | 1 — llm (only if `monitoring_dcgm_target` is non-empty AND the DCGM container is up on the llm VM; will report DOWN otherwise) |
+   | `nut-exporter` | 1 — nas (only if `monitoring_nut_target` is non-empty AND the Asustor NAS has network UPS enabled in ADM; multi-target via `?target=` relabel — the exporter itself runs locally on the monitoring VM at 127.0.0.1:9995, scraping the NAS's `upsd` on port 3493) |
    | `prometheus` | 1 — self-scrape on localhost:9090 |
 
 2. **`http://<vm-ip>:3000`** — Grafana loads (initial login `admin` /
@@ -205,6 +214,15 @@ this order:
    after 24h. Per-VM memory panels should show a continuous time series.
    `pve_memory_usage_bytes / pve_memory_size_bytes` consistently below
    ~50% over a week is the signal that a VM is over-provisioned.
+
+5. **(If nut-exporter is up)** Grafana Explore: query
+   `nut_load{ups="asustor"}` — single series with the UPS load %. Watch
+   during sustained GPU inference (`ollama run` on a large model) to
+   correlate against `nut_input_voltage_volts` and `DCGM_FI_DEV_POWER_USAGE`
+   from the llm-VM scrape. This is the cross-stack data Brian set the
+   role up for in the first place — see the design-doc rationale in
+   `Homelab Inventory.md` § UPS for what the BR1000MS's 600W ceiling
+   means against the lab's worst-case draw.
 
 ## Operations
 

@@ -89,6 +89,46 @@ monitoring_pbs_exporter_insecure: true
 # scraping again.
 monitoring_dcgm_target: "llm:9400"
 
+# --- prometheus-nut-exporter (HON95/prometheus-nut-exporter) ----------------
+# Multi-target NUT exporter. HON95 ships Docker-only (no binary releases on
+# GitHub, no apt package — verified 2026-05-20 against
+# github.com/HON95/prometheus-nut-exporter v1.2.1), so the role installs
+# docker.io and runs the upstream image as a systemd-managed container
+# bound to localhost only (Prometheus is on the same VM).
+#
+# Scrape pattern is multi-target via `?target=<ups-server>:<port>` — same
+# shape as prometheus-pve-exporter. monitoring_nut_target is the
+# (host:port) of the NUT server, NOT the exporter. The exporter itself
+# always listens on 127.0.0.1:{{ monitoring_nut_exporter_port }}.
+#
+# Set monitoring_nut_target to empty string to skip the scrape job and
+# the dashboard. The exporter container will still be running but
+# Prometheus won't query it. (Removing the container entirely would
+# require disabling the systemd unit; for now keep it always installed
+# since it's <50 MB resident and re-enabling means a single var flip.)
+#
+# Why IP instead of hostname: the monitoring VM doesn't currently
+# resolve `nas` — only the pve_hosts / pbs_hosts groups are populated
+# into /etc/hosts via the .extra-inventories sidecar pattern, and the
+# NAS isn't in any sidecar inventory. A future cleanup could add a
+# `nas_hosts` sidecar inventory (or extend monitoring_lan_hosts to be
+# additive rather than override-only) so this could flip back to
+# `nas:3493`. Until then, the IP is stable per Homelab Inventory.md.
+monitoring_nut_target: "192.168.1.209:3493"
+monitoring_nut_exporter_port: 9995
+monitoring_nut_exporter_image: "hon95/prometheus-nut-exporter"
+# Pin to a major-tag (`1`) — upstream's tagging convention is
+# major-version floats forward inside a major. Bump deliberately:
+# look at https://hub.docker.com/r/hon95/prometheus-nut-exporter/tags
+# for newer tags + verify metrics still match dashboard 14371's
+# selectors. `latest` exists but tracks main/dev — don't use.
+monitoring_nut_exporter_image_tag: "1"
+# UPS instance label that lands on every scraped metric. Pure cosmetic
+# — Grafana dashboard 14371 doesn't filter by instance, only by `ups`
+# (which is the UPS name inside NUT's protocol, e.g. "asustor"). This
+# value is what the Prometheus /targets page shows.
+monitoring_nut_instance_label: "nas"
+
 # --- /etc/hosts -------------------------------------------------------------
 # Override for the auto-built /etc/hosts entries. By default the role
 # pulls `pve_lan_ip` / `pbs_lan_ip` from the pve-hosts + pbs-hosts
@@ -139,6 +179,15 @@ monitoring_dashboards:
   # (namespace/pod) will be empty. Acceptable for a single-host setup.
   - file_name: "12239.json"
     url: https://grafana.com/api/dashboards/12239/revisions/2/download
+  # HON95 Prometheus NUT Exporter Dashboard (grafana.com 14371, rev 1).
+  # Designed for the same upstream that ships monitoring_nut_exporter_image.
+  # Panels select on `ups=~"${ups:pipe}"` so the dropdown auto-populates
+  # from whatever UPS names NUT reports (in this lab: "asustor"). All
+  # gauges use the `nut_*` metric prefix that HON95's exporter emits;
+  # DRuggeri's alt exporter would not work with this dashboard (different
+  # `network_ups_tools_*` prefix).
+  - file_name: "14371.json"
+    url: https://grafana.com/api/dashboards/14371/revisions/1/download
 
 # Files left in monitoring_grafana_dashboards_dir by previous deploys
 # that should be removed (idempotently). Add new entries here when

@@ -32,3 +32,20 @@
   ansible.builtin.systemd:
     name: prometheus-pbs-exporter
     state: restarted
+
+- name: Restart prometheus-nut-exporter
+  ansible.builtin.systemd:
+    name: prometheus-nut-exporter
+    state: restarted
+  ignore_errors: "{{ ansible_check_mode }}"
+  # Triggered on systemd unit changes (image tag bump, port change, env
+  # var addition). Unlike pve / pbs exporters, no operator-pasted token
+  # — NUT server accepts anon read access on this lab's Asustor.
+  #
+  # ignore_errors in check mode: on a first --check run, the systemd
+  # unit file hasn't been written to disk (template tasks are no-ops
+  # under --check), so a restart attempt fails with "Could not find
+  # the requested service". Real applies write the unit and the
+  # handler works normally. Once the role is applied for real once,
+  # subsequent --check runs against the deployed VM also work because
+  # the unit file is on disk.

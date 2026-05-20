@@ -1,0 +1,32 @@
+[Unit]
+Description=Prometheus NUT Exporter (HON95) — multi-target NUT exporter for Network UPS Tools
+Documentation=https://github.com/HON95/prometheus-nut-exporter
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+TimeoutStartSec=120
+
+# Idempotent shape: ExecStartPre clears any stale container left behind by
+# a previous unit invocation (e.g., after a manual `docker stop` outside
+# systemd), then pulls the image. ExecStart runs the container in the
+# foreground so systemd tracks its lifetime. ExecStop is a defensive
+# `docker stop` in case `--rm` cleanup fails for any reason.
+ExecStartPre=-/usr/bin/docker rm -f prometheus-nut-exporter
+ExecStartPre=/usr/bin/docker pull {{ monitoring_nut_exporter_image }}:{{ monitoring_nut_exporter_image_tag }}
+ExecStart=/usr/bin/docker run --rm --name prometheus-nut-exporter \
+  -p 127.0.0.1:{{ monitoring_nut_exporter_port }}:9995 \
+  -e HTTP_PATH=/nut \
+  -e LOG_LEVEL=INFO \
+  {{ monitoring_nut_exporter_image }}:{{ monitoring_nut_exporter_image_tag }}
+ExecStop=/usr/bin/docker stop prometheus-nut-exporter
+
+# Bound to 127.0.0.1 on the host (see -p above) — only Prometheus on the
+# same VM scrapes it, never exposed to LAN. No ufw rule needed.
+
+[Install]
+WantedBy=multi-user.target

@@ -32,6 +32,9 @@
 - name: Install prometheus-pbs-exporter (natrontech tarball)
   ansible.builtin.import_tasks: pbs_exporter.yml
 
+- name: Install prometheus-nut-exporter (HON95 Docker image)
+  ansible.builtin.import_tasks: nut_exporter.yml
+
 - name: Render Prometheus + Grafana configuration
   ansible.builtin.import_tasks: config.yml
 

@@ -1,0 +1,43 @@
+---
+# HON95/prometheus-nut-exporter — Docker-only upstream (no GitHub binary
+# release, no apt package — verified 2026-05-20 against v1.2.1). Install
+# pattern: pre-pull the image to populate the local cache, then drop a
+# systemd unit that runs the container in the foreground. Bound to
+# localhost only; Prometheus on the same VM scrapes the multi-target
+# `/nut?target=<host:port>` endpoint via the relabel pattern in
+# prometheus.yml.j2 (same shape as pve_exporter).
+
+- name: Pull prometheus-nut-exporter image
+  ansible.builtin.command:
+    cmd: "docker pull {{ monitoring_nut_exporter_image }}:{{ monitoring_nut_exporter_image_tag }}"
+  register: monitoring_nut_pull
+  changed_when: "'Downloaded newer image' in monitoring_nut_pull.stdout"
+  when: not ansible_check_mode
+  # On first apply this materializes the image so the systemd unit's first
+  # ExecStart doesn't wait on a cold pull (matters for the role's "is the
+  # exporter up by the time Prometheus first scrapes?" sequencing).
+  # check_mode skipped: docker may not be installed yet under --check (the
+  # apt install in packages.yml didn't run for real), so `docker pull`
+  # would error with "docker: command not found".
+
+- name: Install prometheus-nut-exporter systemd unit
+  ansible.builtin.template:
+    src: prometheus-nut-exporter.service.j2
+    dest: /etc/systemd/system/prometheus-nut-exporter.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart prometheus-nut-exporter
+
+- name: Enable and start prometheus-nut-exporter
+  ansible.builtin.systemd:
+    name: prometheus-nut-exporter
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not ansible_check_mode
+  # --check skipped because the unit file doesn't land on disk under
+  # --check, so systemd can't find it. Matches pve_exporter /
+  # pbs_exporter convention.

@@ -17,6 +17,12 @@
       # "chmod: invalid mode: 'A+user:...'". See:
       # https://docs.ansible.com/ansible-core/2.20/playbook_guide/playbooks_privilege_escalation.html#risks-of-becoming-an-unprivileged-user
       - acl
+      # Docker — only consumer on this VM is the nut_exporter task (HON95's
+      # prometheus-nut-exporter ships Docker-only, no binary release). Pulling
+      # in the full daemon for one container is heavier than ideal but cheaper
+      # than maintaining a from-source build of HON95's exporter. Future
+      # containerized exporters can reuse the daemon.
+      - docker.io
     state: present
     update_cache: true
     cache_valid_time: 3600
@@ -35,3 +41,19 @@
   # The Debian package's default /etc/grafana/grafana.ini is fine for MVP
   # (binds 0.0.0.0:3000, SQLite state, no auth changes). Provisioning
   # files in config.yml will be picked up on next restart via handler.
+
+- name: Enable and start docker
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+  # docker.io's apt install starts the daemon by default, but be explicit
+  # so re-runs against a half-installed VM (e.g. operator stopped docker
+  # for any reason) re-converge to running. Required by the nut_exporter
+  # task that follows.
+  #
+  # check_mode skipped: under --check, the apt install above didn't
+  # actually install docker.io, so systemd can't find the unit
+  # ("Could not find the requested service docker: host"). Same
+  # pattern as the pve/pbs exporter systemd-enable tasks.

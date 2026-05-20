@@ -51,14 +51,18 @@
     # natrontech-style dashboards that hardcode `"uid": "prometheus"`
     # work, all against the same provisioned datasource.
     #
-    # Both case variants appear in the wild: dashboard 1860 (Node Exporter
-    # Full) uses lowercase `${ds_prometheus}`; 10347 uses uppercase
-    # `${DS_PROMETHEUS}`. We rewrite both.
+    # Three placeholder variants surfaced in dashboards we provision so
+    # far: ${DS_PROMETHEUS} (1860 / 10347 / 12239), ${ds_prometheus}
+    # (1860 in places), and ${DS_PRIVATE_PROMETHEUS} (14371 — HON95).
+    # Rather than enumerate every author's naming preference, regex any
+    # ${DS_*} (uppercase) or ${ds_*} (lowercase) and rewrite to the
+    # pinned UID. Grafana variable expressions like ${ups:pipe} are
+    # NOT caught by these patterns (they don't start with DS_/ds_).
     content: >-
       {{
         dash.content
-        | replace('${DS_PROMETHEUS}', monitoring_grafana_datasource_uid)
-        | replace('${ds_prometheus}', monitoring_grafana_datasource_uid)
+        | regex_replace('\$\{DS_[A-Z_]+\}', monitoring_grafana_datasource_uid)
+        | regex_replace('\$\{ds_[a-z_]+\}', monitoring_grafana_datasource_uid)
       }}
     dest: "{{ monitoring_grafana_dashboards_dir }}/{{ dash.item.file_name }}"
     owner: grafana
