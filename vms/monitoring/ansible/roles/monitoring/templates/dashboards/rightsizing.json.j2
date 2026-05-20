@@ -212,11 +212,130 @@
       }
     },
     {
+      "id": 9,
+      "type": "table",
+      "title": "Memory composition (instant)",
+      "description": "What that MemAvailable % is actually made of, per VM. Anon = process-private memory (JVM heaps, daemon workers, anything not file-backed) — the closest thing to a true working set. Cache+Buf = page cache + block buffers, fully reclaimable when the kernel needs RAM. Slab = kernel data structures (dentries/inodes — mostly reclaimable). Free = unused. A low MemAvailable% with most of the bytes in Cache+Buf (typical for I/O-heavy guests) does NOT mean the VM is short on memory — reclaim is on tap.",
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "node_memory_MemTotal_bytes{instance=~\"$instance\"}",
+          "refId": "Total",
+          "legendFormat": "Total",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "node_memory_AnonPages_bytes{instance=~\"$instance\"}",
+          "refId": "Anon",
+          "legendFormat": "Anon",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "node_memory_Cached_bytes{instance=~\"$instance\"} + node_memory_Buffers_bytes{instance=~\"$instance\"}",
+          "refId": "CacheBuf",
+          "legendFormat": "Cache+Buf",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "node_memory_Slab_bytes{instance=~\"$instance\"}",
+          "refId": "Slab",
+          "legendFormat": "Slab",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "node_memory_MemFree_bytes{instance=~\"$instance\"}",
+          "refId": "Free",
+          "legendFormat": "Free",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": { "byField": "instance", "mode": "outer" }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true, "Time 5": true,
+              "__name__ 1": true, "__name__ 2": true, "__name__ 3": true, "__name__ 4": true, "__name__ 5": true,
+              "job 1": true, "job 2": true, "job 3": true, "job 4": true, "job 5": true
+            },
+            "indexByName": {
+              "instance": 0,
+              "Value #Total": 1,
+              "Value #Anon": 2,
+              "Value #CacheBuf": 3,
+              "Value #Slab": 4,
+              "Value #Free": 5
+            },
+            "renameByName": {
+              "instance": "VM",
+              "Value #Total": "Total",
+              "Value #Anon": "Anon (working set)",
+              "Value #CacheBuf": "Cache + Buf (reclaimable)",
+              "Value #Slab": "Slab (kernel)",
+              "Value #Free": "Free"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 1,
+          "custom": {
+            "align": "right",
+            "cellOptions": { "type": "auto" }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "VM" },
+            "properties": [
+              { "id": "unit", "value": "string" },
+              { "id": "custom.align", "value": "left" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Cache + Buf (reclaimable)" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Anon (working set)" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": { "show": false }
+      }
+    },
+    {
       "id": 5,
       "type": "timeseries",
       "title": "CPU pressure over time",
       "description": "Same metric as the top-left stat panel, plotted as a trend. Dashed reference lines mark the 5%/20% thresholds. A persistent line above the orange line for a given VM is the signal that VM is CPU-starved often enough to deserve a vCPU bump.",
-      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 9 },
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 9 },
       "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
       "targets": [
         {
@@ -261,7 +380,7 @@
       "type": "timeseries",
       "title": "Memory pressure over time",
       "description": "5m-rate of node_pressure_memory_waiting per VM, with the 1%/5% thresholds as reference lines. Memory PSI is much more sensitive than CPU PSI — even brief spikes mean reclaim is doing real work.",
-      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 9 },
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 9 },
       "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
       "targets": [
         {
@@ -306,7 +425,7 @@
       "type": "timeseries",
       "title": "Memory available % over time",
       "description": "MemAvailable / MemTotal × 100 per VM. Reference lines at 30% (tight) and 10% (constrained). A VM with a slow downward slope over days is a candidate for a RAM bump.",
-      "gridPos": { "x": 0, "y": 17, "w": 12, "h": 9 },
+      "gridPos": { "x": 0, "y": 25, "w": 12, "h": 9 },
       "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
       "targets": [
         {
@@ -352,7 +471,7 @@
       "type": "timeseries",
       "title": "Load1 / vCPUs over time",
       "description": "Run-queue depth normalized by vCPU count per VM. Reference lines at 1.0 and 2.0. Sustained above 1.0 = processes are queued; above 2.0 = chronic oversubscription.",
-      "gridPos": { "x": 12, "y": 17, "w": 12, "h": 9 },
+      "gridPos": { "x": 12, "y": 25, "w": 12, "h": 9 },
       "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
       "targets": [
         {
