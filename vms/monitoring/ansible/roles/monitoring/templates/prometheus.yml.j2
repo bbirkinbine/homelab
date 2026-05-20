@@ -52,7 +52,12 @@ scrape_configs:
   # is `target=http://host:port`, not bare hostname, and is ignored
   # when PBS_ENDPOINT is set. If we ever add pbs02, configure a second
   # exporter instance with a different port.
-  - job_name: pbs
+  #
+  # Job name MUST be `pbs-exporter` (with hyphen) — natrontech's
+  # bundled Grafana dashboard hardcodes `job="pbs-exporter"` in every
+  # panel's PromQL, and naming the job differently silently misses
+  # every selector. Aligns with their upstream convention.
+  - job_name: pbs-exporter
     static_configs:
       - targets:
           - '127.0.0.1:{{ monitoring_pbs_exporter_port }}'
