@@ -1,0 +1,71 @@
+---
+# Install prometheus-node-exporter on guest VMs (sibling to install-node-exporter.yml,
+# which targets PVE + PBS hosts). Guest VMs share the Ubuntu 24.04 Packer
+# base, so the firewall path is uniformly ufw — no per-group conditionals
+# like the host-side playbook needs.
+#
+# Why a separate playbook from install-node-exporter.yml:
+#   * Different inventories (each VM has its own ansible/inventory.yml,
+#     produced by `just inventory <role>`), each with a different
+#     ansible_user. Listing them all on one ansible-playbook -i is the
+#     right shape, but mixing host + guest invocations in one play
+#     would conflate two firewall paths (pve-firewall vs ufw).
+#   * Guest scope is "every host in every loaded inventory" — `hosts: all`
+#     here is correct because the operator passes only the VM
+#     inventories they want.
+#
+# Why we install node_exporter inside guests at all: the host-side
+# prometheus-pve-exporter gives hypervisor-view metrics per VMID (CPU%,
+# RAM% from QEMU's perspective), but it does NOT surface guest-internal
+# memory pressure (page cache hides it), runqueue depth, or kernel PSI.
+# Right-sizing decisions need the guest's own view. Pairs with the
+# "Lab Rightsizing" dashboard (templates/dashboards/rightsizing.json.j2).
+#
+# Usage from repo root — list each VM's inventory.yml explicitly. The
+# rootca VM is intentionally omitted; it's air-gapped + USB-HSM-pinned
+# and its security posture trumps observability. Add it here if/when
+# that calculus changes.
+#
+#     ansible-playbook \
+#       -i vms/openbao/ansible/inventory.yml \
+#       -i vms/llm/ansible/inventory.yml \
+#       -i vms/amp-game/ansible/inventory.yml \
+#       -i vms/openclaw/ansible/inventory.yml \
+#       -i vms/nemoclaw/ansible/inventory.yml \
+#       vms/monitoring/ansible/install-node-exporter-guests.yml
+#
+# Idempotent — re-running is a no-op once green. monitoring's own
+# node_exporter is installed by the monitoring role's packages.yml +
+# firewall.yml on the monitoring VM itself; don't list it here.
+
+- name: Install prometheus-node-exporter on guest VMs
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Install prometheus-node-exporter
+      ansible.builtin.apt:
+        name: prometheus-node-exporter
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Enable and start prometheus-node-exporter
+      ansible.builtin.systemd:
+        name: prometheus-node-exporter
+        enabled: true
+        state: started
+
+    # Packer base ships ufw default-deny with 22/tcp allowed (per
+    # packer/ubuntu-24-04-base/provision/20-harden.sh). LAN-wide open
+    # on 9100 matches the posture for the cluster hosts' node_exporter
+    # (see install-node-exporter.yml — PVE/PBS rules are also LAN-wide,
+    # not source-restricted to monitoring's IP). Consistency over a
+    # marginal hardening that breaks on monitoring-VM IP rotation.
+    - name: Allow node_exporter through ufw
+      community.general.ufw:
+        rule: allow
+        port: "9100"
+        proto: tcp
+        comment: "prometheus-node-exporter from monitoring VM"

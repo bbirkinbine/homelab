@@ -92,3 +92,10 @@
     # CyberPower BR-series UPSes don't expose ups.realpower directly. Pairs
     # with the nut_real_power_derived_watts recording rule.
     - ups-power.json.j2
+    # Lab Rightsizing — per-VM CPU/memory pressure for right-sizing decisions.
+    # PSI + load + MemAvailable, deutan-safe orange→purple ramp instead of
+    # the red/yellow/green stoplight. Requires node_exporter inside each
+    # guest VM (install-node-exporter-guests.yml). Panels filter to instances
+    # via a templating variable so VMs not yet running node_exporter just
+    # show empty rather than NaN.
+    - rightsizing.json.j2

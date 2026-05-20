@@ -115,6 +115,28 @@ playbook installs the apt package, enables the service, and opens
 port 9100 on each host's firewall (pve-firewall for cluster nodes;
 ufw on pbs01).
 
+### Phase 4 — install node_exporter inside guest VMs (workstation)
+
+```bash
+ansible-playbook \
+  -i vms/openbao/ansible/inventory.yml \
+  -i vms/llm/ansible/inventory.yml \
+  -i vms/amp-game/ansible/inventory.yml \
+  -i vms/openclaw/ansible/inventory.yml \
+  -i vms/nemoclaw/ansible/inventory.yml \
+  vms/monitoring/ansible/install-node-exporter-guests.yml
+```
+
+Same idempotency; same pattern as Phase 3 but targets the guest VMs
+(uniform ufw path, no per-group conditionals). Installs the apt
+package, enables the service, opens 9100/tcp on each guest's ufw.
+Pairs with the **Lab Rightsizing** dashboard — without this step
+that dashboard's panels are empty.
+
+The `rootca` VM is intentionally absent — air-gapped + USB-HSM-pinned,
+its security posture trumps observability. Add it back if/when that
+calculus changes.
+
 ## Operator ceremony — paste exporter tokens (one-time)
 
 The two API tokens live in KeePassXC only; the repo never sees them.
@@ -165,6 +187,7 @@ dir every 30s and loads them — no UI step needed.
 | [grafana.com 12239](https://grafana.com/grafana/dashboards/12239) (NVIDIA DCGM Exporter) | GPU util/memory/power/temp/clocks from the llm VM's 3090 — only populated when `monitoring_dcgm_target` is set AND the DCGM container is running on the llm VM (see [`vms/llm/README.md`](../llm/README.md) "Expose GPU metrics to Prometheus"). Authored for K8s deployments; K8s-label-filtered panels (namespace/pod) will be empty on this single-host setup |
 | [grafana.com 14371](https://grafana.com/grafana/dashboards/14371) (Prometheus NUT Exporter, HON95) | UPS metrics — battery charge/runtime, input voltage, load %, status (OL/OB), temp. Populated when `monitoring_nut_target` is set AND the NUT server on the Asustor NAS accepts remote reads (ADM → Services → UPS → enable network UPS). Multi-target via `?target=` (relabel pattern); the `ups` dashboard dropdown auto-populates from whatever NUT reports |
 | `homelab-ups-power` (lab-local — `templates/dashboards/ups-power.json.j2`) | UPS power & energy derived from `nut_load × nut_real_power_nominal_watts` (CyberPower BR-series doesn't expose `ups.realpower` directly — HON95 emits the metric but the underlying driver doesn't surface the variable on BR1000MS / BR1500MS2). Stat panels for current watts / UPS load / rated capacity / 24h kWh / 7d avg kWh, plus a time-series with the nominal-capacity ceiling overlaid. Pairs with the `nut_real_power_derived_watts` recording rule (see [Recording rules](#recording-rules)). |
+| `homelab-rightsizing` (lab-local — `templates/dashboards/rightsizing.json.j2`) | Per-VM CPU/memory pressure for right-sizing decisions. Four signals plotted as instant stats + trend lines: CPU PSI rate (`node_pressure_cpu_waiting_seconds_total`), Memory PSI rate (`node_pressure_memory_waiting_seconds_total`), MemAvailable% (`node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes`), and Load1 / vCPUs. Hypervisor-view metrics from `pve-exporter` can't surface guest-internal memory pressure (page cache hides it) or runqueue depth — PSI inside the guest is the honest signal. Thresholds use a deutan-safe orange→purple ramp instead of red/yellow/green. VM dropdown defaults to All. Empty when guest node_exporter isn't running (Phase 4 not yet applied). |
 
 To pick up a newer revision, edit `monitoring_dashboards[].url` in
 [ansible/roles/monitoring/defaults/main.yml](ansible/roles/monitoring/defaults/main.yml)
@@ -207,15 +230,16 @@ this order:
 1. **`http://<vm-ip>:9090/classic/targets`** — every target reports `UP`.
    The Debian/Ubuntu prometheus 2.x package serves the legacy UI under
    `/classic/`, not at the root (the bare `/targets` route 404s). Expect
-   10 endpoints across 4 always-on jobs, plus 1 endpoint each for the
+   15 endpoints across 4 always-on jobs, plus 1 endpoint each for the
    two optional jobs (`dcgm-exporter`, `nut-exporter`) when their
    corresponding `monitoring_<x>_target` variables are non-empty AND the
    upstream services (DCGM container on llm VM, network UPS in ADM)
-   are actually up:
+   are actually up. Guest VMs in the `node_exporter` count report DOWN
+   until Phase 4 (install-node-exporter-guests.yml) is applied for them:
 
    | Job | Targets |
    | --- | --- |
-   | `node_exporter` | 5 — monitoring, pve12t, pve13m, pve13t, pbs01 |
+   | `node_exporter` | 10 — monitoring, pve12t, pve13m, pve13t, pbs01, openbao, llm, amp-game, openclaw, nemoclaw (5 host targets always; 5 guest targets after Phase 4 runs against them) |
    | `pve` | 3 — pve12t, pve13m, pve13t (scraped via the pve-exporter multi-target relabel) |
    | `pbs-exporter` | 1 — pbs01 (job name matches natrontech's dashboard convention; see prometheus.yml.j2 header) |
    | `dcgm-exporter` | 1 — llm (only if `monitoring_dcgm_target` is non-empty AND the DCGM container is up on the llm VM; will report DOWN otherwise) |
@@ -253,6 +277,14 @@ this order:
    uptime the "Energy consumed (last 24h)" stat reflects the lab's
    actual daily kWh; before that it's just an extrapolation of the
    shorter window.
+7. **(If Phase 4 guest node_exporters are up)** In Grafana Explore,
+   query `rate(node_pressure_cpu_waiting_seconds_total[5m])` — one series
+   per guest VM (plus the 5 host targets). Values near 0 = sized right;
+   sustained values above ~0.05 = CPU starvation worth bumping. Then
+   open the **Lab Rightsizing** dashboard — stat panels at the top
+   show current values across all VMs, time-series below show trend.
+   VMs without node_exporter just don't appear (panels filter by
+   `instance` label).
 
 ## Operations
 

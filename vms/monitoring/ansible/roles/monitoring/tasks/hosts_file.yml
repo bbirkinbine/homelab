@@ -1,18 +1,23 @@
 ---
 # Maintain /etc/hosts entries for scrape targets the monitoring VM
 # needs to reach by name (prometheus-node-exporter on each PVE node +
-# pbs01; pbs-exporter's PBS_ENDPOINT also uses the hostname).
+# pbs01 + each guest VM; pbs-exporter's PBS_ENDPOINT also uses a
+# hostname).
 #
 # Sources of truth (in priority order):
 #   1. `monitoring_lan_hosts` set in inventory.yml — explicit operator
 #      override as a list of `{name, ip}` dicts. Useful for one-off
-#      deploys without the .extra-inventories wiring.
+#      deploys without the .extra-inventories wiring. When set, this
+#      replaces the entire auto-built block.
 #   2. Otherwise: pull `pve_lan_ip` / `pbs_lan_ip` from `groups['pve_hosts']`
-#      / `groups['pbs_hosts']` hostvars. These come from the host-level
-#      pve-hosts / pbs-hosts inventory files, loaded at play time via
+#      / `groups['pbs_hosts']` hostvars, AND pull `ansible_host` from
+#      each group in `monitoring_guest_inventory_groups`. These come
+#      from the host-level pve-hosts / pbs-hosts inventories + the
+#      per-role guest inventory.yml files, loaded at play time via
 #      vms/monitoring/ansible/.extra-inventories (a sidecar the Justfile
-#      `ansible` recipe picks up automatically).
-#   3. Neither populated (LAN-DNS-only deploy or running ad-hoc without
+#      `ansible` recipe picks up automatically — missing files
+#      skipped silently).
+#   3. Nothing populated (LAN-DNS-only deploy or running ad-hoc without
 #      the sidecar) → skip silently.
 
 - name: Maintain /etc/hosts entries for scrape targets
@@ -34,6 +39,13 @@
       {{ hostvars[h].pbs_lan_ip }}   {{ h }}
       {% endif %}
       {% endfor %}
+      {% for g in monitoring_guest_inventory_groups | default([]) %}
+      {% for h in groups.get(g, []) | sort %}
+      {% if hostvars[h].ansible_host is defined %}
+      {{ hostvars[h].ansible_host }}   {{ h }}
+      {% endif %}
+      {% endfor %}
+      {% endfor %}
       {% endif %}
     marker: "# {mark} ANSIBLE MANAGED — monitoring role scrape targets"
     create: false
@@ -41,3 +53,5 @@
     (monitoring_lan_hosts | default([]) | length > 0)
     or (groups.get('pve_hosts', []) | length > 0)
     or (groups.get('pbs_hosts', []) | length > 0)
+    or (monitoring_guest_inventory_groups | default([])
+        | map('extract', groups) | map('default', []) | flatten | length > 0)

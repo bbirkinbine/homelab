@@ -68,13 +68,21 @@ inventory role:
 # .extra-inventories file (one inventory path per line, repo-relative),
 # each path is added as an extra `-i` flag BEFORE the role's own
 # inventory.yml. Lets a role (e.g. monitoring) read hostvars from
-# pve-hosts / pbs-hosts inventories without duplicating IPs.
+# pve-hosts / pbs-hosts / guest VM inventories without duplicating IPs.
+#
+# Missing inventories are skipped silently — guest VM inventory.yml's
+# are produced by `just inventory <role>` after a deploy and may not
+# exist for every role yet. The monitoring play's hosts_file task uses
+# groups.get(...) defensively so absent groups just don't render an
+# /etc/hosts entry for that role's host.
 ansible role:
     cd vms/{{role}}/ansible && \
       extra_inv="" ; \
       if [ -f .extra-inventories ]; then \
         while IFS= read -r p; do \
-          [ -z "$p" ] || [ "${p#\#}" != "$p" ] && continue ; \
+          [ -z "$p" ] && continue ; \
+          [ "${p#\#}" != "$p" ] && continue ; \
+          [ -f "../../../$p" ] || continue ; \
           extra_inv="$extra_inv -i ../../../$p" ; \
         done < .extra-inventories ; \
       fi ; \
@@ -86,7 +94,9 @@ ansible-check role:
       extra_inv="" ; \
       if [ -f .extra-inventories ]; then \
         while IFS= read -r p; do \
-          [ -z "$p" ] || [ "${p#\#}" != "$p" ] && continue ; \
+          [ -z "$p" ] && continue ; \
+          [ "${p#\#}" != "$p" ] && continue ; \
+          [ -f "../../../$p" ] || continue ; \
           extra_inv="$extra_inv -i ../../../$p" ; \
         done < .extra-inventories ; \
       fi ; \

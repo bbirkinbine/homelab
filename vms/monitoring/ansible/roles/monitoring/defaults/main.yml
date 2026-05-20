@@ -22,6 +22,22 @@ monitoring_node_exporter_targets:
     instance: pve13t
   - host: pbs01
     instance: pbs01
+  # Guest VMs — node_exporter installed via install-node-exporter-guests.yml.
+  # Lets the rightsizing dashboard see kernel PSI + load + MemAvailable
+  # from inside each guest (hypervisor-view metrics from pve-exporter
+  # can't distinguish working-set memory from page cache). rootca is
+  # intentionally omitted — air-gapped + HSM-pinned, security posture
+  # trumps observability there.
+  - host: openbao
+    instance: openbao
+  - host: llm
+    instance: llm
+  - host: amp-game
+    instance: amp-game
+  - host: openclaw
+    instance: openclaw
+  - host: nemoclaw
+    instance: nemoclaw
 
 # Where pve_exporter pulls from. One target per cluster node so a node-local
 # outage doesn't blind the whole cluster view. The exporter scrapes the API
@@ -141,6 +157,27 @@ monitoring_nut_instance_label: "nas"
 #     - { name: pve12t, ip: 192.0.2.227 }
 #     - { name: pbs01,  ip: 192.0.2.250 }
 monitoring_lan_hosts: []
+
+# Guest VM inventory groups whose hosts the role pulls into /etc/hosts.
+# Each entry is an Ansible group name (hyphens converted to underscores
+# per Ansible's group-name normalization). For each group, the role
+# reads `ansible_host` from each member and writes a `<ip>  <hostname>`
+# line into /etc/hosts on the monitoring VM. The corresponding inventory
+# must be listed in vms/monitoring/ansible/.extra-inventories so the
+# group is populated at play time; missing inventories are skipped
+# silently (Justfile loader has an [ -f ] guard).
+#
+# Why pull from per-role inventories instead of duplicating IPs here:
+# the inventories are gitignored (real IPs), so this stays in alignment
+# with the repo's "VM IPs don't land in committed files" hygiene rule
+# (root CLAUDE.md). Adding a new guest role's hostname to /etc/hosts
+# is a one-line append below.
+monitoring_guest_inventory_groups:
+  - openbao_servers
+  - llm_servers
+  - amp_game_servers
+  - openclaw_servers
+  - nemoclaw_servers
 
 # --- Grafana ----------------------------------------------------------------
 

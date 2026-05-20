@@ -1,0 +1,396 @@
+{
+  "title": "Lab Rightsizing (per-VM CPU & memory pressure)",
+  "uid": "homelab-rightsizing",
+  "tags": ["homelab", "rightsizing", "pressure"],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "liveNow": false,
+  "weekStart": "",
+  "style": "dark",
+  "description": "Glanceable per-VM CPU/memory pressure for right-sizing decisions. Four signals: CPU PSI rate (kernel-reported time processes waited on CPU), Memory PSI rate (time blocked on memory reclaim), MemAvailable% (kernel's honest 'memory you could use right now', subtracts reclaimable cache), and Load1/vCPUs (run-queue depth normalized by CPU count). Colors use a deutan-safe orange→purple ramp instead of the standard red/yellow/green stoplight. Numbers are authoritative; color is supplementary.",
+  "templating": {
+    "list": [
+      {
+        "name": "instance",
+        "label": "VM",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+        "definition": "label_values(node_pressure_cpu_waiting_seconds_total, instance)",
+        "query": {
+          "query": "label_values(node_pressure_cpu_waiting_seconds_total, instance)",
+          "refId": "StandardVariableQuery"
+        },
+        "regex": "",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "refresh": 1,
+        "sort": 1,
+        "options": [],
+        "hide": 0,
+        "skipUrlSync": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "CPU pressure (5m rate of node_pressure_cpu_waiting)",
+      "description": "Fraction of time during the last 5 min that at least one process was waiting on CPU. 0 = sized right. Sustained >5% (orange) is real contention worth a vCPU bump; >20% (purple) means processes are spending most of their wall-clock queued.",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "rate(node_pressure_cpu_waiting_seconds_total{instance=~\"$instance\"}[5m])",
+          "refId": "A",
+          "legendFormat": "{% raw %}{{instance}}{% endraw %}",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "min": 0,
+          "max": 1,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "text", "value": null },
+              { "color": "orange", "value": 0.05 },
+              { "color": "purple", "value": 0.20 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "values": true, "calcs": ["lastNotNull"], "fields": "" },
+        "orientation": "vertical",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Memory pressure (5m rate of node_pressure_memory_waiting)",
+      "description": "Fraction of time during the last 5 min that at least one process was delayed by memory reclaim. PSI memory is sensitive — even small sustained values (orange at 1%, purple at 5%) indicate the working set is pushing against the allocation. This catches starvation BEFORE swap engages, unlike hypervisor-view memory metrics that hover near 100% due to page cache.",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "rate(node_pressure_memory_waiting_seconds_total{instance=~\"$instance\"}[5m])",
+          "refId": "A",
+          "legendFormat": "{% raw %}{{instance}}{% endraw %}",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "min": 0,
+          "max": 1,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "text", "value": null },
+              { "color": "orange", "value": 0.01 },
+              { "color": "purple", "value": 0.05 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "values": true, "calcs": ["lastNotNull"], "fields": "" },
+        "orientation": "vertical",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Memory available (% of total)",
+      "description": "Kernel's MemAvailable as a fraction of MemTotal — the honest answer to 'how much memory could a new allocation actually use right now' (subtracts reclaimable page cache, slabs, etc.). >30% (text/default) = comfortable; <30% (orange) = tight; <10% (purple) = constrained, bump the allocation. Threshold direction inverted: lower values are worse, so the base color (purple) applies below the first threshold.",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "(node_memory_MemAvailable_bytes{instance=~\"$instance\"} / node_memory_MemTotal_bytes{instance=~\"$instance\"}) * 100",
+          "refId": "A",
+          "legendFormat": "{% raw %}{{instance}}{% endraw %}",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 0,
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "purple", "value": null },
+              { "color": "orange", "value": 10 },
+              { "color": "text", "value": 30 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "values": true, "calcs": ["lastNotNull"], "fields": "" },
+        "orientation": "vertical",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Load1 / vCPUs (run-queue depth, normalized)",
+      "description": "1-min load average divided by allocated vCPU count. <1.0 = CPU is keeping up; >1.0 (orange) = sustained queuing, things are waiting; >2.0 (purple) = chronic oversubscription, bump vCPUs. CPU count comes from counting `node_cpu_seconds_total{mode='idle'}` series per instance — one per logical CPU.",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "node_load1{instance=~\"$instance\"} / on(instance) count by (instance) (node_cpu_seconds_total{mode=\"idle\",instance=~\"$instance\"})",
+          "refId": "A",
+          "legendFormat": "{% raw %}{{instance}}{% endraw %}",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 2,
+          "min": 0,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "text", "value": null },
+              { "color": "orange", "value": 1.0 },
+              { "color": "purple", "value": 2.0 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "values": true, "calcs": ["lastNotNull"], "fields": "" },
+        "orientation": "vertical",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "CPU pressure over time",
+      "description": "Same metric as the top-left stat panel, plotted as a trend. Dashed reference lines mark the 5%/20% thresholds. A persistent line above the orange line for a given VM is the signal that VM is CPU-starved often enough to deserve a vCPU bump.",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "rate(node_pressure_cpu_waiting_seconds_total{instance=~\"$instance\"}[5m])",
+          "refId": "A",
+          "legendFormat": "{% raw %}{{instance}}{% endraw %}",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "axisPlacement": "auto"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "orange", "value": 0.05 },
+              { "color": "purple", "value": 0.20 }
+            ]
+          },
+          "custom.thresholdsStyle": { "mode": "dashed" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Memory pressure over time",
+      "description": "5m-rate of node_pressure_memory_waiting per VM, with the 1%/5% thresholds as reference lines. Memory PSI is much more sensitive than CPU PSI — even brief spikes mean reclaim is doing real work.",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "rate(node_pressure_memory_waiting_seconds_total{instance=~\"$instance\"}[5m])",
+          "refId": "A",
+          "legendFormat": "{% raw %}{{instance}}{% endraw %}",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "axisPlacement": "auto"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "orange", "value": 0.01 },
+              { "color": "purple", "value": 0.05 }
+            ]
+          },
+          "custom.thresholdsStyle": { "mode": "dashed" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Memory available % over time",
+      "description": "MemAvailable / MemTotal × 100 per VM. Reference lines at 30% (tight) and 10% (constrained). A VM with a slow downward slope over days is a candidate for a RAM bump.",
+      "gridPos": { "x": 0, "y": 17, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "(node_memory_MemAvailable_bytes{instance=~\"$instance\"} / node_memory_MemTotal_bytes{instance=~\"$instance\"}) * 100",
+          "refId": "A",
+          "legendFormat": "{% raw %}{{instance}}{% endraw %}",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "axisPlacement": "auto"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "orange", "value": 10 },
+              { "color": "transparent", "value": 30 }
+            ]
+          },
+          "custom.thresholdsStyle": { "mode": "dashed" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "min"] },
+        "tooltip": { "mode": "multi", "sort": "asc" }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Load1 / vCPUs over time",
+      "description": "Run-queue depth normalized by vCPU count per VM. Reference lines at 1.0 and 2.0. Sustained above 1.0 = processes are queued; above 2.0 = chronic oversubscription.",
+      "gridPos": { "x": 12, "y": 17, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "node_load1{instance=~\"$instance\"} / on(instance) count by (instance) (node_cpu_seconds_total{mode=\"idle\",instance=~\"$instance\"})",
+          "refId": "A",
+          "legendFormat": "{% raw %}{{instance}}{% endraw %}",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "axisPlacement": "auto"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "orange", "value": 1.0 },
+              { "color": "purple", "value": 2.0 }
+            ]
+          },
+          "custom.thresholdsStyle": { "mode": "dashed" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    }
+  ]
+}
