@@ -75,20 +75,15 @@ monitoring_pbs_exporter_endpoint: "https://pbs01:8007"
 monitoring_pbs_exporter_verify_ssl: false
 
 # --- /etc/hosts -------------------------------------------------------------
-# LAN host→IP mapping for the monitoring VM's /etc/hosts. Required when
-# the router (or whatever's doing DNS on your LAN) doesn't resolve the
-# cluster + PBS hostnames — most homelab routers serve DHCP reservations
-# but not corresponding DNS records, so plan on populating this in
-# inventory.yml unless you've explicitly set up Pi-hole / Unbound / etc.
+# Override for the auto-built /etc/hosts entries. By default the role
+# pulls `pve_lan_ip` / `pbs_lan_ip` from the pve-hosts + pbs-hosts
+# inventories (loaded via vms/monitoring/ansible/.extra-inventories).
+# Set this list in inventory.yml only if you're deploying without those
+# sidecar inventories OR you want to override the auto-built entries.
 #
-# Leave empty to skip /etc/hosts management entirely (role assumes
-# you've got DNS / mDNS covering the same set of names).
-#
-# Example shape (committed inventory.yml.example carries this):
+# Shape (used both here and as the override):
 #   monitoring_lan_hosts:
 #     - { name: pve12t, ip: 192.0.2.227 }
-#     - { name: pve13m, ip: 192.0.2.163 }
-#     - { name: pve13t, ip: 192.0.2.240 }
 #     - { name: pbs01,  ip: 192.0.2.250 }
 monitoring_lan_hosts: []
 
