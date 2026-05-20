@@ -115,13 +115,109 @@ with separate tokens, ACLs, and roles. Nothing requires one to know
 about another. Separation keeps the blast radius small if any single
 token leaks.
 
+---
+
+## PBS API permissions for `prometheus-pbs-exporter`
+
+Separate token for the PBS-side of the monitoring stack
+([natrontech/pbs-exporter](https://github.com/natrontech/pbs-exporter)).
+PBS users + tokens are managed independently from PVE — the PBS host
+has its own `proxmox-backup-manager` CLI and its own ACL system.
+
+Two PBS-vs-PVE gotchas worth internalizing before running the commands
+(both apply per the `project_pbs_token_privsep_intersection` memory):
+
+1. **Token privsep is intersection-based on PBS 4.x.** Effective token
+   perms = `(user perms) ∩ (token perms)`. Unlike PVE, granting the
+   role to the user alone is NOT enough — the **token also needs its
+   own ACL entry**. Both grants are required.
+2. **Token auth-header uses `:` as the separator**, not PVE's `=`.
+   Header form: `PBSAPIToken=<user>@<realm>!<tokenname>:<secret>`.
+
+### Bootstrap on the PBS host
+
+SSH in as `root` on `pbs01` and run:
+
+```bash
+# 1. Create the user. No --password needed — service identity, token auth only.
+proxmox-backup-manager user create prometheus@pbs --comment "prometheus-pbs-exporter scrape user"
+
+# 2. Grant Audit on the root path to the user.
+proxmox-backup-manager acl update / Audit --auth-id prometheus@pbs
+
+# 3. Mint the token. Output JSON contains the one-time secret as `value`.
+proxmox-backup-manager user generate-token prometheus@pbs exporter --comment "PBS exporter token"
+
+# 4. Grant the token its OWN Audit ACL (privsep intersection — step 2 alone
+#    is insufficient because the token would intersect with no own grants).
+proxmox-backup-manager acl update / Audit --auth-id 'prometheus@pbs!exporter'
+
+# 5. Verify
+proxmox-backup-manager user list-tokens prometheus@pbs
+proxmox-backup-manager acl list
+```
+
+Step 3 prints something like:
+
+```json
+{
+  "tokenid": "prometheus@pbs!exporter",
+  "value": "00000000-0000-0000-0000-000000000000"
+}
+```
+
+Stash the full `prometheus@pbs!exporter:<value>` string in KeePassXC
+under `Homelab/Prometheus/pbs-api-token`. That combined string is what
+the operator pastes into `/etc/prometheus/pbs-exporter.env`'s
+`PBS_API_TOKEN=...` line on the monitoring VM — the natrontech
+exporter concatenates `PBS_USERNAME`, `PBS_API_TOKEN_NAME`, and
+`PBS_API_TOKEN` into the auth header using the `:` separator at scrape
+time.
+
+### Verifying the PBS token
+
+From the monitoring VM (or any LAN host that can reach `pbs01:8007`):
+
+```bash
+TOKEN='prometheus@pbs!exporter:00000000-0000-0000-0000-000000000000'
+curl -sk -H "Authorization: PBSAPIToken=$TOKEN" \
+  https://pbs01:8007/api2/json/version
+```
+
+Expect `{"data":{"version":"4.x.x", ...}}`. `authentication failed` →
+the user or token doesn't exist, OR the token's own ACL is missing
+(step 4 above).
+
+### Tearing down the PBS token
+
+```bash
+proxmox-backup-manager user delete-token prometheus@pbs exporter
+proxmox-backup-manager acl delete / Audit --auth-id 'prometheus@pbs!exporter'
+proxmox-backup-manager acl delete / Audit --auth-id prometheus@pbs
+proxmox-backup-manager user delete prometheus@pbs
+```
+
+### PBS Web UI equivalent
+
+If you'd rather click through the PBS UI:
+
+1. **Configuration → Access Control → Users** → Add → user `prometheus`,
+   realm `Proxmox Backup authentication server` (the `pbs` realm).
+2. **Configuration → Access Control → Permissions** → Add → Path `/`,
+   User `prometheus@pbs`, Role `Audit`.
+3. **Configuration → Access Control → API Token** → Add → user
+   `prometheus@pbs`, token name `exporter`. Copy the secret on creation
+   (one-time reveal).
+4. **Configuration → Access Control → Permissions** → Add → Path `/`,
+   API Token `prometheus@pbs!exporter`, Role `Audit`. (Yes, a separate
+   ACL row for the token — see the privsep gotcha above. Forgetting
+   this step is the most common reason for `pbs_up 0` in the exporter.)
+
 ## See also
 
 - [`vms/monitoring/README.md`](../vms/monitoring/README.md) — operator
-  flow that consumes this token.
+  flow that consumes both tokens.
 - [`prometheus-pve-exporter` README](https://github.com/prometheus-pve/prometheus-pve-exporter)
-  — upstream auth + scrape semantics.
-- PBS-side equivalent — the read-only token for
-  `prometheus-pbs-exporter` is created in the PBS UI (Configuration →
-  Access Control → API Tokens) with role `Audit` at `/`. PBS's token
-  string uses `:` as the separator vs PVE's `=`.
+  — upstream PVE auth + scrape semantics.
+- [`natrontech/pbs-exporter` README](https://github.com/natrontech/pbs-exporter)
+  — upstream PBS auth + scrape semantics.

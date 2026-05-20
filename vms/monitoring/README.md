@@ -38,11 +38,14 @@ vms/monitoring/
    KeePassXC at `Homelab/Prometheus/proxmox-api-token`. This is the
    token the running exporter uses to read cluster metrics — separate
    from the `tofu@pve!apply` token that creates the VM.
-5. **PBS API token (read-only).** In the PBS UI under Configuration →
-   Access Control → API Tokens, create `prometheus@pbs!exporter` and
-   grant `Audit` at `/`. Stash the full `prometheus@pbs!exporter:<secret>`
-   string in KeePassXC at `Homelab/Prometheus/pbs-api-token`. Note PBS
-   uses `:` as the separator vs PVE's `=`.
+5. **PBS API token (read-only).** Mint per the **PBS API permissions**
+   section of [`docs/proxmox-prometheus-permissions.md`](../../docs/proxmox-prometheus-permissions.md)
+   — five `proxmox-backup-manager` commands on pbs01. The walk-through
+   includes both the user-create and the **token's own** ACL grant
+   (PBS 4.x privsep is intersection-based; forgetting the token-ACL
+   step is the most common reason for `pbs_up 0`). Stash the full
+   `prometheus@pbs!exporter:<secret>` string in KeePassXC at
+   `Homelab/Prometheus/pbs-api-token`.
 6. **SSH access to the target node + key loaded into `ssh-agent`.**
    `ssh-copy-id root@pve13m`, then `ssh-add ~/.ssh/id_ed25519`. The
    `bpg/proxmox` provider uploads cloud-init snippets over SSH and
@@ -113,7 +116,7 @@ sudo systemctl start prometheus-pve-exporter prometheus-pbs-exporter
 
 # 4. Sanity-check.
 curl -sf http://127.0.0.1:9221/pve?target=pve13m | head -5
-curl -sf http://127.0.0.1:10019/pbs?target=pbs01 | head -5
+curl -sf http://127.0.0.1:10019/metrics | grep '^pbs_' | head -5
 ```
 
 Both `curl` outputs should print Prometheus exposition-format text with
