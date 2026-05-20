@@ -39,9 +39,27 @@
   check_mode: false
   changed_when: false # idempotency tracked on the copy task below
 
-- name: Install dashboard JSON (substituting ${DS_PROMETHEUS} → datasource name)
+- name: Install dashboard JSON (rewriting datasource placeholders to the pinned UID)
   ansible.builtin.copy:
-    content: "{{ dash.content | replace('${DS_PROMETHEUS}', monitoring_grafana_datasource_name) }}"
+    # Grafana.com dashboards declare datasource references as
+    # `{"type": "prometheus", "uid": "${DS_PROMETHEUS}"}` — that placeholder
+    # is the dashboard input slot the import-flow substitutes. The file
+    # provider does NOT run that substitution, so we do it here.
+    #
+    # Substituting to the pinned datasource UID (lowercase `prometheus`)
+    # instead of the name makes the rewritten dashboards work AND
+    # natrontech-style dashboards that hardcode `"uid": "prometheus"`
+    # work, all against the same provisioned datasource.
+    #
+    # Both case variants appear in the wild: dashboard 1860 (Node Exporter
+    # Full) uses lowercase `${ds_prometheus}`; 10347 uses uppercase
+    # `${DS_PROMETHEUS}`. We rewrite both.
+    content: >-
+      {{
+        dash.content
+        | replace('${DS_PROMETHEUS}', monitoring_grafana_datasource_uid)
+        | replace('${ds_prometheus}', monitoring_grafana_datasource_uid)
+      }}
     dest: "{{ monitoring_grafana_dashboards_dir }}/{{ dash.item.file_name }}"
     owner: grafana
     group: grafana

@@ -93,6 +93,11 @@ monitoring_lan_hosts: []
 
 monitoring_grafana_port: 3000
 monitoring_grafana_datasource_name: Prometheus
+# Lowercase. Pinned so community dashboards that hardcode
+# `"uid": "prometheus"` (natrontech/pbs-exporter is one — they hardcode
+# the UID rather than using the ${DS_PROMETHEUS} input convention) find
+# the datasource without manual rewriting.
+monitoring_grafana_datasource_uid: prometheus
 monitoring_grafana_datasources_dir: /etc/grafana/provisioning/datasources
 monitoring_grafana_dashboards_provisioning_dir: /etc/grafana/provisioning/dashboards
 monitoring_grafana_dashboards_dir: /var/lib/grafana/dashboards

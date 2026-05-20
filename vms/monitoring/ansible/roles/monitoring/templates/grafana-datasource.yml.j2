@@ -6,7 +6,13 @@
 apiVersion: 1
 
 datasources:
-  - name: Prometheus
+  - name: {{ monitoring_grafana_datasource_name }}
+    # Pin the UID to a stable lowercase value. Several community dashboards
+    # (notably natrontech/pbs-exporter) hardcode `"uid": "prometheus"` in
+    # their queries rather than using ${DS_PROMETHEUS}, so panels show "No
+    # data" against a Grafana-assigned random UID. Pinning here lets those
+    # dashboards work without per-dashboard rewriting.
+    uid: {{ monitoring_grafana_datasource_uid }}
     type: prometheus
     access: proxy
     url: http://localhost:9090
