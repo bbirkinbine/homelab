@@ -42,19 +42,31 @@ vms/openbao/
 
 ## Deploy
 
-> **Fresh deploy vs. existing instance — storage decision.** The committed
-> `terraform.tfvars.tpl` carries a two-line pre-flip pin
-> (`disk_storage = "local-lvm"` and `snippets_storage = "local"`) that
-> keeps the original openbao instance bit-identical across `tofu apply`.
-> If you're standing this role up **for the first time** (e.g. DR rebuild,
-> new lab), drop those two pin lines from
-> `vms/openbao/terraform/terraform.tfvars.tpl` BEFORE running `just hydrate`
-> so the fresh VM lands on `nas-vms` (cluster-shared NFS, the role default
-> for cluster-mobility). If you're operating an existing instance, leave the
-> pin alone — see [Storage migration](#storage-migration-local-lvm--nas-vms)
-> for the in-place move path.
+> **STOP — this role is not all-`just`.** Unlike openclaw / nemoclaw /
+> amp-game, the operator installs the OpenBao binary **by hand**
+> between Phase 1 and Phase 3 below. `just ansible openbao` will
+> refuse to run against a VM with no `bao` on disk — there is a
+> pre-flight assert in the role that fails loud with a pointer back
+> to Phase 2. The manual install is intentional: OpenBao is a trust
+> anchor, and the .deb fetch + GPG verification stays under the
+> operator's direct control (same custody discipline as the Shamir
+> shares downstream). OpenBao also doesn't publish an apt repo
+> (`apt.openbao.org` is NXDOMAIN), so the practical install path is
+> a pinned .deb from GitHub releases either way.
 
-From repo root:
+**Fresh deploy vs. existing instance — storage decision.** The committed
+`terraform.tfvars.tpl` carries a two-line pre-flip pin
+(`disk_storage = "local-lvm"` and `snippets_storage = "local"`) that
+keeps the original openbao instance bit-identical across `tofu apply`.
+If you're standing this role up **for the first time** (e.g. DR rebuild,
+new lab), drop those two pin lines from
+`vms/openbao/terraform/terraform.tfvars.tpl` BEFORE running `just hydrate`
+so the fresh VM lands on `nas-vms` (cluster-shared NFS, the role default
+for cluster-mobility). If you're operating an existing instance, leave the
+pin alone — see [Storage migration](#storage-migration-local-lvm--nas-vms)
+for the in-place move path.
+
+### Phase 1 — provision the VM (workstation)
 
 ```bash
 just ansible-deps openbao   # one-time per workstation
@@ -62,7 +74,54 @@ just hydrate openbao        # render terraform.tfvars from KeePassXC
 just plan openbao           # review the plan
 just apply openbao          # create the VM
 just inventory openbao      # write ansible/inventory.yml from tofu output (waits on guest-agent)
-just ansible openbao        # install + configure OpenBao
+```
+
+### Phase 2 — install OpenBao on the VM (manual, GPG-verified)
+
+Pick a release from
+[`github.com/openbao/openbao/releases`](https://github.com/openbao/openbao/releases)
+(2.5.3 or later — the role asserts `>= 2.5`). Get the VM's IP from
+`just output openbao` or by reading `vms/openbao/ansible/inventory.yml`.
+Then, on the VM:
+
+```bash
+ssh bao-admin@<vm-ip>
+VER=2.5.3                                                       # bump as needed
+cd /tmp
+
+# Fetch the .deb, the checksums file, its detached GPG signature,
+# and the OpenBao signing key.
+curl -fsSLO https://github.com/openbao/openbao/releases/download/v${VER}/openbao_${VER}_linux_amd64.deb
+curl -fsSLO https://github.com/openbao/openbao/releases/download/v${VER}/checksums-linux.txt
+curl -fsSLO https://github.com/openbao/openbao/releases/download/v${VER}/checksums-linux.txt.gpgsig
+curl -fsSLO https://openbao.org/assets/openbao-gpg-pub-20240618.asc
+
+# Verify the GPG signature on the checksums file.
+gpg --import openbao-gpg-pub-20240618.asc
+gpg --verify checksums-linux.txt.gpgsig checksums-linux.txt
+# Expect: Good signature from "OpenBao <openbao@lists.lfedge.org>"
+# Primary key fingerprint: 66D1 5FDD 8728 7219 C8E1  5478 D200 CD70 2853 E6D0
+
+# Verify the .deb's SHA256 against the now-trusted checksums file.
+grep "openbao_${VER}_linux_amd64.deb" checksums-linux.txt | sha256sum -c -
+# Expect: openbao_X.Y.Z_linux_amd64.deb: OK
+
+# Install. The postinst creates the openbao user/group and lays
+# down /usr/lib/systemd/system/openbao.service.
+sudo dpkg -i openbao_${VER}_linux_amd64.deb
+bao --version
+exit
+```
+
+Upgrade path: when bumping versions later, re-run Phase 2 on the VM
+with a newer `VER`. The role's `>= 2.5` assert catches an accidental
+downgrade.
+
+### Phase 3 — configure with Ansible (workstation)
+
+```bash
+just ansible-check openbao  # optional dry-run with --diff
+just ansible openbao        # configure OpenBao + bring the service up
 ```
 
 End state: openbao service is **running but sealed** — `bao status`
@@ -186,20 +245,37 @@ bao operator unseal   # paste share 3 — unsealed
 bao status            # Initialized: true; Sealed: false
 ```
 
-Enable the audit log immediately (any operation without it is
-unauditable):
+### Audit log
+
+The file audit device is wired **declaratively** in
+`/etc/openbao/openbao.hcl` (rendered from the role's
+`templates/openbao.hcl.j2` — search for the `audit "file"` stanza).
+OpenBao removed the runtime `bao audit enable` API pre-v2.5; that
+command now returns HTTP 400 unless the unsafe API flag is set,
+which we deliberately leave off.
+
+On a freshly-deployed instance, audit is active from first start —
+no operator step required. After init + unseal, confirm:
 
 ```bash
 bao login <root-token>
-bao audit enable file file_path=/var/log/openbao/audit.log
+bao read sys/audit                 # 'file/' (matches the stanza label "audit-log" → audit-log/)
+sudo ls -la /var/log/openbao/audit.log
+sudo tail /var/log/openbao/audit.log
 ```
+
+To change the audit destination, edit `openbao_audit_log_path` in
+the role's defaults (or set per-host in inventory) and re-run
+`just ansible openbao`. The template change triggers a service
+restart via the handler, which means a re-seal — keep 3 shares
+within reach.
 
 Then proceed to Phase 3 of [[13 Homelab Blueprint]] (PKI Intermediate,
 Transit, etc.).
 
 ## Operations
 
-### After every restart — manual unseal
+### After every restart — manual unseal (on the VM)
 
 Shamir is the trade-off for not having an HSM: OpenBao boots **sealed**
 on every reboot. Roughly 30 seconds of human time per restart:
@@ -213,31 +289,83 @@ bao operator unseal              # paste share 3
 bao status                       # Sealed: false
 ```
 
-### Stable IP via DHCP reservation
+### Stable IP via DHCP reservation (on the LAN router)
 
 `just output openbao` reports the MAC of the VM's NIC. Pin a DHCP
 reservation on the router so the IP doesn't rotate — Ansible's
 inventory and the OpenBao API URL both reference the IP, and
 re-pasting after every lease change is friction.
 
-### Raft snapshots
+### Raft snapshots (setup on the VM)
 
 Cron'd inside the VM. The role doesn't lay this down (it would need
 a non-root token with `sys/storage/raft/snapshot` capability, which
 requires the operator-driven init to have completed). Once you've
-done the ceremony:
+done the ceremony, install the snapshot job in three steps.
+
+**1. Stage the credentials.** Create a token with snapshot capability,
+then write it where cron's `openbao` user can read it (and only it):
 
 ```bash
-# As root, on the VM:
-install -d -m 700 -o openbao -g openbao /backups
+bao policy write snapshot - <<'POLICY'
+path "sys/storage/raft/snapshot" {
+  capabilities = ["read"]
+}
+POLICY
+SNAP_TOKEN=$(bao token create -policy=snapshot -period=720h -display-name=snapshot-cron -field=token)
+sudo install -d -m 700 -o openbao -g openbao /var/lib/openbao
+echo "$SNAP_TOKEN" | sudo tee /var/lib/openbao/.bao-token >/dev/null
+sudo chown openbao:openbao /var/lib/openbao/.bao-token
+sudo chmod 600 /var/lib/openbao/.bao-token
+```
+
+**2. Prepare the backup directory.**
+
+```bash
+sudo install -d -m 700 -o openbao -g openbao /backups
+```
+
+**3. Install the cron entry.** Run this heredoc as-is — it writes the
+file `/etc/cron.d/openbao-snapshot` with a single cron record. The
+record's command line wraps visually in your renderer, but on disk
+it's one physical line (cron's `/etc/cron.d/` format does not honor
+`\` line continuation):
+
+```bash
 sudo tee /etc/cron.d/openbao-snapshot >/dev/null <<'EOF'
 0 3 * * * openbao BAO_ADDR=http://127.0.0.1:8200 BAO_TOKEN_FILE=/var/lib/openbao/.bao-token /usr/bin/bao operator raft snapshot save /backups/openbao-$(date +\%F).snap 2>&1 | logger -t openbao-snapshot
 EOF
 ```
 
+> **Don't paste the cron line on its own into a shell.** It's a cron
+> *record format*, not a shell command — bash would see the first
+> word `0` and try to execute it as a program. The line only works
+> inside `/etc/cron.d/`, parsed by cron. Use the heredoc above.
+
+For editing or troubleshooting, here's the record broken down field
+by field:
+
+| Field | Value | Notes |
+| --- | --- | --- |
+| Schedule | `0 3 * * *` | 03:00 daily |
+| User | `openbao` | cron runs the command as this user (NOT root) |
+| Env | `BAO_ADDR=http://127.0.0.1:8200` | Listener URL (matches the role's `openbao_api_addr`) |
+| Env | `BAO_TOKEN_FILE=/var/lib/openbao/.bao-token` | Path containing the snapshot-policy token from step 1 |
+| Command | `/usr/bin/bao operator raft snapshot save /backups/openbao-$(date +\%F).snap` | `\%F` is cron-escaped `%F` (`YYYY-MM-DD`) — cron strips bare `%` |
+| Logging | `2>&1 \| logger -t openbao-snapshot` | Routes stdout + stderr to syslog under tag `openbao-snapshot` |
+
+**Verify the run.** Wait for the first 03:00, then:
+
+```bash
+ls -la /backups/                                  # expect openbao-YYYY-MM-DD.snap
+sudo journalctl -t openbao-snapshot --since today # expect a single success line
+```
+
 Push snapshots offsite weekly via your preferred backup path.
 
-### Re-run a single Ansible task
+### Re-run a single Ansible task (from the workstation)
+
+From the repo root on the workstation:
 
 ```bash
 cd vms/openbao/ansible
@@ -246,13 +374,6 @@ ansible-playbook -i inventory.yml site.yml --tags <tag>   # if you've added tags
 just ansible-check openbao   # --check --diff (no changes)
 just ansible openbao
 ```
-
-### Resize a running VM
-
-`tofu apply` after editing `vms/openbao/terraform/main.tf`. Memory
-grows live; cores require a guest reboot. Disk grows live but the
-guest must `growpart` + `resize2fs` to use it (the Packer base does
-this automatically on first boot only — subsequent resizes are manual).
 
 ### Storage migration (local-lvm → nas-vms)
 
@@ -328,9 +449,9 @@ just ansible openbao
 | Resource | Value | Why |
 | --- | --- | --- |
 | vCPU | 2 | OpenBao is light — a few goroutines, KV store, audit log |
-| RAM | 2 GiB | Comfortable; ballooning disabled so mlock works |
+| RAM | 2 GiB | Comfortable for the secrets engine + audit log + UI |
 | Disk | 32 GiB | Mostly for /var/log + audit-log retention |
-| Balloon | 0 | OpenBao mlocks; ballooning would interfere |
+| Balloon | 0 | Predictable memory for a trust anchor (no surprise pressure on the secrets engine); was historically required by mlock, kept after OpenBao moved to cgroup MemorySwapMax=0 |
 | Machine | q35 | Matches the rest of the homelab |
 | CPU type | x86-64-v3 | Common baseline across the cluster's NUCs (Alder/Raptor Lake-P/H) — supports live migration |
 

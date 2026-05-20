@@ -130,6 +130,42 @@ first set up the workstation; refer back when something breaks.
 
 ---
 
+## Resizing a VM (any role)
+
+Every role shares the same Ubuntu Packer base, so the procedure is
+identical regardless of which VM you're growing.
+
+Edit the role's sizing variables in
+`vms/<role>/terraform/terraform.tfvars` (or in `terraform/main.tf`
+if the value is hardcoded in the module call), then:
+
+```bash
+just plan  <role>     # confirm only sizing fields change
+just apply <role>
+```
+
+| Resource | What happens on apply | What you need to do |
+| --- | --- | --- |
+| Memory | Grows live (no reboot for `balloon != 0` roles; `balloon=0` roles may need a stop+start if free host RAM was below the new target at first apply). | Usually nothing. |
+| Cores | Provider triggers a guest reboot automatically. | Reconnect afterward. |
+| Disk | Block device grows live; **the guest filesystem does not**. | On the VM: `sudo growpart /dev/sda 1 && sudo resize2fs /dev/sda1`. The Packer base does this on the *first* boot only — every subsequent disk grow is operator-driven. |
+
+**Plan-time preconditions worth knowing.** Some constraints are
+encoded in the shared module and surface at `tofu plan` time:
+
+- **`balloon=0` required for PCIe passthrough.** The LLM role (and
+  any future hardware-pinned role using `pci_devices`) carries a
+  precondition that refuses to apply a config violating this. If
+  your plan fails it, leave `balloon=0` even when bumping RAM.
+- **Storage class is not a resize.** Switching `disk_storage`
+  (e.g. `local-lvm` → `nas-vms`) destroys and recreates the disk.
+  See the role's README "Storage migration" section if applicable.
+
+The full input surface for sizing lives in
+[`modules/proxmox-vm/variables.tf`](../modules/proxmox-vm/variables.tf).
+
+---
+
 ## Where things are documented
 
 Don't re-derive — read the existing doc.

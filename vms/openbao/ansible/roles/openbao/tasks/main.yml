@@ -1,62 +1,46 @@
 ---
-# Install OpenBao from the official apt repo, lay down a Shamir-seal
-# config, and bring the service up. Stops short of `bao operator init`
-# — that's an operator ceremony per [[OpenBao Homelab Setup]] Phase 3
-# (5 unseal shares, custody split between KeePassXC + paper envelopes).
+# Configure OpenBao on a host where the operator has already installed
+# the .deb from github.com/openbao/openbao/releases (GPG-verified —
+# see vms/openbao/README.md "Install OpenBao"). The role lays down a
+# Shamir-seal config and brings the service up. Stops short of
+# `bao operator init` — that's an operator ceremony per
+# [[OpenBao Homelab Setup]] Phase 3 (5 unseal shares, custody split
+# between KeePassXC + paper envelopes).
+#
+# Why the operator installs the binary, not Ansible:
+#   OpenBao is a trust anchor. The hands-on GPG-verified .deb fetch
+#   keeps the chain of custody from upstream release to running
+#   binary under the operator's direct control, which matches the
+#   Shamir-share custody ceremony downstream. (OpenBao also doesn't
+#   publish an apt repository — apt.openbao.org is NXDOMAIN — so the
+#   alternative would be Ansible pinning a version + SHA, which adds
+#   maintenance without restoring the trust property.)
 #
 # Idempotency:
-#   * apt-key landing site: a fixed path under /etc/apt/keyrings.
-#   * Repo file: written via apt_repository (idempotent).
-#   * Config + override: managed via template/copy with explicit modes
-#     and notify-based handlers.
+#   * Pre-flight: stat — read-only.
+#   * Config + override: managed via template/copy with explicit
+#     modes and notify-based handlers.
 #   * Service: systemd module with enabled+started — re-running is a
 #     no-op once green.
 
-- name: Ensure dependencies for the apt repo are installed
-  ansible.builtin.apt:
-    name:
-      - ca-certificates
-      - curl
-      - gnupg
-    state: present
-    update_cache: true
-    # No cache_valid_time — see amp_game/tasks/main.yml for the
-    # explanation. Short version: Packer base wipes
-    # /var/lib/apt/lists/* but leaves /var/cache/apt/pkgcache.bin
-    # mtime recent, so cache_valid_time would mask the empty lists
-    # and `apt install` would fail on a fresh clone.
+# Fail fast if the operator hasn't installed OpenBao yet. The rest of
+# the role hard-depends on the openbao user/group (created by the
+# .deb postinst) and the unit file at /usr/lib/systemd/system/.
+- name: Pre-flight — confirm OpenBao binary is installed
+  ansible.builtin.stat:
+    path: /usr/bin/bao
+  register: openbao_binary
+  check_mode: false
 
-- name: Ensure /etc/apt/keyrings exists
-  ansible.builtin.file:
-    path: /etc/apt/keyrings
-    state: directory
-    owner: root
-    group: root
-    mode: "0755"
-
-# OpenBao publishes their archive key as an ASCII-armored .asc. Drop
-# it under keyrings as a stable filename and reference it from the
-# repo file's signed-by= attribute. This is the modern apt pattern
-# (replaces the deprecated apt-key add).
-- name: Install OpenBao apt archive key
-  ansible.builtin.get_url:
-    url: https://apt.openbao.org/pubkey.asc
-    dest: /etc/apt/keyrings/openbao.asc
-    owner: root
-    group: root
-    mode: "0644"
-
-- name: Add OpenBao apt repository
-  ansible.builtin.apt_repository:
-    repo: "deb [signed-by=/etc/apt/keyrings/openbao.asc] https://apt.openbao.org stable main"
-    filename: openbao
-    state: present
-    update_cache: true
-
-- name: Install openbao package
-  ansible.builtin.apt:
-    name: openbao
-    state: present
+- name: Assert OpenBao binary is present
+  ansible.builtin.assert:
+    that:
+      - openbao_binary.stat.exists
+    fail_msg: >-
+      OpenBao is not installed (/usr/bin/bao missing). Install the
+      .deb from github.com/openbao/openbao/releases first — see
+      vms/openbao/README.md "Install OpenBao" for the GPG-verified
+      ceremony — then re-run this role.
 
 # Sanity-check the version — Shamir is built into every release, but
 # the PKI/Transit work in [[13 Homelab Blueprint]] downstream needs
@@ -66,6 +50,10 @@
   ansible.builtin.command: bao --version
   register: openbao_version_raw
   changed_when: false
+  # bao --version is read-only; run it even in --check so the assert
+  # downstream has something to evaluate (otherwise check mode skips
+  # this and the assert fails on an undefined variable).
+  check_mode: false
 
 - name: Assert OpenBao >= 2.5
   ansible.builtin.assert:
@@ -74,7 +62,9 @@
     fail_msg: >-
       OpenBao version is older than 2.5.x.
       Installed: {{ openbao_version_raw.stdout | trim }}.
-      Check that /etc/apt/sources.list.d/openbao.list points at stable, then re-run.
+      Upgrade by reinstalling a newer .deb from
+      github.com/openbao/openbao/releases (see
+      vms/openbao/README.md "Install OpenBao"), then re-run.
 
 - name: Ensure OpenBao directories exist with correct ownership
   ansible.builtin.file:
@@ -100,12 +90,12 @@
     mode: "0640"
   notify: Restart openbao
 
-# Defensive: the apt-installed unit at /usr/lib/systemd/system/openbao.service
-# already includes LimitMEMLOCK=infinity + CAP_IPC_LOCK on current
-# packages, but the override drop-in re-asserts these so the service
-# survives an upstream unit change. Set openbao_install_systemd_override
-# to false in inventory to skip if you've verified the stock unit is
-# fine on your distro.
+# Replacement for the old mlock hardening: OpenBao now expects the
+# operator to restrict swap at the systemd cgroup level instead of
+# mlocking the process. Our override drops in MemorySwapMax=0 — see
+# files/openbao-override.conf for the file + rationale. Set
+# openbao_install_systemd_override to false in inventory to skip if
+# you've configured equivalent protection host-wide.
 - name: Ensure systemd drop-in directory exists
   ansible.builtin.file:
     path: /etc/systemd/system/openbao.service.d
@@ -115,7 +105,7 @@
     mode: "0755"
   when: openbao_install_systemd_override
 
-- name: Install systemd drop-in for mlock + IPC_LOCK
+- name: Install systemd drop-in for MemorySwapMax=0
   ansible.builtin.copy:
     src: openbao-override.conf
     dest: /etc/systemd/system/openbao.service.d/override.conf
@@ -133,6 +123,24 @@
     enabled: true
     state: started
     daemon_reload: true
+
+# Operator convenience: bao CLI defaults to HTTPS, but our listener
+# is plain HTTP (tls_disable=1 — TLS lands in Phase 4 of
+# [[13 Homelab Blueprint]]). Without BAO_ADDR exported, every
+# interactive `bao status` / `bao operator unseal` greets the user
+# with "http: server gave HTTP response to HTTPS client". Drop a
+# profile.d snippet so the env var is set on every login. When TLS
+# flips on later, openbao_api_addr updates to https:// and this
+# snippet follows automatically.
+- name: Export BAO_ADDR for interactive shells
+  ansible.builtin.copy:
+    dest: /etc/profile.d/openbao.sh
+    content: |
+      # Managed by Ansible — vms/openbao/ansible/roles/openbao
+      export BAO_ADDR={{ openbao_api_addr }}
+    owner: root
+    group: root
+    mode: "0644"
 
 # OpenBao API port. The Packer base ships ufw with 22/tcp already
 # allowed; this opens the API. We keep cluster port 8201 closed —
@@ -179,6 +187,8 @@
 # Final state check. `bao status` exits 2 when sealed (expected — we
 # have not initialized), 0 when unsealed, 1 on connection error.
 # We accept 0 OR 2; anything else means the service didn't come up.
+# Skipped in --check because the systemd start task above is a no-op
+# in check mode, so the service may not actually be listening.
 - name: Confirm openbao is responding (sealed=2 or unsealed=0 both OK)
   ansible.builtin.command: bao status
   environment:
@@ -186,7 +196,9 @@
   register: openbao_status
   failed_when: openbao_status.rc not in [0, 2]
   changed_when: false
+  when: not ansible_check_mode
 
 - name: Show bao status output
   ansible.builtin.debug:
     msg: "{{ openbao_status.stdout_lines }}"
+  when: openbao_status.stdout_lines is defined

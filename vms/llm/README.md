@@ -207,17 +207,6 @@ sudo apt install -y nvidia-driver-580-server
 sudo reboot
 ```
 
-### Resize a running VM
-
-`tofu apply` after editing `vms/llm/terraform/main.tf` (or setting the
-override in `terraform.tfvars`):
-
-- Memory grows live.
-- Cores require a guest reboot.
-- Disk grows live, but the guest must `sudo growpart /dev/sda 1 && sudo resize2fs /dev/sda1` to use the new space (the Packer base does this on first boot only).
-- **PCIe passthrough requires balloon=0** — the module's plan-time
-  precondition refuses to apply a config that violates this.
-
 ### GPU reset / VM reboot quirks
 
 The 3090 occasionally has trouble re-attaching to a VM after a hard

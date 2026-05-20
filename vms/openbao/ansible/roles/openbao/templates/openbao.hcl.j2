@@ -6,6 +6,11 @@
 # Phase 3). The unseal shares NEVER appear in this file or in Ansible
 # vars — they're surfaced once at init time and the operator captures
 # them by hand.
+#
+# No `disable_mlock` line: OpenBao removed mlock support (PR #363,
+# pre-v2.5) and now rejects the directive as a config error. Memory
+# protection is provided by systemd MemorySwapMax=0 in the drop-in
+# override at /etc/systemd/system/openbao.service.d/override.conf.
 
 storage "raft" {
   path    = "{{ openbao_data_dir }}"
@@ -21,4 +26,17 @@ api_addr     = "{{ openbao_api_addr }}"
 cluster_addr = "{{ openbao_cluster_addr }}"
 ui           = {{ openbao_ui | string | lower }}
 
-disable_mlock = {{ openbao_disable_mlock | string | lower }}
+{% if openbao_audit_enabled %}
+# Audit device — declarative in OpenBao (the runtime
+# `bao audit enable ...` API was removed pre-v2.5 and now returns
+# 400 unless `unsafe_allow_api_audit_creation = true`, which we
+# don't set). The label "audit-log" becomes the mount path in the
+# root namespace (sys/audit/audit-log/). OpenBao creates the file
+# on first write; we pre-create the parent directory in the role.
+audit "file" "audit-log" {
+  description = "Primary file audit device — every request/response logged"
+  options {
+    file_path = "{{ openbao_audit_log_path }}"
+  }
+}
+{% endif %}

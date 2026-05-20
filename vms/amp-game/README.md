@@ -152,20 +152,6 @@ just ansible-check amp-game   # --check --diff (no changes)
 just ansible amp-game
 ```
 
-### Resize a running VM
-
-Edit `terraform.tfvars` to bump sizing, then `just apply amp-game`. The
-provider's clone block reconciles in place:
-
-```bash
-# Edit terraform.tfvars: uncomment + raise vm_memory_mb / vm_cores
-just plan amp-game        # confirm only memory/cores change
-just apply amp-game
-```
-
-Memory grows live (no reboot needed when balloon=0). Cores require a
-VM reboot to take effect — the provider triggers it automatically.
-
 ### Recovery
 
 - **Take a Proxmox snapshot** before risky changes (UI: VM 110 → Snapshots).
