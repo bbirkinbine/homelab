@@ -1,0 +1,229 @@
+---
+# Prep an Ubuntu 24.04 VM for an operator-run hermes-agent install.
+# The role stops short of installing the hermes-agent binary itself —
+# upstream's installer is opinionated about doing its own bootstrap
+# (uv + Python 3.11 + a Node tarball under ~/.hermes/node/, plus
+# `~/.local/bin/hermes` symlink and a stack of $HOME/.hermes/*
+# directories), so pinning the install in IaC would re-litigate
+# decisions upstream is already making for us. Instead the role gets
+# the host to a state where the upstream `curl ... | bash` Just Works
+# without sudo prompts mid-install:
+#
+#   * The handful of system packages the installer would otherwise
+#     `sudo apt install -y` mid-stream (ripgrep, ffmpeg, git +
+#     build-tool helpers) are pre-installed via apt here, so the
+#     installer's "sudo -n true" probe finds nothing to install and
+#     skips sudo entirely. Without this step, mid-install sudo
+#     prompts derail the operator's interactive flow.
+#   * `hermes` system user with a real $HOME under /home/hermes, bash
+#     login shell, and linger enabled (so `hermes gateway install`'s
+#     user-systemd unit survives logout — same shape as openclaw).
+#   * apt-daily timers active so security patches flow on the long-
+#     running VM.
+#
+# See vms/hermes/README.md "Install hermes-agent" for the canonical
+# operator install command, and "First-setup ceremony" for the
+# interactive provider auth + optional gateway pairing steps after
+# install.
+#
+# Idempotency: every task here is either an apt module call, an
+# ansible.builtin.user call with system=true, or a copy/blockinfile —
+# all idempotent on re-run.
+#
+# Check-mode behavior: there's no third-party apt repo to bootstrap
+# (the upstream installer fetches its own runtime), so the
+# check_mode: false convention from the claws / pbs-hosts roles
+# doesn't apply here. `just ansible-check hermes` produces a clean
+# dry-run diff out of the box.
+
+- name: Wait for cloud-init to finish
+  ansible.builtin.command: cloud-init status --wait
+  changed_when: false
+  # cloud-init might still be finishing apt-daily / unattended-upgrades
+  # background work the moment Ansible first connects. Waiting here
+  # avoids dpkg-lock races on the first apt task below.
+
+# --- System prereqs the upstream installer would otherwise sudo for ---------
+
+# These packages cover the install.sh script's "apt install -y" branch
+# (ripgrep + ffmpeg) plus the helpers the installer auto-offers to
+# pull on Debian/Ubuntu when building Python wheels (gcc, python3-dev,
+# libffi-dev). Pre-installing them means:
+#   1. The installer's `sudo -n true` probe finds no sudo needed.
+#   2. The interactive operator flow never gets interrupted by a
+#      surprise password prompt halfway through.
+#   3. `git` is here even though the upstream installer falls back to
+#      a bundled MinGit on Windows — on Linux it assumes system git.
+- name: Install hermes-agent runtime prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - git
+      - gnupg
+      - ripgrep
+      - ffmpeg
+      # Build tools the installer auto-offers when compiling Python
+      # wheels for any package without a prebuilt manylinux artifact
+      # in the dep tree. Pre-installing keeps the install non-
+      # interactive — without these, the installer prompts during the
+      # `uv pip install -e '.[all]'` step.
+      - gcc
+      - python3-dev
+      - libffi-dev
+    state: present
+    update_cache: true
+    # No cache_valid_time — the Packer base wipes /var/lib/apt/lists/*
+    # but leaves /var/cache/apt/pkgcache.bin mtime recent, so
+    # cache_valid_time would mask the empty lists and `apt install`
+    # would fail on a fresh clone. Same pattern as openbao / openclaw /
+    # nemoclaw.
+
+# --- Service user -----------------------------------------------------------
+
+- name: Create hermes service group
+  ansible.builtin.group:
+    name: "{{ hermes_service_group }}"
+    state: present
+    system: true
+
+# Real home + bash shell so the operator can `sudo -u hermes -i`
+# cleanly. The upstream installer assumes a real $HOME and writes
+# under ~/.hermes/, ~/.local/bin/, and appends to ~/.bashrc.
+- name: Create hermes service user
+  ansible.builtin.user:
+    name: "{{ hermes_service_user }}"
+    group: "{{ hermes_service_group }}"
+    home: "{{ hermes_service_home }}"
+    shell: "{{ hermes_service_shell }}"
+    create_home: true
+    system: true
+    state: present
+
+# Without linger, a user-systemd unit installed via `hermes gateway
+# install` would only run while the operator has an active login
+# session — it'd die on SSH disconnect. Linger keeps the user's
+# systemd instance alive across logout so the gateway survives. Same
+# rationale as openclaw / nemoclaw.
+- name: Enable systemd linger for service user
+  ansible.builtin.command: "loginctl enable-linger {{ hermes_service_user }}"
+  args:
+    creates: "/var/lib/systemd/linger/{{ hermes_service_user }}"
+  when: hermes_enable_linger
+
+# Grant read access to the user journal so `journalctl --user -u
+# hermes-gateway` works as the hermes user itself. Without this,
+# user-unit messages still land in /var/log/journal/ but hermes can't
+# read its own entries — only root and members of `systemd-journal`
+# / `adm` can. Compatible with this role's "agent runs the machine"
+# trust model (opt-in NOPASSWD sudo below); the journal read access
+# doesn't widen the security envelope when the user can already
+# escalate.
+- name: Add hermes service user to systemd-journal group
+  ansible.builtin.user:
+    name: "{{ hermes_service_user }}"
+    groups: systemd-journal
+    append: true
+
+# `sudo -u hermes -i` spawns a login shell without going through
+# pam_systemd (Ubuntu's /etc/pam.d/sudo pulls in
+# common-session-noninteractive, which doesn't register a logind
+# session), so $XDG_RUNTIME_DIR stays unset and any
+# `systemctl --user` / `journalctl --user` call in that shell fails
+# with "Failed to connect to bus: No medium found". The user@<uid>
+# .service instance IS running (linger above ensures that) — the
+# shell just isn't pointed at its bus. Drop a guarded export into
+# the service user's .bashrc so the documented operator path
+# (sudo -u hermes -i, then systemctl --user ...) works without a
+# manual export. The guard is a no-op when XDG_RUNTIME_DIR is
+# already set (e.g. when SSH'ing directly as hermes, where
+# pam_systemd does fire). blockinfile markers keep this coexisting
+# cleanly with whatever the upstream hermes installer later appends
+# to .bashrc (it adds ~/.local/bin to PATH there).
+- name: Ensure XDG_RUNTIME_DIR is set in hermes login shells
+  ansible.builtin.blockinfile:
+    path: "{{ hermes_service_home }}/.bashrc"
+    create: true
+    owner: "{{ hermes_service_user }}"
+    group: "{{ hermes_service_group }}"
+    mode: "0644"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - hermes XDG_RUNTIME_DIR"
+    block: |
+      # See vms/hermes/README.md "Troubleshooting" for the rationale.
+      if [ -z "$XDG_RUNTIME_DIR" ] && [ -d "/run/user/$(id -u)" ]; then
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+      fi
+
+# NOPASSWD sudo for the hermes service user. Deliberate trust call —
+# matches the common "agent runs the whole machine" deployment
+# pattern (openclaw uses the same toggle). Flip hermes_grant_sudo=false
+# in inventory to drop this and treat the service user as strictly
+# unprivileged. validate: visudo -cf prevents a broken drop-in from
+# locking the host out of sudo.
+- name: Grant hermes service user NOPASSWD sudo
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ hermes_service_user }}"
+    content: "{{ hermes_service_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s
+  when: hermes_grant_sudo
+
+- name: Remove sudoers drop-in if hermes_grant_sudo is disabled
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/{{ hermes_service_user }}"
+    state: absent
+  when: not hermes_grant_sudo
+
+# --- Patching ---------------------------------------------------------------
+#
+# Same pattern as openbao / openclaw / nemoclaw — the Packer base
+# masks apt-daily timers so locked-down roles can stay frozen. hermes
+# is a long-running agent host and we want security patches flowing.
+
+- name: Unmask apt-daily timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    masked: false
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+- name: Enable unattended-upgrades config
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Start apt-daily timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+- name: Show next-steps reminder
+  ansible.builtin.debug:
+    msg: >-
+      Prereqs are in place: ripgrep + ffmpeg + git + build tools on
+      PATH, service user '{{ hermes_service_user }}' with $HOME at
+      {{ hermes_service_home }} (linger enabled). The upstream
+      installer brings its own uv + Python 3.11 + Node.js bundle —
+      run it as the service user (no sudo needed; we pre-installed
+      every package it would otherwise prompt for):
+        ssh hermes-admin@<vm-ip>
+        sudo -u {{ hermes_service_user }} -i
+        curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+        source ~/.bashrc   # pick up ~/.local/bin on PATH
+        hermes setup       # interactive provider + (optional) gateway wizard
+      See vms/hermes/README.md "Install hermes-agent" and "First-setup ceremony".
+  when: not ansible_check_mode

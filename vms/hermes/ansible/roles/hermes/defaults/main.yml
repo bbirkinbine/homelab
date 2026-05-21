@@ -1,0 +1,33 @@
+---
+# Defaults for the hermes role. Override in inventory, group_vars, or
+# host_vars if a deployment diverges; the defaults match a single-host
+# Ubuntu 24.04 deployment with hermes-agent running as a dedicated
+# service user.
+
+# --- Service user ---
+# NOT the admin user from cloud-init (that's hermes-admin, used only
+# for SSH + sudo). The agent runs as a dedicated unprivileged user so
+# its $HOME (~/.hermes/, ~/.local/bin/hermes, the venv + the bundled
+# Node tarball) is owned by one identity.
+#
+# Real shell + linger (matching the openclaw role) so the operator
+# can `sudo -u hermes -i` and run upstream's installer plus the
+# optional `hermes gateway install` (which writes a user-systemd unit
+# under ~/.config/systemd/user — needs linger to survive logout).
+hermes_service_user: hermes
+hermes_service_group: hermes
+hermes_service_home: /home/hermes
+hermes_service_shell: /bin/bash
+hermes_enable_linger: true
+
+# NOPASSWD sudo for the hermes service user. Default OFF — the role
+# treats this as a deliberate trust call the operator must make in
+# inventory, not a silent default. Common hermes-agent deployments
+# DO grant the agent sudo (the "let the agent run the whole machine"
+# pattern, matching how a lot of people use the upstream CLI), but
+# the role's baseline is least-privilege. To enable, set
+# `hermes_grant_sudo: true` in inventory.yml and re-run. Mirrors the
+# openclaw role's trust toggle. The sandboxed alternative is
+# vms/nemoclaw/, which keeps its service user unprivileged AND runs
+# the agent inside an OpenShell sandbox.
+hermes_grant_sudo: false

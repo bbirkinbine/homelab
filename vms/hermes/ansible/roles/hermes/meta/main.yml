@@ -1,0 +1,22 @@
+---
+galaxy_info:
+  role_name: hermes
+  author: brian.birkinbine
+  description: "System prereqs (ripgrep + ffmpeg + git + build tools), service user, and patch flow for an operator-run NousResearch hermes-agent install."
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+
+dependencies: []
+
+collections:
+  # community.general is pulled in even though the role currently has
+  # no ufw rule (hermes's transports are mostly outbound — LLM HTTPS
+  # to the provider, polling for Telegram/Discord/Slack). Keeping the
+  # collection here matches the other VM roles and means an operator
+  # adding a future inbound listener doesn't have to debug a missing
+  # collection.
+  - community.general

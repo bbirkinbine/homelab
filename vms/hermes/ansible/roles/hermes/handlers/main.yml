@@ -1,0 +1,12 @@
+---
+# Handlers for the hermes role. Triggered via `notify:` in tasks/main.yml.
+#
+# Currently the role's tasks don't notify any handler — every state
+# transition (apt install, user create, blockinfile, sudoers drop-in)
+# either takes effect immediately or doesn't need a daemon reload.
+# Keep the Reload systemd handler as forward-compat for any future
+# task that drops a unit file into /etc/systemd/system/.
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true

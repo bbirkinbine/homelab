@@ -1,0 +1,17 @@
+---
+# vms/hermes/ansible/site.yml
+#
+# Top-level play for the hermes role. Runs the `hermes` role
+# against the inventory's `hermes_servers` host group.
+#
+# Usage from repo root:
+#   just ansible hermes
+# Or directly:
+#   cd vms/hermes/ansible && ansible-playbook -i inventory.yml site.yml
+
+- name: Bootstrap hermes
+  hosts: hermes_servers
+  become: true
+  gather_facts: true
+  roles:
+    - role: hermes

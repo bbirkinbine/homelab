@@ -1,0 +1,14 @@
+---
+# Galaxy collections this role pulls. Install with:
+#   just ansible-deps hermes
+# Or directly:
+#   ansible-galaxy collection install -r requirements.yml
+#
+# community.general isn't strictly required by the current tasks —
+# hermes has no inbound port to ufw-open by default — but keeping it
+# aligned with the other VM roles means an operator adding a future
+# listener (gateway HTTP, custom skill webhook) doesn't need to debug
+# a missing collection.
+collections:
+  - name: community.general
+    version: ">=8.0.0"
