@@ -12,13 +12,13 @@ The repo is **public** on GitHub. Treat every change as something a stranger wil
 
 ---
 
-## Active context (as of 2026-05-11)
+## Active context (as of 2026-05-21)
 
 A few states that won't be obvious from the code alone:
 
 **Both base templates are committed and shipping.** Treat `packer/ubuntu-24-04-base/` and `packer/windows-11-base/` as load-bearing — both build reproducibly and have been validated end-to-end. The Windows pipeline shipped in commit 5135652 (proxmox-iso + virtualbox-iso). When working on one base, don't modify the other for "while I'm here" cleanups; if a fix genuinely belongs across both, surface it and ask first.
 
-**Cluster transition in progress.** `README.md` currently describes the three NUCs as independent (per-node tokens, per-node template builds). The lab is moving to a 3-node Proxmox cluster (corosync) with NFS-shared storage from the Asustor AS6706T. Authoritative design lives in the project's private design vault — ask the maintainer if you need access. Until that transition lands in a commit:
+**3-node Proxmox cluster is live.** The lab runs a 3-node corosync cluster (`homelab`), quorate since 2026-05-13: nodes `pve12t` / `pve13m` / `pve13t`, corosync ring0 on the LAN and ring1 on the Thunderbolt fabric, live migration over the TB fabric, cluster firewall enabled, and NFS-shared storage (`nas-vms`) from the Asustor AS6706T registered cluster-wide. Authoritative design lives in the project's private design vault — ask the maintainer if you need access. Working guidance for the cluster:
 
 - **Proxmox hostnames stay `pveXX` (`pve12t`, `pve13m`, `pve13t`).** Physical-chassis labels in the design vault (`nuc12 / nuc13-mini / nuc13-tall`) are NOT Proxmox node names — don't rename one to the other.
 - **`cpu_type = "x86-64-v3"`** is the right module default (set in `modules/proxmox-vm/variables.tf`) for cluster-mobile VMs; it's the common baseline across Alder/Raptor Lake-P/H. Use `host` only on hardware-pinned VMs (eGPU on `pve12t` for the LLM role, USB-HSM passthrough for the Root CA role).
