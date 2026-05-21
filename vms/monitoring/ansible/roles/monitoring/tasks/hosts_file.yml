@@ -1,8 +1,23 @@
 ---
-# Maintain /etc/hosts entries for scrape targets the monitoring VM
-# needs to reach by name (prometheus-node-exporter on each PVE node +
-# pbs01 + each guest VM; pbs-exporter's PBS_ENDPOINT also uses a
-# hostname).
+# Maintain host entries for scrape targets the monitoring VM must reach
+# by name: prometheus-node-exporter on each PVE node + pbs01, each guest
+# VM, and pbs-exporter's hostname-based PBS_ENDPOINT.
+#
+# IMPORTANT — why this writes to TWO files. Every VM cloned from the
+# homelab Packer base has `manage_etc_hosts: True` (set in
+# /etc/cloud/cloud.cfg.d/99-homelab-datasource.cfg). cloud-init then
+# regenerates /etc/hosts from /etc/cloud/templates/hosts.debian.tmpl on
+# EVERY boot, silently discarding anything written straight to
+# /etc/hosts. Writing only to /etc/hosts means the block survives until
+# the next reboot and then vanishes — taking the PVE/PBS dashboards with
+# it (the PVE nodes + pbs01 have static IPs and are not in router DNS,
+# so name resolution depends entirely on this block). The block is
+# therefore written to both:
+#   - hosts.debian.tmpl : durable — cloud-init renders it into
+#                         /etc/hosts on every boot.
+#   - /etc/hosts        : immediate effect this run, no reboot needed.
+# blockinfile keys on the marker, so the rendered-from-template copy and
+# the direct copy reconcile to a single block — no duplication.
 #
 # Sources of truth (in priority order):
 #   1. `monitoring_lan_hosts` set in inventory.yml — explicit operator
@@ -20,9 +35,9 @@
 #   3. Nothing populated (LAN-DNS-only deploy or running ad-hoc without
 #      the sidecar) → skip silently.
 
-- name: Maintain /etc/hosts entries for scrape targets
+- name: Maintain scrape-target host entries (cloud-init template + live /etc/hosts)
   ansible.builtin.blockinfile:
-    path: /etc/hosts
+    path: "{{ item }}"
     block: |
       {% if monitoring_lan_hosts | default([]) | length > 0 %}
       {% for h in monitoring_lan_hosts %}
@@ -49,6 +64,9 @@
       {% endif %}
     marker: "# {mark} ANSIBLE MANAGED — monitoring role scrape targets"
     create: false
+  loop:
+    - /etc/cloud/templates/hosts.debian.tmpl
+    - /etc/hosts
   when: >-
     (monitoring_lan_hosts | default([]) | length > 0)
     or (groups.get('pve_hosts', []) | length > 0)
