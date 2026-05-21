@@ -26,6 +26,7 @@ The live docs (`docs/*.md`, `*/README.md`) describe *current* state and get prun
 | [0006](0006-packer-templates-per-node.md) | Packer base templates per-node with distinct VMIDs | 2026-05-14 | Accepted |
 | [0007](0007-thunderbolt-fabric-line-topology.md) | Thunderbolt fabric topology: line, not full mesh | 2026-05-11 | Accepted |
 | [0008](0008-service-vmid-range.md) | Service VMID range 8000-8099 (separated from workloads) | 2026-05-14 | Accepted |
+| [0009](0009-prevent-destroy-pet-vms.md) | `prevent_destroy = true` is the default for pet VMs | 2026-05-21 | Accepted |
 
 ## Adding a new ADR
 
