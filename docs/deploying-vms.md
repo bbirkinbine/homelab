@@ -302,6 +302,33 @@ Concrete steps:
 
 ---
 
+## One-time iid pin migration (existing VMs)
+
+The shared module pins cloud-init's `instance-id` to `iid-<name>-<vmid>` via a `meta_data_file_id` snippet. New VMs get the pin at create time and are stable from day one. Existing VMs (provisioned before this module change) need a one-time operator step because `meta_data_file_id` is `ForceNew` in `bpg/proxmox` — assigning it via tofu would destroy the VM. The module's `lifecycle { ignore_changes = [initialization[0].meta_data_file_id] }` makes the assignment dormant for existing VMs; the operator attaches the snippet out-of-band instead.
+
+After `tofu apply` against an existing role completes (it will report only "1 to add" for the meta_data snippet — no VM changes), attach the snippet:
+
+```bash
+# Per-role variables — pull from the role's terraform.tfvars / main.tf
+ROLE=openbao
+VMID=8030
+NODE=pve12t
+STORAGE=local      # the role's snippets_storage (local for local-lvm roles, nas-vms for cluster-mobile)
+
+# Attach both user-data + meta-data snippets to the VM's cloud-init drive
+ssh "$NODE" "qm set $VMID --cicustom user=$STORAGE:snippets/vm-$VMID-$ROLE-user.yaml,meta=$STORAGE:snippets/vm-$VMID-$ROLE-meta.yaml"
+
+# Reboot — cloud-init sees the new meta-data, treats it as a new instance
+# ONCE, regenerates host keys one final time, caches the pinned iid forever
+ssh "$NODE" "qm reboot $VMID"
+```
+
+Cost: one final SSH host-key warning on the workstation after the reboot (scrub the stale `known_hosts` entry with `ssh-keygen -R <host>`). After that, host keys are stable across all future reboots, migrations, and cluster restarts — the bug is fixed for that VM.
+
+Skipping the migration is safe: existing VMs continue to behave as before (host keys regenerate on iid drift). The fix only takes effect after the `qm set` step.
+
+---
+
 ## Common gotchas
 
 - **Cluster transition is not done yet.** Hostnames stay `pveXX`

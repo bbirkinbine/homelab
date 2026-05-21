@@ -29,6 +29,37 @@ resource "proxmox_virtual_environment_file" "user_data" {
   }
 }
 
+// Pinned cloud-init meta-data. Without an explicit meta_data_file_id,
+// Proxmox auto-generates meta-data whose `instance-id` is a hash of the
+// VM + drive state — that hash drifts across live-migration, snippet
+// re-upload, and plain cluster reboots. Each drift makes cloud-init
+// think it's a fresh instance, so `cc_ssh` regenerates host keys and
+// every workstation gets "REMOTE HOST IDENTIFICATION HAS CHANGED" on
+// next connect.
+//
+// Pinning instance-id to `iid-<name>-<vmid>` (both fixed for the
+// lifetime of a role) holds cloud-init's per-instance state stable —
+// host keys, machine-id, user creation all become true once-only
+// events for the lifetime of the VM.
+//
+// This resource ALWAYS creates the snippet file (cheap, non-destructive
+// upload). Whether the VM actually uses the pinned meta-data is gated
+// by the lifecycle ignore_changes below — see that block for the
+// new-vs-existing VM behavior.
+resource "proxmox_virtual_environment_file" "meta_data" {
+  content_type = "snippets"
+  datastore_id = var.snippets_storage
+  node_name    = var.node_name
+
+  source_raw {
+    data      = <<-EOT
+      instance-id: iid-${var.name}-${var.vm_id}
+      local-hostname: ${var.name}
+    EOT
+    file_name = "vm-${var.vm_id}-${var.name}-meta.yaml"
+  }
+}
+
 resource "proxmox_virtual_environment_vm" "this" {
   name      = var.name
   vm_id     = var.vm_id
@@ -141,6 +172,34 @@ resource "proxmox_virtual_environment_vm" "this" {
   //     pages out from under a device with DMA access.
   //   * The PCIe topology only exists in q35 — i440fx exposes legacy PCI.
   lifecycle {
+    // Pet VMs (ADR-0009). Refuse plan-time destroys so that bpg ForceNew
+    // attributes (e.g. cloud-init `meta_data_file_id`, certain disk
+    // attribute changes) fail with a clear error instead of silently
+    // destroying the VM and its on-disk state. An intentional rebuild
+    // requires removing this lifecycle block (or just `prevent_destroy`
+    // line) in a deliberate PR — that friction is the feature.
+    prevent_destroy = true
+
+    // Cloud-init meta_data_file_id is ForceNew in bpg/proxmox. Adding
+    // it to an existing VM (which has no meta_data_file_id in its
+    // current state) would propose to destroy and recreate the VM.
+    // Ignoring drift on this single attribute makes the add a NEW-VM-only
+    // change: tofu sets it at create time (no prior state to compare),
+    // but tofu refuses to "update" it on existing VMs — so the VM
+    // survives. Existing VMs get the pinned iid via an out-of-band
+    // `qm set --cicustom user=...,meta=...` migration step that the
+    // operator runs once per role (see vms/_template/README.md). After
+    // the qm set + one reboot, cloud-init caches the pinned iid and
+    // host keys are stable across all future reboots.
+    //
+    // The list element syntax `initialization[0].meta_data_file_id`
+    // targets the meta_data_file_id attribute within the (single-instance)
+    // initialization block. If a future bpg release relaxes the ForceNew
+    // on this attribute, this ignore_changes line can be removed.
+    ignore_changes = [
+      initialization[0].meta_data_file_id,
+    ]
+
     precondition {
       condition     = length(var.hostpci_devices) == 0 || var.balloon_mb == 0
       error_message = "PCIe passthrough (hostpci_devices) requires balloon_mb = 0 — pinned RAM is mandatory for devices with DMA access."
@@ -165,6 +224,7 @@ resource "proxmox_virtual_environment_vm" "this" {
     datastore_id      = var.disk_storage
     interface         = "ide2"
     user_data_file_id = proxmox_virtual_environment_file.user_data.id
+    meta_data_file_id = proxmox_virtual_environment_file.meta_data.id
 
     ip_config {
       ipv4 {
