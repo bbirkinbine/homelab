@@ -41,7 +41,12 @@ Concrete swap-out list (in addition to the `__ROLE__` rename):
 - `terraform/main.tf` — pick a unique `vm_id` per
   [ADR-0008](../../docs/decisions/0008-service-vmid-range.md) (services
   8000-8099, workloads 100-399); right-size `cores` / `memory_mb` /
-  `disk_size_gb`; replace the sizing-rationale comments.
+  `disk_size_gb`; replace the sizing-rationale comments. The
+  `network_devices` MAC pin is intentionally commented out — leave it
+  that way for the first apply, then capture the assigned MAC and
+  uncomment + pin it (see the inline comment in the template main.tf
+  for the exact command). Skipping the pin step means the VM's MAC
+  (and therefore its DHCP lease and IP) will churn on future applies.
 - `terraform/variables.tf` — keep the storage knobs (the convention
   every role follows). Override the `disk_storage` / `snippets_storage`
   defaults only if the role is hardware-pinned or I/O-latency-sensitive.

@@ -81,6 +81,20 @@ module "__ROLE__" {
   disk_storage     = var.disk_storage
   snippets_storage = var.snippets_storage
 
+  // Pin the NIC MAC so the DHCP lease (and therefore the IP) survives any
+  // tofu apply. Without a pin, bpg/proxmox auto-generates a fresh MAC on
+  // NIC recreation, which churns the lease and breaks /etc/hosts + ARP
+  // caches. Two-step workflow for a new role:
+  //   1. Leave this block commented out for the FIRST tofu apply — bpg
+  //      will auto-generate a MAC and the VM will boot.
+  //   2. After first apply, capture the assigned MAC and pin it:
+  //        ssh <node> "qm config <vmid> | awk -F'=|,' '/^net0:/ {print \$2}'"
+  //      Then uncomment the block, paste the captured value below, and
+  //      re-run tofu apply (will be a no-op for the NIC).
+  // network_devices = [
+  //   { bridge = "vmbr0", mac_address = "BC:24:11:XX:XX:XX" }
+  // ]
+
   tags = ["__ROLE__", "tofu"]
 
   // The cloud-init template lives in the role's cloud-init/ subfolder
