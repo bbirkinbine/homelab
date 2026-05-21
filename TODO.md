@@ -71,6 +71,36 @@ ADR-0006 per-node template VMID conventions):
    already cloned from the prior template. Only new role deploys
    pick up the updated base.
 
+### Post-incident IaC safety hardening (2026-05-21 destructive apply)
+
+A `tofu apply -auto-approve` migration loop destroyed four pet VMs on
+2026-05-21 — all recovered from PBS; the detailed post-mortem lives in
+the project's private design vault. The provider-level cause is fixed
+([ADR-0009](docs/decisions/0009-prevent-destroy-pet-vms.md) `prevent_destroy`
+plus the non-destructive cloud-init iid pin, commit `df5fe4e`). The
+process-level hardening is still open:
+
+- **Drop `-auto-approve`** from every operator-facing apply command in
+  `README.md` and `CLAUDE.md`. Replace with `tofu plan -out tfplan`
+  then `tofu apply tfplan`, so the `N to destroy` line is always read
+  before execution. Cheapest item, direct cause — do this first.
+- **Pre-apply snapshot wrapper** — a `Justfile` recipe that runs
+  `qm snapshot <vmid> pre-apply-<unix>` against every VM in a plan
+  before applying, auto-pruning snapshots older than 7 days. Converts
+  the once-a-day PBS recovery floor into a seconds-old rollback.
+- **Conftest / OPA plan gate** — a policy run (CI or pre-push hook)
+  that fails any `tofu show -json` plan containing a `delete` action
+  without an explicit override label. Defense-in-depth behind
+  `prevent_destroy`.
+- **Remote tfstate backend** — tfstate is workstation-only and
+  gitignored; a workstation loss compounds this class of incident.
+  MinIO on the Asustor (or S3) with native locking. Bigger lift —
+  likely warrants its own ADR.
+
+Trigger that makes it urgent: the next destructive-apply near-miss.
+The `-auto-approve` removal should not wait — it is cheap and was the
+direct cause.
+
 ## Done
 
 ### ~~Module output `mac` returns loopback `00:00:00:00:00:00`~~
