@@ -5,13 +5,29 @@
 # the MVP Dashboard]] (vault). Operator-facing flow is in vms/monitoring/README.md.
 
 # --- Scrape targets ---------------------------------------------------------
-# Inventories that prometheus.yml will scrape. Keep them as plain hostnames
-# (not IPs) so DNS / /etc/hosts changes propagate without re-templating. The
-# monitoring VM's own /etc/hosts ships LAN entries for these via the
-# pve-host role's hosts_file.yml output — if you haven't bootstrapped the
-# PVE/PBS hosts yet, override here with IPs.
+# Keep targets as plain hostnames (not IPs) so DNS / /etc/hosts changes
+# propagate without re-templating. The monitoring VM's own /etc/hosts ships
+# LAN entries for these via hosts_file.yml — if you haven't bootstrapped the
+# PVE/PBS hosts yet, override monitoring_lan_hosts (below) with IPs.
+#
+# Two layers feed the node_exporter scrape job:
+#
+#   1. monitoring_static_targets — the non-role hosts (the monitoring VM
+#      itself, the PVE cluster nodes, the PBS host). They aren't managed
+#      under vms/<role>/, so they're listed explicitly here. Edit this list
+#      when adding/removing a PVE node or a backup-target host.
+#
+#   2. Per-role guest VMs — discovered at deploy time by discover_targets.yml,
+#      which globs vms/*/monitoring-target.yml. A role cloned from
+#      vms/_template/ ships that marker file, so it's scraped by default; to
+#      opt a role out, delete its file (git-visible). rootca keeps no file —
+#      air-gapped + HSM-pinned, security posture trumps observability.
+#
+# discover_targets.yml composes monitoring_node_exporter_targets =
+# monitoring_static_targets + discovered guests. The seed below just keeps
+# the var defined if discovery is somehow skipped (e.g. ad-hoc --tags run).
 
-monitoring_node_exporter_targets:
+monitoring_static_targets:
   - host: monitoring
     instance: monitoring
   - host: pve12t
@@ -22,22 +38,8 @@ monitoring_node_exporter_targets:
     instance: pve13t
   - host: pbs01
     instance: pbs01
-  # Guest VMs — node_exporter installed via install-node-exporter-guests.yml.
-  # Lets the rightsizing dashboard see kernel PSI + load + MemAvailable
-  # from inside each guest (hypervisor-view metrics from pve-exporter
-  # can't distinguish working-set memory from page cache). rootca is
-  # intentionally omitted — air-gapped + HSM-pinned, security posture
-  # trumps observability there.
-  - host: openbao
-    instance: openbao
-  - host: llm
-    instance: llm
-  - host: amp-game
-    instance: amp-game
-  - host: openclaw
-    instance: openclaw
-  - host: nemoclaw
-    instance: nemoclaw
+
+monitoring_node_exporter_targets: []
 
 # Where pve_exporter pulls from. One target per cluster node so a node-local
 # outage doesn't blind the whole cluster view. The exporter scrapes the API
@@ -159,25 +161,23 @@ monitoring_nut_instance_label: "nas"
 monitoring_lan_hosts: []
 
 # Guest VM inventory groups whose hosts the role pulls into /etc/hosts.
-# Each entry is an Ansible group name (hyphens converted to underscores
-# per Ansible's group-name normalization). For each group, the role
-# reads `ansible_host` from each member and writes a `<ip>  <hostname>`
-# line into /etc/hosts on the monitoring VM. The corresponding inventory
-# must be listed in vms/monitoring/ansible/.extra-inventories so the
-# group is populated at play time; missing inventories are skipped
-# silently (Justfile loader has an [ -f ] guard).
+# Each entry is an Ansible group name (hyphens converted to underscores per
+# Ansible's group-name normalization). For each group, the role reads
+# `ansible_host` from each member and writes a `<ip>  <hostname>` line into
+# /etc/hosts on the monitoring VM, so Prometheus's node_exporter scrapes
+# resolve by hostname.
 #
-# Why pull from per-role inventories instead of duplicating IPs here:
-# the inventories are gitignored (real IPs), so this stays in alignment
-# with the repo's "VM IPs don't land in committed files" hygiene rule
-# (root CLAUDE.md). Adding a new guest role's hostname to /etc/hosts
-# is a one-line append below.
-monitoring_guest_inventory_groups:
-  - openbao_servers
-  - llm_servers
-  - amp_game_servers
-  - openclaw_servers
-  - nemoclaw_servers
+# DERIVED, not hand-maintained: discover_targets.yml sets this from the same
+# vms/*/monitoring-target.yml glob that builds the scrape list, mapping each
+# discovered instance to its `<role>_servers` group. The seed below just keeps
+# the var defined if discovery is skipped. The matching inventories are loaded
+# via vms/monitoring/ansible/.extra-inventories (a glob), so the groups are
+# populated at play time; absent inventories are skipped silently.
+#
+# Why pull from per-role inventories instead of duplicating IPs here: the
+# inventories are gitignored (real IPs), keeping this aligned with the repo's
+# "VM IPs don't land in committed files" hygiene rule (root CLAUDE.md).
+monitoring_guest_inventory_groups: []
 
 # --- Grafana ----------------------------------------------------------------
 

@@ -1,0 +1,65 @@
+---
+# Discover which guest VMs to scrape by globbing vms/*/monitoring-target.yml.
+#
+# This is the mechanism behind "new VMs are monitored by default": a role
+# cloned from vms/_template/ ships a monitoring-target.yml (the __ROLE__
+# sed-rename fills in its host/instance), so it's picked up here with no edit
+# to this role. Deleting a role's file opts it out — a git-visible decision
+# that also self-cleans when the role directory is removed. See
+# docs/monitoring-alerting.md "Lifecycle and target discovery".
+#
+# Runs FIRST in main.yml: hosts_file.yml and config.yml both consume the
+# facts set here. lookup() always executes on the Ansible control node (where
+# the repo is checked out), so the globs/reads resolve against the repo tree
+# regardless of which host the play targets — no delegate_to needed.
+
+- name: Find per-role monitoring-target.yml files
+  # find runs on the host it's delegated to; delegate to localhost (the
+  # control node) because that's where the repo is checked out. The
+  # fileglob lookup can't do directory wildcards (vms/*/...), so find with
+  # recurse is the working idiom. playbook_dir is vms/monitoring/ansible,
+  # so ../.. is the vms/ dir.
+  ansible.builtin.find:
+    paths: "{{ playbook_dir }}/../.."
+    patterns: monitoring-target.yml
+    recurse: true
+    file_type: file
+  register: monitoring_target_find
+  delegate_to: localhost
+  become: false
+
+- name: Reduce to role marker paths (drop vms/_template and other scaffolding)
+  ansible.builtin.set_fact:
+    # reject('/_') drops any vms/_*/ path, matching the `_*`-skip convention
+    # in scripts/check-role-consistency.sh. Sorted for deterministic output.
+    monitoring_target_files: >-
+      {{ monitoring_target_find.files | map(attribute='path')
+         | reject('search', '/_')
+         | sort }}
+
+- name: Load discovered targets into a list of {host, instance} dicts
+  ansible.builtin.set_fact:
+    monitoring_discovered_targets: >-
+      {{ monitoring_discovered_targets | default([])
+         + [ lookup('file', item) | from_yaml ] }}
+  loop: "{{ monitoring_target_files }}"
+  loop_control:
+    label: "{{ item | basename }}"
+
+- name: Compose the scrape list and the /etc/hosts group list
+  ansible.builtin.set_fact:
+    # Static (non-role) hosts first, then discovered guests sorted by instance
+    # so prometheus.yml renders deterministically (no diff churn between runs).
+    monitoring_node_exporter_targets: >-
+      {{ monitoring_static_targets
+         + (monitoring_discovered_targets | default([]) | sort(attribute='instance')) }}
+    # Derive the Ansible group name each discovered role normalizes to
+    # (instance "amp-game" -> group "amp_game_servers"), matching the
+    # `<role>_servers` convention in vms/_template/ansible/inventory.yml.example.
+    # hosts_file.yml iterates these to write each guest's IP into /etc/hosts.
+    monitoring_guest_inventory_groups: >-
+      {{ monitoring_discovered_targets | default([])
+         | map(attribute='instance')
+         | map('regex_replace', '-', '_')
+         | map('regex_replace', '$', '_servers')
+         | list }}

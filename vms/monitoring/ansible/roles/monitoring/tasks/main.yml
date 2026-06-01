@@ -17,6 +17,12 @@
   # Avoids dpkg-lock races against apt-daily / unattended-upgrades that
   # may still be running on first contact.
 
+- name: Discover scrape targets from per-role monitoring-target.yml files
+  ansible.builtin.import_tasks: discover_targets.yml
+  # MUST run before hosts_file.yml and config.yml — it sets
+  # monitoring_node_exporter_targets + monitoring_guest_inventory_groups,
+  # which both of those consume.
+
 - name: Maintain /etc/hosts entries for scrape targets
   ansible.builtin.import_tasks: hosts_file.yml
 

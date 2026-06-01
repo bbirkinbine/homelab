@@ -9,20 +9,18 @@
 # single-sourced in the host-level inventories, no duplication into
 # vms/monitoring/ansible/inventory.yml.
 #
-# Format: one repo-relative inventory path per line. Lines starting
-# with # are ignored. Missing files are skipped (Justfile loader has
-# an `[ -f ]` guard), so guest inventories that haven't been hydrated
-# yet via `just inventory <role>` simply don't contribute /etc/hosts
-# entries — they'll show up on the next monitoring re-deploy.
+# Format: one repo-relative path per line; shell glob patterns are allowed.
+# Lines starting with # are ignored. The Justfile loader glob-expands each
+# line and skips anything that doesn't resolve to a real file, so guest
+# inventories not yet hydrated via `just inventory <role>` simply don't
+# contribute /etc/hosts entries — they show up on the next monitoring re-deploy.
 pve-hosts/ansible/inventory.yml
 pbs-hosts/ansible/inventory.yml
-# Guest VM inventories — IPs flow into /etc/hosts on the monitoring VM
-# (via hosts_file.yml) so Prometheus's node_exporter scrapes resolve
-# by hostname. rootca intentionally absent — air-gapped + HSM-pinned,
-# security posture trumps observability there. Add new roles as they
-# come online.
-vms/openbao/ansible/inventory.yml
-vms/llm/ansible/inventory.yml
-vms/amp-game/ansible/inventory.yml
-vms/openclaw/ansible/inventory.yml
-vms/nemoclaw/ansible/inventory.yml
+# Guest VM inventories — load ALL of them so each monitored guest's IP flows
+# into /etc/hosts (via hosts_file.yml) and node_exporter scrapes resolve by
+# hostname. This is a glob, not a hand-maintained list: WHICH guests get
+# scraped is decided by the presence of vms/<role>/monitoring-target.yml
+# (see discover_targets.yml), not by this file. Loading an unmonitored role's
+# inventory is harmless — it just won't appear in the scrape list. rootca has
+# no monitoring-target.yml, so loading its inventory here adds nothing.
+vms/*/ansible/inventory.yml

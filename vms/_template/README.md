@@ -84,45 +84,32 @@ just plan <newrole>         # tofu plan against the live cluster
 
 ## Wire into monitoring (post-deploy)
 
-`node_exporter` install + dashboard inclusion is **not auto-wired** by
-the template. After the VM is deployed and Ansible'd, four touchpoints
-in `vms/monitoring/` make it visible on the **Lab Rightsizing** dashboard
-(and on Node Exporter Full, dashboard 1860):
+**Monitoring is default-on.** The template ships a
+[`monitoring-target.yml`](monitoring-target.yml) marker, and the `__ROLE__`
+sed-rename above fills in its `host` / `instance`. The monitoring role
+discovers every `vms/*/monitoring-target.yml` at deploy time (see
+[discover_targets.yml](../monitoring/ansible/roles/monitoring/tasks/discover_targets.yml)),
+so the new VM is scraped — and shows up on the **Lab Rightsizing** and
+**Node Exporter Full** (dashboard 1860) dashboards — with no edit to the
+monitoring role's defaults, `.extra-inventories`, or any central list.
 
-1. **Append to `monitoring_node_exporter_targets`** in
-   [vms/monitoring/ansible/roles/monitoring/defaults/main.yml](../monitoring/ansible/roles/monitoring/defaults/main.yml)
-   — the scrape job (one `{host, instance}` dict entry per VM).
-2. **Append to `monitoring_guest_inventory_groups`** in the same file
-   — the group name Ansible normalizes to (hyphens → underscores;
-   e.g. `amp-game` → `amp_game_servers`). Used by `hosts_file.yml`
-   to render the VM's IP into the monitoring VM's `/etc/hosts`.
-3. **Append the new role's inventory path** to
-   [vms/monitoring/ansible/.extra-inventories](../monitoring/ansible/.extra-inventories).
-   Missing files are skipped silently, so listing it before the VM is
-   even deployed is safe.
-4. **Run the install playbook against the new role's inventory**:
+After the VM is deployed and Ansible'd, two commands make it live:
 
-   ```bash
-   ansible-playbook \
-     -i vms/<newrole>/ansible/inventory.yml \
-     vms/monitoring/ansible/install-node-exporter-guests.yml
-   ```
+```bash
+just monitoring-guests      # installs node_exporter into every opted-in guest (idempotent)
+just ansible monitoring     # re-renders prometheus.yml + /etc/hosts; picks up the new target
+```
 
-5. **Re-deploy monitoring** to pick up the new scrape target +
-   `/etc/hosts` entry:
+The new VM appears in the dashboard's `VM` dropdown once Prometheus has
+scraped it once.
 
-   ```bash
-   just ansible monitoring
-   ```
-
-The new VM shows up in the dashboard's `VM` dropdown automatically once
-Prometheus has scraped it once.
-
-**Skip the wiring** if the role is air-gapped or security-sensitive
-(see [vms/rootca/](../rootca/) — intentionally absent from
-`monitoring_node_exporter_targets` even though it has an Ubuntu base
-and would otherwise be a fit). The "expose runtime telemetry to the
-LAN" decision is per-role, not a blanket default.
+**Opt out** by deleting `monitoring-target.yml` — a git-visible decision
+(shows in `git status`, self-cleans when the role dir is removed). Do this
+for air-gapped or security-sensitive roles where exposing a `node_exporter`
+port on the LAN is wrong: see [vms/rootca/](../rootca/), which keeps no
+marker file for exactly this reason. Document the *why* in the role's README
+when you opt out. The "expose runtime telemetry to the LAN" decision is
+per-role, not a blanket default.
 
 ## What this template assumes
 

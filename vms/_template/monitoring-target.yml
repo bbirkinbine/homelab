@@ -1,0 +1,22 @@
+---
+# Monitoring opt-in marker. The presence of this file is what makes this
+# role's guest VM monitored: the monitoring role globs vms/*/monitoring-target.yml
+# at deploy time and scrapes each one's node_exporter (and every alert that
+# matches job="node_exporter"). See docs/monitoring-alerting.md
+# "Lifecycle and target discovery" for the full mechanism.
+#
+# Default-on: this file ships in vms/_template/, so a role cloned from the
+# template is monitored automatically once the __ROLE__ sed-rename runs and
+# `just monitoring-guests` + `just ansible monitoring` have been run.
+#
+# Opt out: delete this file. The absence is a git-visible decision (shows
+# in `git status`, self-cleans when the role dir is removed) — document the
+# reason in the role's README. vms/rootca/ is the canonical opt-out: no file,
+# because it's air-gapped + USB-HSM-pinned and its security posture trumps
+# observability.
+#
+# `host` is resolved to an IP on the monitoring VM via /etc/hosts (built from
+# the role's gitignored inventory.yml — see hosts_file.yml). `instance` is the
+# label that lands on every scraped metric; keep it unique across roles.
+host: __ROLE__
+instance: __ROLE__

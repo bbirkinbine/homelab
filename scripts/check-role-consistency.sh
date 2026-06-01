@@ -23,6 +23,11 @@
 #   6. VMID conformance per ADR-0008: services in 8000-8099,
 #      workloads in 100-399. Role class is named explicitly in the
 #      role_class() function below; add new roles there.
+#   7. monitoring-target.yml (the optional monitoring opt-in marker):
+#      when present, must declare host: + instance:, carry no leftover
+#      __ROLE__ placeholder, and use an instance label unique across
+#      roles (Prometheus de-dupes targets by (job, instance), so a
+#      collision silently drops a VM's metrics). Absence = opt-out.
 #
 # Discovery: any vms/<name>/terraform/ directory is picked up. Names
 # starting with `_` are skipped (convention reserved for templates and
@@ -272,6 +277,44 @@ for role in "${ROLES[@]}"; do
       ;;
   esac
 done
+
+# --- 7. monitoring-target.yml shape + unique instance ----------------------
+
+heading "7. monitoring-target.yml (monitoring opt-in marker)"
+# Optional per-role file. Presence opts the role into monitoring (globbed by
+# vms/monitoring/ansible/roles/monitoring/tasks/discover_targets.yml). When
+# present it must declare host: + instance:, carry no unsubstituted __ROLE__,
+# and its instance label must be unique across roles. Absence = opt-out
+# (rootca is the canonical example — air-gapped, keeps no file).
+declare -A mt_instance_owner
+mt_found=0
+for role in "${ROLES[@]}"; do
+  mt="vms/${role}/monitoring-target.yml"
+  [[ -f "$mt" ]] || continue
+  mt_found=1
+  problems=""
+  grep -qE '^host:[[:space:]]*[^[:space:]]' "$mt" || problems="${problems}missing-host-key "
+  inst="$(awk '/^instance:[[:space:]]*/ { print $2; exit }' "$mt")"
+  [[ -n "$inst" ]] || problems="${problems}missing-instance-key "
+  grep -q '__ROLE__' "$mt" && problems="${problems}unsubstituted-__ROLE__ "
+  if [[ -n "$inst" ]]; then
+    if [[ -n "${mt_instance_owner[$inst]:-}" ]]; then
+      problems="${problems}duplicate-instance(shared-with:${mt_instance_owner[$inst]}) "
+    else
+      mt_instance_owner[$inst]="$role"
+    fi
+  fi
+  if [[ -z "$problems" ]]; then
+    pass "${role}: monitoring-target.yml ok (instance=${inst})"
+  else
+    fail "${role}: monitoring-target.yml issues: ${problems}" \
+         "see vms/_template/monitoring-target.yml for the canonical shape"
+  fi
+done
+if [[ "$mt_found" -eq 0 ]]; then
+  printf '  %swarn%s no monitoring-target.yml found under any role — is the opt-in marker convention wired up?\n' \
+    "$YELLOW" "$RESET" 1>&2
+fi
 
 # --- summary ----------------------------------------------------------------
 

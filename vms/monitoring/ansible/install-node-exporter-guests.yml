@@ -21,22 +21,24 @@
 # Right-sizing decisions need the guest's own view. Pairs with the
 # "Lab Rightsizing" dashboard (templates/dashboards/rightsizing.json.j2).
 #
-# Usage from repo root — list each VM's inventory.yml explicitly. The
-# rootca VM is intentionally omitted; it's air-gapped + USB-HSM-pinned
-# and its security posture trumps observability. Add it here if/when
-# that calculus changes.
+# Usage from repo root — run via the Justfile recipe, which builds the
+# `-i` list from every role carrying a vms/<role>/monitoring-target.yml
+# (the same opt-in marker the monitoring role discovers and scrapes):
 #
-#     ansible-playbook \
-#       -i vms/openbao/ansible/inventory.yml \
-#       -i vms/llm/ansible/inventory.yml \
-#       -i vms/amp-game/ansible/inventory.yml \
-#       -i vms/openclaw/ansible/inventory.yml \
-#       -i vms/nemoclaw/ansible/inventory.yml \
+#     just monitoring-guests
+#
+# Roles without the marker are skipped automatically — rootca has none
+# (air-gapped + USB-HSM-pinned, security posture trumps observability),
+# so it's never targeted. To run against a single role manually, the
+# old explicit form still works:
+#
+#     ansible-playbook -i vms/<role>/ansible/inventory.yml \
 #       vms/monitoring/ansible/install-node-exporter-guests.yml
 #
 # Idempotent — re-running is a no-op once green. monitoring's own
 # node_exporter is installed by the monitoring role's packages.yml +
-# firewall.yml on the monitoring VM itself; don't list it here.
+# firewall.yml on the monitoring VM itself; it has no monitoring-target.yml
+# of its own (it's a static target in the role defaults) so it's not listed here.
 
 - name: Install prometheus-node-exporter on guest VMs
   hosts: all

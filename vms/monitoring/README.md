@@ -118,24 +118,25 @@ ufw on pbs01).
 ### Phase 4 — install node_exporter inside guest VMs (workstation)
 
 ```bash
-ansible-playbook \
-  -i vms/openbao/ansible/inventory.yml \
-  -i vms/llm/ansible/inventory.yml \
-  -i vms/amp-game/ansible/inventory.yml \
-  -i vms/openclaw/ansible/inventory.yml \
-  -i vms/nemoclaw/ansible/inventory.yml \
-  vms/monitoring/ansible/install-node-exporter-guests.yml
+just monitoring-guests
 ```
 
-Same idempotency; same pattern as Phase 3 but targets the guest VMs
-(uniform ufw path, no per-group conditionals). Installs the apt
-package, enables the service, opens 9100/tcp on each guest's ufw.
-Pairs with the **Lab Rightsizing** dashboard — without this step
-that dashboard's panels are empty.
+The recipe builds the target list from every role carrying a
+`vms/<role>/monitoring-target.yml` marker — the same opt-in set the
+monitoring role discovers and scrapes (see
+[docs/monitoring-alerting.md](../../docs/monitoring-alerting.md)
+"Lifecycle and target discovery"). Same idempotency as Phase 3, but
+targets the guest VMs (uniform ufw path, no per-group conditionals):
+installs the apt package, enables the service, opens 9100/tcp on each
+guest's ufw. Pairs with the **Lab Rightsizing** dashboard — without this
+step that dashboard's panels are empty.
 
-The `rootca` VM is intentionally absent — air-gapped + USB-HSM-pinned,
-its security posture trumps observability. Add it back if/when that
-calculus changes.
+The `rootca` VM is intentionally absent — it keeps no
+`monitoring-target.yml` because it's air-gapped + USB-HSM-pinned and its
+security posture trumps observability. To monitor a newly-deployed role,
+no edit here is needed: the marker file (shipped by `vms/_template/`)
+opts it in automatically, and the next `just monitoring-guests` +
+`just ansible monitoring` picks it up.
 
 ## Operator ceremony — paste exporter tokens (one-time)
 

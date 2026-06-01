@@ -1,0 +1,6 @@
+---
+# Monitoring opt-in marker — presence means this VM is scraped by the
+# monitoring stack. See docs/monitoring-alerting.md "Lifecycle and target
+# discovery" and vms/_template/monitoring-target.yml for the mechanism.
+host: llm
+instance: llm

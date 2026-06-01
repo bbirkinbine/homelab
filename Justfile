@@ -65,16 +65,16 @@ inventory role:
 # Run the role's site.yml against vms/<role>/ansible/inventory.yml.
 #
 # Opt-in cross-inventory loading: if the role's ansible/ dir contains a
-# .extra-inventories file (one inventory path per line, repo-relative),
-# each path is added as an extra `-i` flag BEFORE the role's own
-# inventory.yml. Lets a role (e.g. monitoring) read hostvars from
+# .extra-inventories file (one repo-relative path per line, shell globs
+# allowed), each resolved path is added as an extra `-i` flag BEFORE the
+# role's own inventory.yml. Lets a role (e.g. monitoring) read hostvars from
 # pve-hosts / pbs-hosts / guest VM inventories without duplicating IPs.
 #
-# Missing inventories are skipped silently — guest VM inventory.yml's
-# are produced by `just inventory <role>` after a deploy and may not
-# exist for every role yet. The monitoring play's hosts_file task uses
-# groups.get(...) defensively so absent groups just don't render an
-# /etc/hosts entry for that role's host.
+# Glob lines (e.g. `vms/*/ansible/inventory.yml`) expand here; the `[ -f ]`
+# guard drops both non-matching globs and listed-but-missing files. Guest
+# inventory.yml's are produced by `just inventory <role>` after a deploy and
+# may not exist yet — the monitoring play's hosts_file task uses groups.get(...)
+# defensively, so an absent group just doesn't render an /etc/hosts entry.
 ansible role:
     cd vms/{{role}}/ansible && \
       extra_inv="" ; \
@@ -82,8 +82,9 @@ ansible role:
         while IFS= read -r p; do \
           [ -z "$p" ] && continue ; \
           [ "${p#\#}" != "$p" ] && continue ; \
-          [ -f "../../../$p" ] || continue ; \
-          extra_inv="$extra_inv -i ../../../$p" ; \
+          for path in ../../../$p; do \
+            [ -f "$path" ] && extra_inv="$extra_inv -i $path" ; \
+          done ; \
         done < .extra-inventories ; \
       fi ; \
       ansible-playbook $extra_inv -i inventory.yml site.yml
@@ -96,11 +97,39 @@ ansible-check role:
         while IFS= read -r p; do \
           [ -z "$p" ] && continue ; \
           [ "${p#\#}" != "$p" ] && continue ; \
-          [ -f "../../../$p" ] || continue ; \
-          extra_inv="$extra_inv -i ../../../$p" ; \
+          for path in ../../../$p; do \
+            [ -f "$path" ] && extra_inv="$extra_inv -i $path" ; \
+          done ; \
         done < .extra-inventories ; \
       fi ; \
       ansible-playbook $extra_inv -i inventory.yml site.yml --check --diff
+
+# Install prometheus-node-exporter into every guest VM that has opted into
+# monitoring — i.e. carries a vms/<role>/monitoring-target.yml. Roles without
+# the file (rootca) are skipped automatically; this is the same set the
+# monitoring role discovers and scrapes. Idempotent — re-run after deploying
+# a new role (then `just ansible monitoring` to pick up the scrape target).
+monitoring-guests:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    shopt -s nullglob
+    inventories=()
+    for marker in vms/*/monitoring-target.yml; do
+        role_dir="$(dirname "$marker")"
+        role="$(basename "$role_dir")"
+        case "$role" in _*) continue ;; esac   # skip vms/_template
+        inv="${role_dir}/ansible/inventory.yml"
+        if [[ -f "$inv" ]]; then
+            inventories+=(-i "$inv")
+        else
+            echo "skip: ${role} has monitoring-target.yml but no hydrated inventory.yml (run 'just inventory ${role}' after deploy)" >&2
+        fi
+    done
+    if [[ ${#inventories[@]} -eq 0 ]]; then
+        echo "No roles with monitoring-target.yml + a hydrated inventory.yml found." >&2
+        exit 1
+    fi
+    ansible-playbook "${inventories[@]}" vms/monitoring/ansible/install-node-exporter-guests.yml
 
 # --- pve-hosts (layer 0) -----------------------------------------------------
 #
