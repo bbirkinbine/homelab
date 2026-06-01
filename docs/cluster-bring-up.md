@@ -476,6 +476,64 @@ After this runbook completes, return to [docs/0-scratch-build-order.md](0-scratc
 
 ---
 
+## Adding a node to an existing cluster
+
+Steps 1–8 form the cluster from scratch. Adding a node *later* (e.g. a fourth node) is a different, shorter operation: the cluster and corosync ring1 already exist, so you join with **both links in a single command** and skip the manual `corosync.conf` edit from Step 4 entirely — `pvecm add` writes the new node's `ring1_addr` and bumps `config_version` itself.
+
+Placeholders below: the new node is `192.0.2.15` on the LAN with TB loopback `10.10.10.15`; `192.0.2.12` is any existing cluster member.
+
+### Before you join
+
+1. **New node baselined** — `just pve-hosts-one <node>` has run and reports `changed=0` on a healthy re-run. Its LAN bridge (`vmbr0`) is up and SSH-reachable.
+2. **The joiner is EMPTY.** `pvecm add` adopts the cluster's `/etc/pve/` and *refuses* if the joiner has VMs/templates registered. Custom `pveum` users get wiped. Verify:
+
+   ```bash
+   ssh root@192.0.2.15 'ls -A /etc/pve/qemu-server/ /etc/pve/lxc/ 2>/dev/null; pveum user list'
+   ```
+
+   Both dirs empty; only `root@pam`/`root@pve`.
+3. **TB fabric live to the new node** — its `tbnet-*` link is `UP` and its loopback is reachable from the cluster. If the node extends the topology, this needs the topology work below *first*. (Cluster join itself only needs ring0/LAN; ring1 needs the loopback reachable at join time so `--link1` succeeds.)
+4. **`pve-firewall` active.** The joiner adopts the cluster's enabled `cluster.fw` on join, so it ends up firewalled correctly with no action.
+5. **Creator's root password ready** (KeePassXC) — `pvecm add` prompts for it.
+
+### If the new node extends the TB line topology
+
+Adding a node usually means cabling it into a former leaf's spare TB port, which **extends the line and promotes that former leaf to a transit node** (e.g. a fourth node off pve13t makes the line `pve12t — pve13m — pve13t — pve12t2`, with both pve13m and pve13t forwarding). Do this *before* the join:
+
+1. **Update `inventory.yml`** — add the new node, and on the promoted node set `tb_role: transit`, `ip_forwarding_enabled: true`, and add its new `tb_links` entry. Every node's `tb_links[].reaches` lists the peers on the far side of each link (see `interfaces.j2` and the vault doc `[[Thunderbolt Mesh Networking — 3-Node Cluster Option]]` § "4-node extension"). Run `just pve-hosts` to stage the new config fleet-wide.
+2. **Bring the fabric up.** The role stages `/etc/network/interfaces` but never auto-reloads, and after any host reboot the `tbnet-*` interfaces come up admin-DOWN regardless — name-pinning fixes the *name*, not the bring-up. So run `ifreload -a` on each affected node (from console or SSH; `vmbr0` is untouched). A TB link only carries traffic once *both* ends are up, so expect a first `ifreload` pass to fail its routes (`Nexthop has invalid gateway`) and a second pass to install them once carriers are present.
+3. **Renaming a new TB netdev without a reboot:** if the new interface is still `thunderbolt0` (the `.link` rename hasn't applied), trigger it on the down device — no reboot, no VM downtime:
+
+   ```bash
+   ssh root@<node> 'udevadm trigger --action=add /sys/class/net/thunderbolt0'
+   ```
+
+4. Confirm the new node's loopback pings end-to-end (including any multi-hop transit path) before joining.
+
+### Join — both rings in one shot
+
+```bash
+ssh root@192.0.2.15
+# Inside the new node's shell:
+pvecm add 192.0.2.12 --link0 192.0.2.15 --link1 10.10.10.15
+#   --link0 = new node's LAN address  (corosync ring0)
+#   --link1 = new node's TB loopback  (corosync ring1)
+# yes to the host-key prompt; the creator's root password to the password prompt
+exit
+```
+
+Because the cluster already has `linknumber: 1` defined, `pvecm add` merges the new node into `corosync.conf` with **both** ring addresses and bumps `config_version` — no hand-edit of the quorum-critical file, which is lower-risk than the Step 4 two-step. (If `--link1` ever misbehaves, fall back to joining with `--link0` only, then add `ring1_addr` for the new node via the Step 4 edit.)
+
+### Verify
+
+```bash
+ssh root@192.0.2.15 'pvecm status; echo ===RINGS===; corosync-cfgtool -s'
+```
+
+Expect `N+1` nodes quorate (`Expected votes` matches the new count), and `corosync-cfgtool -s` showing the new node on **both LINK 0 and LINK 1**, connected to every existing member. `nas-vms` and other cluster-wide storage are inherited automatically on join — nothing to register.
+
+---
+
 ## Common failures + recovery
 
 **`pvecm add` errors with "no quorum on node".**
