@@ -64,22 +64,25 @@ iface {{ pve_host_tb_loopback_alias }} inet static
     # fabric naturally. Discovered 2026-05-13 — `pve12t → pve13t` and
     # `pve13t → pve12t` transit pings failed silently until the src
     # hint was added.
-{% if tb_role == 'leaf' and (tb_links | default([]) | length) > 0 %}
-    # Leaf node — every other peer reachable via the single TB neighbor
-    # ({{ tb_links[0].peer }}). pve13m forwards toward the far leaf.
-{% for peer in groups['pve_hosts'] | sort if peer != inventory_hostname %}
-    post-up ip route add {{ hostvars[peer].tb_loopback }}/32 via {{ tb_links[0].peer_addr }} dev {{ tb_links[0].name }} src {{ tb_loopback }}
-    post-down ip route del {{ hostvars[peer].tb_loopback }}/32 via {{ tb_links[0].peer_addr }} dev {{ tb_links[0].name }} || true
+{% for link in tb_links | default([]) %}
+    # Loopbacks reachable through {{ link.name }} (peer {{ link.peer }}).
+    # `reaches` lists the nodes on the far side of this link: the
+    # directly-connected peer plus anything beyond it along the line. A
+    # leaf has one link and reaches every other node through it; a middle
+    # (transit) node splits peers across its two links by which side each
+    # one sits on. This per-link form is correct for a line of any length
+    # — the older leaf/transit branch only routed a transit node's
+    # directly-connected peers, which silently dropped the far node once
+    # the line grew past three.
+    #
+    # We route `via {{ link.peer_addr }}` (the /31 peer address) rather
+    # than `dev <link> scope link` because Linux's loopback-ARP behavior
+    # proved asymmetric across the cables (2026-05-13) — routing via the
+    # /31 peer keeps the kernel ARPing for an address that always
+    # responds. The `src {{ tb_loopback }}` hint is CRITICAL for the same
+    # reason (see the note above the lo:10 routes).
+{% for dest in link.reaches | default([]) %}
+    post-up ip route add {{ hostvars[dest].tb_loopback }}/32 via {{ link.peer_addr }} dev {{ link.name }} src {{ tb_loopback }}
+    post-down ip route del {{ hostvars[dest].tb_loopback }}/32 via {{ link.peer_addr }} dev {{ link.name }} || true
 {% endfor %}
-{% elif tb_role == 'transit' %}
-    # Transit node — each peer's loopback is one TB hop away. We
-    # explicitly route via the peer's /31 address (not just `dev <link>
-    # scope link`) because Linux's ARP defaults turned out to be
-    # asymmetric in practice (loopback-ARP question on one cable but
-    # not the other). Routing via the /31 peer keeps the kernel ARPing
-    # for an address that definitely responds.
-{% for link in tb_links %}
-    post-up ip route add {{ hostvars[link.peer].tb_loopback }}/32 via {{ link.peer_addr }} dev {{ link.name }} src {{ tb_loopback }}
-    post-down ip route del {{ hostvars[link.peer].tb_loopback }}/32 via {{ link.peer_addr }} dev {{ link.name }} || true
 {% endfor %}
-{% endif %}

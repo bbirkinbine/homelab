@@ -2,7 +2,7 @@
 # pve-hosts/ansible/inventory.yml.example
 #
 # Copy to inventory.yml (gitignored) and fill in the placeholder values
-# marked with `# TODO`. Three nodes in the cluster, each carrying its
+# marked with `# TODO`. Four nodes in the cluster, each carrying its
 # own per-host settings via inline `vars:` blocks. We keep one flat
 # inventory file rather than splitting into group_vars/host_vars
 # because (a) the per-host divergences are small and (b) it matches the
@@ -66,6 +66,13 @@ pve_hosts:
     # time by matching `device_name` against `tb_links[].peer`, after
     # enrolling each peer via `boltctl enroll --policy=auto`. No operator
     # action between plugging the cables and `just pve-hosts`.
+    #
+    # `reaches` on each tb_link lists the nodes on the far side of that
+    # link — the directly-connected peer plus anything beyond it along
+    # the line. interfaces.j2 emits one /32 loopback route per entry, via
+    # that link. A leaf has one link and reaches every other node through
+    # it; a middle (transit) node splits peers across its two links by
+    # which side each sits on. Omit it and the node gets NO TB routes.
 
     # ---- pve12t (NUC12 Pro Tall, eGPU host, TB leaf) ----
     pve12t:
@@ -74,12 +81,13 @@ pve_hosts:
       pve_lan_ip: "192.0.2.12"              # replace with real LAN IP
       tb_role: "leaf"
       tb_loopback: "10.10.10.12"
-      # Single TB link to pve13m.
+      # Single TB link to pve13m; reaches every other node through it.
       tb_links:
         - name: "tbnet-13m"
           peer: "pve13m"
           local_addr: "10.10.0.0/31"
           peer_addr: "10.10.0.1"
+          reaches: ["pve13m", "pve13t", "pve12t2"]
       ip_forwarding_enabled: false
       # Context only — the role does not manage these. They're set up
       # at install time (see docs/proxmox-install.md).
@@ -94,31 +102,59 @@ pve_hosts:
       pve_lan_ip: "192.0.2.13"              # replace with real LAN IP
       tb_role: "transit"
       tb_loopback: "10.10.10.13"
-      # Two TB links — one to each leaf.
+      # Two TB links — one toward each side of the line.
       tb_links:
         - name: "tbnet-12t"
           peer: "pve12t"
           local_addr: "10.10.0.1/31"
           peer_addr: "10.10.0.0"
+          reaches: ["pve12t"]
         - name: "tbnet-13t"
           peer: "pve13t"
           local_addr: "10.10.0.2/31"
           peer_addr: "10.10.0.3"
-      # Transit node: IP forwarding required so pve12t↔pve13t traffic
-      # can hop through here at L3.
+          reaches: ["pve13t", "pve12t2"]
+      # Transit node: IP forwarding required so traffic between the two
+      # sides of the line can hop through here at L3.
       ip_forwarding_enabled: true
 
-    # ---- pve13t (NUC13 Pro Tall, TB leaf, spare port for future use) ----
+    # ---- pve13t (NUC13 Pro Tall, TB transit since pve12t2 joined) ----
+    # Its formerly-spare TB port now carries the link to pve12t2, which
+    # extended the line to four nodes and promoted pve13t to transit.
     pve13t:
       ansible_host: 192.0.2.14              # replace with real LAN IP
       pve_lan_iface: "nic0"                 # PVE 9 default (verify with `ip link`)
       pve_lan_ip: "192.0.2.14"              # replace with real LAN IP
-      tb_role: "leaf"
+      tb_role: "transit"
       tb_loopback: "10.10.10.14"
-      # Single TB link to pve13m.
+      # Two TB links. pve13m and (beyond it) pve12t ride tbnet-13m;
+      # pve12t2 sits directly off the new tbnet-12t2 link.
       tb_links:
         - name: "tbnet-13m"
           peer: "pve13m"
           local_addr: "10.10.0.3/31"
           peer_addr: "10.10.0.2"
+          reaches: ["pve13m", "pve12t"]
+        - name: "tbnet-12t2"
+          peer: "pve12t2"
+          local_addr: "10.10.0.4/31"
+          peer_addr: "10.10.0.5"
+          reaches: ["pve12t2"]
+      # Transit node: forwards pve12t2 <-> (pve13m, pve12t) at L3.
+      ip_forwarding_enabled: true
+
+    # ---- pve12t2 (NUC12 Pro Tall #2, TB leaf at the end of the line) ----
+    pve12t2:
+      ansible_host: 192.0.2.15              # replace with real LAN IP
+      pve_lan_iface: "nic0"                 # PVE 9 default (verify with `ip link`)
+      pve_lan_ip: "192.0.2.15"              # replace with real LAN IP
+      tb_role: "leaf"
+      tb_loopback: "10.10.10.15"
+      # Single TB link to pve13t; reaches every other node through it.
+      tb_links:
+        - name: "tbnet-13t"
+          peer: "pve13t"
+          local_addr: "10.10.0.5/31"
+          peer_addr: "10.10.0.4"
+          reaches: ["pve13t", "pve13m", "pve12t"]
       ip_forwarding_enabled: false
