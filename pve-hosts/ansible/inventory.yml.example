@@ -49,6 +49,12 @@ pve_hosts:
     # Common Ansible connection bits — Packer base ships python3.
     ansible_user: root
     ansible_python_interpreter: /usr/bin/python3
+    # Auto-trust a host's key on first contact (TOFU). Node IPs can churn
+    # on DHCP; without this, a new/changed IP fails the play with "Host key
+    # verification failed". Matches the vms/*/ guest-inventory convention.
+    # Trade-off: no protection against a MITM on first connect (acceptable
+    # on the trusted LAN); a *changed* key on a known IP is still rejected.
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
 
   hosts:
     # NIC naming note: the Proxmox 9.x installer writes a per-host
