@@ -22,7 +22,9 @@ vms/monitoring/
 ├── terraform/                         VM provisioning
 ├── ansible/
 │   ├── site.yml                       role play (against monitoring_servers)
-│   ├── install-node-exporter.yml      sub-playbook for the 3 PVE nodes + pbs01
+│   ├── .extra-inventories             globs vms/*/ansible/inventory.yml (IP resolution)
+│   ├── install-node-exporter.yml      host sub-playbook (PVE nodes + pbs01) — `just monitoring-hosts`
+│   ├── install-node-exporter-guests.yml  guest sub-playbook — `just monitoring-guests`
 │   └── roles/monitoring/              install + config
 └── cloud-init/                        first-boot identity
 ```
@@ -104,16 +106,15 @@ repo working directory. Continue to the ceremony.
 ### Phase 3 — install node_exporter on PVE + PBS hosts (workstation)
 
 ```bash
-ansible-playbook \
-  -i pve-hosts/ansible/inventory.yml \
-  -i pbs-hosts/ansible/inventory.yml \
-  vms/monitoring/ansible/install-node-exporter.yml
+just monitoring-hosts
 ```
 
-Idempotent — re-running on subsequent host additions is safe. The
-playbook installs the apt package, enables the service, and opens
-port 9100 on each host's firewall (pve-firewall for cluster nodes;
-ufw on pbs01).
+Idempotent — re-running on subsequent host additions is safe. The recipe
+runs the fixed two-inventory `install-node-exporter.yml` against the PVE
+nodes + pbs01: installs the apt package, enables the service, and opens
+port 9100 on each host's firewall (pve-firewall for cluster nodes; ufw on
+pbs01). It's the layer-0 sibling of `just monitoring-guests` (Phase 4),
+which covers the guest VMs.
 
 ### Phase 4 — install node_exporter inside guest VMs (workstation)
 
@@ -159,8 +160,9 @@ sudoedit /etc/prometheus/pbs-exporter.env
 # 3. Start both services.
 sudo systemctl start prometheus-pve-exporter prometheus-pbs-exporter
 
-# 4. Sanity-check.
-curl -sf http://127.0.0.1:9221/pve?target=pve13m | head -5
+# 4. Sanity-check. Quote the first URL — the `?` is a glob char in zsh,
+#    so an unquoted URL fails with "no matches found".
+curl -sf 'http://127.0.0.1:9221/pve?target=pve13m' | head -5
 curl -sf http://127.0.0.1:10019/metrics | grep '^pbs_' | head -5
 ```
 
@@ -371,8 +373,10 @@ you front Grafana with mTLS at a reverse proxy.
 - `terraform/terraform.tfvars.example` — committed, manual-fill alternative.
 - `cloud-init/user-data.yaml.tftpl` — identity only.
 - `ansible/site.yml` — top-level play.
-- `ansible/install-node-exporter.yml` — sub-playbook for the cluster hosts + pbs01.
-- `ansible/roles/monitoring/` — install + config (tasks split into `repos`, `packages`, `pve_exporter`, `pbs_exporter`, `config`, `firewall`).
+- `ansible/.extra-inventories` — glob of `vms/*/ansible/inventory.yml`, loaded by `just ansible monitoring` so each monitored guest's IP resolves into `/etc/hosts`.
+- `ansible/install-node-exporter.yml` — host sub-playbook (PVE nodes + pbs01); run via `just monitoring-hosts`.
+- `ansible/install-node-exporter-guests.yml` — guest sub-playbook; run via `just monitoring-guests`, which targets every role carrying a `monitoring-target.yml`.
+- `ansible/roles/monitoring/` — install + config. Tasks run in this order: `discover_targets`, `hosts_file`, `repos`, `packages`, `pve_exporter`, `pbs_exporter`, `nut_exporter`, `config`, `dashboards`, `firewall`.
 
 ## Related
 

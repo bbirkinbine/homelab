@@ -131,6 +131,16 @@ monitoring-guests:
     fi
     ansible-playbook "${inventories[@]}" vms/monitoring/ansible/install-node-exporter-guests.yml
 
+# Install prometheus-node-exporter on the PVE + PBS bare-metal hosts (the
+# layer-0 sibling of monitoring-guests, which targets the guest VMs). Fixed
+# two-inventory invocation — no per-role discovery, unlike the guest side.
+# Idempotent; re-run when a new cluster node or PBS host comes online.
+monitoring-hosts:
+    ansible-playbook \
+      -i pve-hosts/ansible/inventory.yml \
+      -i pbs-hosts/ansible/inventory.yml \
+      vms/monitoring/ansible/install-node-exporter.yml
+
 # --- pve-hosts (layer 0) -----------------------------------------------------
 #
 # Separate recipes from `ansible <role>` above because layer 0 targets
