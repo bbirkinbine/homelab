@@ -3,7 +3,13 @@
 This directory is an **experiment**, not yet a canonical role. It exists to
 answer a handful of unknowns about cloning the Windows 11 base template and
 auto-injecting accounts, before any of it is hardened into the shared module +
-the canonical `vms/<role>/` shape. Read this before running anything.
+the canonical `vms/<role>/` shape.
+
+> **Operator instructions (prerequisites, KeePassXC, deploy, verify) now live in
+> [README.md](README.md).** This file is the experiment log: what was unknown,
+> what was learned, and the remaining Phase-2 work. The proven findings are
+> resolved below; the Credentials / How-to-run / success-criteria steps that
+> were here have moved to the README to keep one source of truth.
 
 ## Goal
 
