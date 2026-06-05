@@ -33,6 +33,12 @@ lifecycle {
 
 No role-level changes. Every role inherits the protection through the shared module on its next apply. The lifecycle block is a no-op for any VM whose plan doesn't propose a destroy — the protection only triggers when destruction is attempted.
 
+### Amendment (2026-06-05) — applies to the Windows module too
+
+A second shared module, [`modules/proxmox-vm-windows/`](../../modules/proxmox-vm-windows/), was added when the first Windows VM role shipped ([`vms/win-client/`](../../vms/win-client/)). Windows guests require ForceNew-prone attributes the Linux module deliberately avoids (`bios`, `efi_disk`, `tpm_state`, `operating_system`) plus a different cloud-init shape, so they live in a separate module rather than as knobs on `modules/proxmox-vm/` — which keeps the Linux module (shared by the live pets) free of new ForceNew surface.
+
+That Windows module carries the **identical** `lifecycle { prevent_destroy = true }` on its `proxmox_virtual_environment_vm.this`. So this ADR's invariant holds for **every** provisioned VM regardless of OS, and the intentional-destroy procedure is the same — comment out the lifecycle block in whichever module the role uses (`modules/proxmox-vm/` for Linux, `modules/proxmox-vm-windows/` for Windows), apply, then restore it.
+
 ## Consequences
 
 - **The bpg `ForceNew` class of bug becomes a plan-time error, not a silent destroy.** Adding any attribute that the provider classifies as ForceNew (`meta_data_file_id`, certain disk attribute changes, etc.) to a deployed VM now fails the plan with `Resource module.<role>.proxmox_virtual_environment_vm.this has lifecycle.prevent_destroy set, but the plan calls for this resource to be destroyed.`
