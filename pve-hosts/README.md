@@ -43,7 +43,7 @@ pve-hosts/
 ├── CLAUDE.md                          # AI-agent spec for filling in the role
 └── ansible/
     ├── site.yml                       # top-level play
-    ├── inventory.yml.example          # template inventory (3 nodes with placeholders)
+    ├── inventory.yml.example          # template inventory (4 nodes with placeholders)
     ├── requirements.yml               # Galaxy collections
     └── roles/
         └── pve-host/
@@ -81,7 +81,7 @@ pve-hosts/
    just pve-hosts-deps
    ```
 
-3. Dry-run against all three nodes:
+3. Dry-run against all four nodes:
    ```bash
    just pve-hosts-check
    ```

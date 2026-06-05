@@ -18,9 +18,9 @@ proxmox_endpoint = "https://pve12t:8006/"
 #   proxmox_api_token = "{{ kp://Homelab/proxmox-tofu-token }}"
 proxmox_api_token = "tofu@pve!apply=00000000-0000-0000-0000-000000000000"
 
-# Proxmox node name to create the VM on. Matches the cluster member
-# (currently pve12t; will gain pve13/pve14 when the 3-node cluster
-# migration lands per CLAUDE.md's "Active context").
+# Proxmox node name to create the VM on. The lab is a live 4-node cluster
+# (pve12t / pve13m / pve13t / pve12t2); a cluster-mobile role can target any of
+# them and live-migrate after deploy.
 proxmox_node = "pve12t"
 
 # First-boot admin user. cloud-init creates this with sudo + the SSH

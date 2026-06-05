@@ -25,7 +25,7 @@ fit and match upstream's recommendation.
 
 ## Part 1 — PVE bootstrap
 
-The three nodes are clustered (`homelab`), so `/etc/pve/user.cfg` is
+The four nodes are clustered (`homelab`), so `/etc/pve/user.cfg` is
 replicated cluster-wide via pmxcfs. **Run the steps below once on any
 node** — SSH into whichever is convenient (`pve12t`, `pve13m`, `pve13t`)
 and the user, ACL, and token will land on all three.

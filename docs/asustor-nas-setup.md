@@ -153,7 +153,7 @@ posture, and the standard NFS-on-NAS tradeoff.
 actual cryptographic per-user auth via Kerberos tickets, the closest
 analogue to SMB's model. Requires standing up a KDC, keytabs on every
 client + server, and tight time sync. Heavy infrastructure for a
-3-node homelab; raise as a separate project if the threat model
+4-node homelab; raise as a separate project if the threat model
 changes.
 
 ## 4. Verify from the workstation

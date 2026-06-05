@@ -24,7 +24,7 @@ Three Intel NUCs running Proxmox VE 9.x (Debian 13 / trixie base, deb822 repo fo
 
 Network layers:
 
-1. **2.5GbE** — single port per node, carries management, Corosync ring0, NFS to NAS (Asustor AS6706T), VM bridges. All three nodes + NAS sit on the same switched LAN.
+1. **2.5GbE** — single port per node, carries management, Corosync ring0, NFS to NAS (Asustor AS6706T), VM bridges. All four nodes + NAS sit on the same switched LAN.
 2. **TB4 line topology** — `pve12t ── pve13m ── pve13t`. Two TB4 cables total. Carries live migration + Corosync ring1. `pve13m` is the L3 transit (single point of failure for the TB fabric; acceptable because the fabric is purely additive and falls back to 2.5GbE).
 
 No HA. No Ceph. NFS-on-Asustor for shared storage. PCIe passthrough VMs (the LLM on `pve12t`) are node-pinned and can't migrate.

@@ -65,7 +65,7 @@ This is a public GitHub repo. Anything that lands in a commit can be scraped wit
 - VM hostnames or IPs that aren't already in `README.md`'s hardware table.
 - Cleartext build passwords *beyond* the intentional `packer-build-only-Win11!` in `http/Autounattend.xml`. That one is deliberate and rotated by sysprep at the end of the build — don't replace it with a "real" secret.
 
-**Commit messages count as published surface.** Everything in the list above applies to the commit *message body*, not just file content — `git log`, GitHub's PR/commit views, and search-engine indexers expose commit messages exactly like they expose files. When summarizing a change, refer to "the lab's LAN subnet" or "the cluster's three nodes" instead of pasting the actual values. Even a "scrub" commit that removes sensitive content from files will leak that content forever if the commit message names it.
+**Commit messages count as published surface.** Everything in the list above applies to the commit *message body*, not just file content — `git log`, GitHub's PR/commit views, and search-engine indexers expose commit messages exactly like they expose files. When summarizing a change, refer to "the lab's LAN subnet" or "the cluster's four nodes" instead of pasting the actual values. Even a "scrub" commit that removes sensitive content from files will leak that content forever if the commit message names it.
 
 **Secrets flow in from the operator's credential store at run time, never embedded in code.** The current shape uses a local password manager (resolved by [`scripts/hydrate.sh`](scripts/hydrate.sh) for OpenTofu, and by `.env.<target>` reads for Packer). When suggesting credential patterns for IaC:
 

@@ -5,7 +5,7 @@ The install-time procedure for bringing a fresh NUC up to a state where the
 — what the operator does sitting in front of the box with a USB stick.
 Everything declarative is layer 0b ([pve-hosts/](../pve-hosts/)) and later.
 
-The lab runs three nodes (`pve12t`, `pve13m`, `pve13t`); the steps are
+The lab runs four nodes (`pve12t`, `pve13m`, `pve13t`, `pve12t2`); the steps are
 identical across them except where called out. The decision to keep this
 manual rather than building a PVE-autoinstall + remastered-ISO pipeline is
 in the vault doc `Projects/Homelab/PVE Host Bootstrap — Manual Install +
@@ -319,7 +319,7 @@ install time.
 
 ## TB4 cabling
 
-Once all three nodes are installed and reachable on the LAN, plug
+Once all four nodes are installed and reachable on the LAN, plug
 in the two TB4 cables to form the line topology: `pve12t ── pve13m
 ── pve13t`. `pve13m` is the transit midpoint with both ports used.
 The eGPU keeps its TB port on `pve12t`. See vault `Thunderbolt Mesh
