@@ -91,13 +91,14 @@ Stand up the Proxmox Backup Server host between cluster bring-up and IaC enablem
 
     **Per-node VMID convention** (matches [`local.ubuntu_template_ids`](../vms/openbao/terraform/main.tf) in every Linux role and the case statement in [`scripts/preflight.sh`](../scripts/preflight.sh)):
 
-    | Node | Ubuntu base VMID | Windows base VMID (future) |
+    | Node | Ubuntu base VMID | Windows base VMID |
     | --- | --- | --- |
     | `pve12t` | 9100 | 9200 |
     | `pve13m` | 9101 | 9201 |
     | `pve13t` | 9102 | 9202 |
+    | `pve12t2` | 9103 | 9203 |
 
-    VMIDs are cluster-wide unique post-cluster — building the same VMID on two nodes fails with HTTP 500 ("VM 9100 already exists"). The Windows series skips up by 100 to leave room for additional Linux variants.
+    VMIDs are cluster-wide unique post-cluster — building the same VMID on two nodes fails with HTTP 500 ("VM 9100 already exists"). The Windows series skips up by 100 to leave room for additional Linux variants; the convention extends +1 per node as the cluster grows.
 
     **Env files (one per host).** The wrapper sources `.env.<node>`. Token + secret are cluster-replicated via `/etc/pve/user.cfg`, so the per-host deltas are `PROXMOX_URL`, `PROXMOX_NODE`, and `VM_ID`:
 
@@ -129,7 +130,7 @@ Stand up the Proxmox Backup Server host between cluster bring-up and IaC enablem
 
 12. **(Optional) Build the Windows 11 base template** — [packer/windows-11-base/README.md](../packer/windows-11-base/README.md). Two targets — `proxmox-iso` (per-node Windows base; VMIDs `9200`/`9201`/`9202` for `pve12t`/`pve13m`/`pve13t`, same per-node-distinct-VMID rule as step 11 — see [ADR-0006](decisions/0006-packer-templates-per-node.md)) and `virtualbox-iso` (T480-only; outputs qcow2 for libvirt). Required only if you'll deploy Windows roles.
 
-    `packer/windows-11-base/` defaults to `VM_ID=9200` (pve12t); bump per node when fanning out the env files (`9201` for pve13m, `9202` for pve13t) — same pattern as the Ubuntu series. Future Windows roles will need their own `local.windows_template_ids` map in role tfvars (analogous to the Ubuntu one in [`vms/openbao/terraform/main.tf`](../vms/openbao/terraform/main.tf)).
+    `packer/windows-11-base/` defaults to `VM_ID=9200` (pve12t); bump per node when fanning out the env files (`9201`/`9202`/`9203` for pve13m/pve13t/pve12t2) — same pattern as the Ubuntu series. Windows roles use their own `local.windows_template_ids` map and the shared [`modules/proxmox-vm-windows/`](../modules/proxmox-vm-windows/) module — see [`vms/win-client/`](../vms/win-client/README.md), the first shipped Windows role, as the worked example.
 
 ---
 

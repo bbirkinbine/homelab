@@ -5,10 +5,11 @@
 > start. Orientation-first; pointers to the runbooks rather than a
 > duplicate of them.
 
-The repo's VM-provisioning shape was migrated off shell `deploy.sh`
-scripts to OpenTofu + Ansible on 2026-05-11. Two roles ship today as
-worked examples: `vms/openbao/` (a cluster-mobile service VM) and
-`vms/rootca/` (an air-gapped, hardware-pinned VM). Everything below is
+The repo's VM-provisioning shape uses OpenTofu + Ansible (migrated off the
+older shell `deploy.sh` scripts). Several roles ship as worked examples:
+cluster-mobile services like `vms/openbao/`, an air-gapped hardware-pinned VM
+(`vms/rootca/`), an eGPU workload (`vms/llm/`), and the first Windows host
+(`vms/win-client/`, which uses a separate Windows module). Everything below is
 how to use that shape — and how to add new roles to it.
 
 ---
@@ -69,7 +70,7 @@ latency; see [`vms/amp-game/README.md`](../vms/amp-game/README.md).)
 
 The VM has a Thunderbolt eGPU passthrough or USB-token passthrough
 that ties it to one specific Proxmox node. Live migration is
-impossible. Examples: future LLM role (eGPU on `pve12t`), the Root CA
+impossible. Examples: the LLM role (eGPU on `pve12t`), the Root CA
 (USB-HSM on `pve12t`).
 
 - **Disk storage**: node-local (`local-lvm`, or a dedicated pool like
@@ -102,9 +103,34 @@ two-phase apply on top of the hardware-pin pattern:
 **Template to copy:** `vms/rootca/`. Read its README end-to-end before
 adapting — the lifecycle is non-obvious.
 
+### D. Windows host
+
+A Windows 11 VM cloned from the Windows base template, with a local admin
+auto-injected on first boot via `cloudbase-init`. The shape diverges from the
+Linux classes enough to warrant a separate module — so it does not fit A/B/C.
+Example: `vms/win-client/`.
+
+- **Module**: [`modules/proxmox-vm-windows/`](../modules/proxmox-vm-windows/),
+  not the Linux `modules/proxmox-vm/`. It bakes in q35 + OVMF + TPM, a SATA
+  boot disk, and the configdrive2 JSON meta-data Windows requires.
+- **cloud-init**: a `#ps1_sysnative` PowerShell user-data script that creates
+  the admin + enables RDP, plus JSON meta-data (Windows guests default to
+  `citype=configdrive2`; a NoCloud YAML meta-data file crashes cloudbase-init).
+  Identity is a local admin account with a password from KeePassXC — **no SSH
+  key**.
+- **Disk storage**: `local-lvm` by default to match the template (same-storage
+  clone, EFI/TPM off NFS); flip both storage knobs to `nas-vms` for
+  cluster-mobility once that path is verified.
+- **Config mgmt**: none wired yet (no Ansible / `just inventory` step). Add a
+  WinRM- or SSH-based Ansible role when post-boot config is needed.
+
+**Template to copy:** `vms/win-client/`. Its README has the KeePassXC password
+rules and the Windows-specific gotchas; the deploy flow differs from the Linux
+one below — **no `just inventory` / `just ansible` steps**.
+
 ---
 
-## The repeatable flow (any role)
+## The repeatable flow (Linux roles)
 
 Once a role exists at `vms/<role>/`, the deploy sequence is identical
 across all of them:
@@ -130,10 +156,13 @@ first set up the workstation; refer back when something breaks.
 
 ---
 
-## Resizing a VM (any role)
+## Resizing a VM (Linux roles)
 
-Every role shares the same Ubuntu Packer base, so the procedure is
-identical regardless of which VM you're growing.
+Every Linux role shares the same Ubuntu Packer base, so the procedure is
+identical regardless of which VM you're growing. (Windows hosts grow
+differently — the block device resizes the same way, but extend the C:
+partition in-guest with `Resize-Partition` / `diskpart`, not
+`growpart`/`resize2fs`.)
 
 Edit the role's sizing variables in
 `vms/<role>/terraform/terraform.tfvars` (or in `terraform/main.tf`
@@ -331,10 +360,11 @@ Skipping the migration is safe: existing VMs continue to behave as before (host 
 
 ## Common gotchas
 
-- **Cluster transition is not done yet.** Hostnames stay `pveXX`
-  (Inventory doc's `nuc*` are physical-chassis labels). `nas-vms`
-  shared storage doesn't exist; module default is still `local-lvm`.
-  See CLAUDE.md "Active context".
+- **Hostnames stay `pveXX`.** The vault/Inventory doc's `nuc*` are
+  physical-chassis labels, not Proxmox node names — don't conflate them.
+  (The cluster is live: 4 nodes, with `nas-vms` NFS registered cluster-wide
+  and set as the default `disk_storage` / `snippets_storage` for cluster-mobile
+  roles. See CLAUDE.md "Active context".)
 - **The bpg/proxmox provider's API shifts between minor versions.**
   Module is pinned `~> 0.66`; lockfile pins to v0.106.0. If you bump,
   re-validate before applying.
