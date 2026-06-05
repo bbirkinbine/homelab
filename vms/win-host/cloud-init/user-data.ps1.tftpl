@@ -1,0 +1,91 @@
+#ps1_sysnative
+# =============================================================================
+# win-host first-boot account provisioning
+#
+# Rendered by templatefile() in ../terraform/main.tf and delivered as the
+# cloud-init user-data. cloudbase-init's UserDataPlugin sees the
+# `#ps1_sysnative` header above and runs this as SYSTEM (64-bit PowerShell)
+# ONCE per instance-id on first boot. This is the reliable account-creation
+# path (verified against cloudbase-init upstream docs): cloudbase-init only
+# has to "execute a script", versus parsing a cloud-config `users:` list
+# through its newer/quirkier cloud-config user plugin.
+#
+# DESIGN: the admin account is created FIRST, in its own try/catch, before any
+# other logic (RDP, etc.), so a failure in a later step cannot leave the VM
+# with no usable login. If cloudbase-init fails to run this script at all,
+# recover from the Proxmox host via `qm guest exec` (qemu-guest-agent is
+# independent of cloudbase-init) — see ../SPIKE-NOTES.md "Break-glass".
+#
+# templatefile() escaping rules for this file (the doubled $$ / %% below are
+# how you write a LITERAL $-brace / %-brace without Terraform interpreting it):
+#   * Only $${...} and %%{...} are interpolated by Terraform. This script uses
+#     bare PowerShell $vars (no braces) and ForEach-Object (NOT the %%{ }
+#     alias) precisely so nothing here collides with templatefile syntax.
+#   * Real placeholders: $${admin_username}, $${admin_password_b64}. The
+#     password arrives base64-encoded and is decoded below, so no symbol in
+#     it can break PowerShell quoting.
+#
+# Ordering note: the template's packer-cleanup.ps1 scheduled task WAITS for
+# cloudbase-init to finish before it disables the built-in Administrator, so
+# the named admins created here always exist before Administrator is locked
+# out. (See packer/windows-11-base/provision/99-sysprep.ps1.)
+# =============================================================================
+$ErrorActionPreference = 'Stop'
+
+$logDir = 'C:\Windows\Setup\Scripts'
+$log    = Join-Path $logDir 'win-host-userdata.log'
+if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+function Write-Log($msg) {
+    "$([DateTime]::UtcNow.ToString('o')) $msg" | Add-Content -Path $log -Encoding UTF8
+}
+
+# Idempotent "ensure this local user exists, is an admin, has this password".
+# Decodes the base64 password so any generated symbol survives intact.
+function Set-LabAdmin {
+    param([string]$Name, [string]$PwB64, [string]$Desc)
+    $plain  = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($PwB64))
+    $secure = ConvertTo-SecureString $plain -AsPlainText -Force
+    $plain  = $null
+    if (Get-LocalUser -Name $Name -ErrorAction SilentlyContinue) {
+        Set-LocalUser -Name $Name -Password $secure
+    } else {
+        New-LocalUser -Name $Name -Password $secure -FullName $Name -Description $Desc `
+            -PasswordNeverExpires -AccountNeverExpires | Out-Null
+    }
+    Add-LocalGroupMember -Group 'Administrators' -Member $Name -ErrorAction SilentlyContinue
+}
+
+Write-Log '=== win-host user-data start ==='
+
+# --- Named admin -------------------------------------------------------------
+try {
+    Set-LabAdmin -Name '${admin_username}' -PwB64 '${admin_password_b64}' -Desc 'Lab admin (cloud-init)'
+    Write-Log 'admin ${admin_username} ensured in Administrators'
+} catch {
+    Write-Log "ERROR creating admin ${admin_username}: $_"
+}
+
+# --- Enable RDP so the host is actually reachable ----------------------------
+# A "usable Windows host" needs a way in beyond the Proxmox console. Best-
+# effort: a failure here must not abort the script (accounts already exist).
+try {
+    Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+        -Name 'fDenyTSConnections' -Value 0 -Type DWord
+    Enable-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue
+    Write-Log 'RDP enabled'
+} catch {
+    Write-Log "WARN enabling RDP: $_"
+}
+
+# --- Example: your own additional users / groups -----------------------------
+# Pattern for extra accounts/groups (uncomment + customize; pass any extra
+# passwords through the same KeePassXC -> base64 path as the admins above
+# rather than hardcoding):
+#
+#   try {
+#       New-LocalGroup -Name 'LabOperators' -Description 'Day-to-day operators' -ErrorAction SilentlyContinue
+#       Set-LabAdmin -Name 'svc-foo' -PwB64 '<base64>' -Desc 'service account'
+#       Add-LocalGroupMember -Group 'LabOperators' -Member 'svc-foo' -ErrorAction SilentlyContinue
+#   } catch { Write-Log "WARN extra users: $_" }
+
+Write-Log '=== win-host user-data done ==='
