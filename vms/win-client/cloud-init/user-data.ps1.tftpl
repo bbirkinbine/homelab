@@ -1,6 +1,6 @@
 #ps1_sysnative
 # =============================================================================
-# win-host first-boot account provisioning
+# win-client first-boot account provisioning
 #
 # Rendered by templatefile() in ../terraform/main.tf and delivered as the
 # cloud-init user-data. cloudbase-init's UserDataPlugin sees the
@@ -33,7 +33,7 @@
 $ErrorActionPreference = 'Stop'
 
 $logDir = 'C:\Windows\Setup\Scripts'
-$log    = Join-Path $logDir 'win-host-userdata.log'
+$log    = Join-Path $logDir 'win-client-userdata.log'
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 function Write-Log($msg) {
     "$([DateTime]::UtcNow.ToString('o')) $msg" | Add-Content -Path $log -Encoding UTF8
@@ -55,7 +55,7 @@ function Set-LabAdmin {
     Add-LocalGroupMember -Group 'Administrators' -Member $Name -ErrorAction SilentlyContinue
 }
 
-Write-Log '=== win-host user-data start ==='
+Write-Log '=== win-client user-data start ==='
 
 # --- Named admin -------------------------------------------------------------
 try {
@@ -88,4 +88,4 @@ try {
 #       Add-LocalGroupMember -Group 'LabOperators' -Member 'svc-foo' -ErrorAction SilentlyContinue
 #   } catch { Write-Log "WARN extra users: $_" }
 
-Write-Log '=== win-host user-data done ==='
+Write-Log '=== win-client user-data done ==='

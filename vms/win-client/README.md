@@ -1,4 +1,4 @@
-# vms/win-host
+# vms/win-client
 
 Clones the [Windows 11 base template](../../packer/windows-11-base/) into a
 usable Windows host and auto-injects a named local admin on first boot via
@@ -52,18 +52,18 @@ SPIKE-NOTES.md              experiment log + Phase-2 checklist
 
 ## Credentials (KeePassXC)
 
-win-host pulls two secrets at hydrate time. Both read the entry's **Password**
+win-client pulls two secrets at hydrate time. Both read the entry's **Password**
 field (the `kp://` refs carry no `#field`, so they default to `Password`):
 
 | KeePassXC entry (group / title)  | Used for          | Status                  |
 | -------------------------------- | ----------------- | ----------------------- |
 | `Homelab/Tofu/proxmox-api-token` | Proxmox API token | shared — already exists |
-| `Homelab/Tofu/win-host-labadmin` | the VM admin pw   | **you create this**     |
+| `Homelab/Tofu/win-client-labadmin` | the VM admin pw   | **you create this**     |
 
-Create `win-host-labadmin`:
+Create `win-client-labadmin`:
 
 1. KeePassXC → group **`Homelab/Tofu`** → New Entry → title exactly
-   **`win-host-labadmin`**.
+   **`win-client-labadmin`**.
 2. Generate the password (dice icon): **length 20**, and in the generator's
    *exclude characters* field put **`"\{}`**. Those characters break the value
    when it is written into the HCL `terraform.tfvars` (`"` and `\` are HCL
@@ -85,15 +85,15 @@ host's `terraform.tfvars.tpl` `kp://` ref at it — don't share one password.
 # 1. Hydrate kp:// → terraform.tfvars (gitignored, 0600). MUST use --force if
 #    terraform.tfvars already exists (hydrate is a no-op otherwise). DB is on
 #    YubiKey slot 2.
-KEEPASSXC_YUBIKEY=2 just hydrate win-host --force
+KEEPASSXC_YUBIKEY=2 just hydrate win-client --force
 
 # 2. Preflight. preflight defaults to the UBUNTU template id for the node, so
 #    override it to verify the WINDOWS template exists (e.g. 9203 on pve12t2):
-TEMPLATE_VM_ID=9203 ./scripts/preflight.sh win-host
+TEMPLATE_VM_ID=9203 ./scripts/preflight.sh win-client
 
 # 3. Plan, read it (expect "3 to add, 0 to destroy"; check the efi_disk /
 #    tpm_state / single ide3 cloud-init drive), then apply. Never -auto-approve.
-cd vms/win-host/terraform && tofu init -upgrade && tofu plan
+cd vms/win-client/terraform && tofu init -upgrade && tofu plan
 tofu apply
 ```
 
@@ -121,7 +121,7 @@ the guest agent):
 
 ```bash
 ssh root@<node> "qm guest exec <vmid> -- powershell -NoProfile -Command \
-  \"hostname; Get-Content C:\Windows\Setup\Scripts\win-host-userdata.log; \
+  \"hostname; Get-Content C:\Windows\Setup\Scripts\win-client-userdata.log; \
     net localgroup Administrators\""
 ```
 

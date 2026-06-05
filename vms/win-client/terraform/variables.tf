@@ -1,4 +1,4 @@
-# Inputs for the win-host spike workspace.
+# Inputs for the win-client spike workspace.
 #
 # All of these come in through terraform.tfvars (gitignored), which
 # scripts/hydrate.sh produces from terraform.tfvars.tpl (committed, with

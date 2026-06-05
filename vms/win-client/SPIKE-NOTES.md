@@ -1,4 +1,4 @@
-# win-host — SPIKE NOTES (feat/windows-host, Phase 1)
+# win-client — SPIKE NOTES (feat/windows-host, Phase 1)
 
 This directory is an **experiment**, not yet a canonical role. It exists to
 answer a handful of unknowns about cloning the Windows 11 base template and
@@ -40,26 +40,26 @@ cloudbase-init upstream docs confirm BOTH a `#cloud-config` `users:` list AND
 `#ps1_sysnative`** because it is the most version-stable and debuggable path:
 cloudbase-init only has to execute a script (a core, long-standing feature),
 versus parsing a `users:` list through its newer cloud-config user plugin. The
-script writes `C:\Windows\Setup\Scripts\win-host-userdata.log`, so first-boot
+script writes `C:\Windows\Setup\Scripts\win-client-userdata.log`, so first-boot
 behavior is observable. The cloud-config `users:` path in
 [docs/cloning-templates.md](../../docs/cloning-templates.md) remains a valid
 documented alternative; this spike deliberately does not use it.
 
 ## Credentials — KeePassXC setup (do this first)
 
-win-host pulls two secrets from KeePassXC at hydrate time. Both come from the
+win-client pulls two secrets from KeePassXC at hydrate time. Both come from the
 entry's **Password** field (the `kp://` refs carry no `#field`, so they default
 to `Password`):
 
 | KeePassXC entry (group / title)   | Used for             | Status                  |
 | --------------------------------- | -------------------- | ----------------------- |
 | `Homelab/Tofu/proxmox-api-token`  | Proxmox API token    | shared — already exists |
-| `Homelab/Tofu/win-host-labadmin`  | the VM's admin pw    | **you create this**     |
+| `Homelab/Tofu/win-client-labadmin`  | the VM's admin pw    | **you create this**     |
 
-Create `win-host-labadmin`:
+Create `win-client-labadmin`:
 
 1. In KeePassXC, group **`Homelab/Tofu`** → New Entry → title exactly
-   **`win-host-labadmin`**.
+   **`win-client-labadmin`**.
 2. Generate the password (dice icon): **length 20**, and in the generator's
    *exclude characters* field put **`"\{}`** (kills the chars that break the
    HCL tfvars: `"`, `\`, and the `${`/`%{` sequences). All other character
@@ -78,23 +78,23 @@ across hosts).
 
 ```bash
 # 1. Resolve kp:// placeholders into terraform.tfvars (gitignored, 0600).
-#    Requires the win-host-labadmin entry above. DB is YubiKey slot 2.
-KEEPASSXC_YUBIKEY=2 just hydrate win-host   # or: scripts/hydrate.sh vms/win-host/terraform
+#    Requires the win-client-labadmin entry above. DB is YubiKey slot 2.
+KEEPASSXC_YUBIKEY=2 just hydrate win-client   # or: scripts/hydrate.sh vms/win-client/terraform
 
 # 2. Preflight: ssh / API token / template-exists / snippets-store checks.
 #    preflight defaults to the UBUNTU template id for the node (pve12t2->9103),
 #    so override it to check the real WINDOWS template (9203 on pve12t2):
-TEMPLATE_VM_ID=9203 ./scripts/preflight.sh win-host
+TEMPLATE_VM_ID=9203 ./scripts/preflight.sh win-client
 
 # 3. Plan, read it, then apply. NEVER -auto-approve against the cluster
 #    (see the 2026-05-21 incident). Read the create/destroy line.
-just plan win-host
-just apply win-host          # plain `tofu apply`, type yes after reading
+just plan win-client
+just apply win-client          # plain `tofu apply`, type yes after reading
 ```
 
-> The `just` recipes are parameterized by role name; if `win-host` isn't picked
+> The `just` recipes are parameterized by role name; if `win-client` isn't picked
 > up because the dir isn't canonical yet, run the `scripts/...` / `tofu` forms
-> shown in the comments directly from `vms/win-host/terraform/`.
+> shown in the comments directly from `vms/win-client/terraform/`.
 
 ## What success looks like
 
@@ -104,7 +104,7 @@ just apply win-host          # plain `tofu apply`, type yes after reading
 3. `tofu output ipv4_addresses` reports a LAN IP — proves the virtio NIC +
    qemu-guest-agent came up on the clone.
 4. RDP (or Proxmox console) login as `labadmin` with the vault password works.
-5. On the guest, `C:\Windows\Setup\Scripts\win-host-userdata.log` shows the
+5. On the guest, `C:\Windows\Setup\Scripts\win-client-userdata.log` shows the
    "admin labadmin ensured" / "done" lines — proves cloudbase-init ran the
    PowerShell user-data.
 6. `net user Administrator` shows `Account active: No` — proves the cleanup
@@ -118,7 +118,7 @@ against being locked out, weakest-failure to strongest-failure:
 1. **The user-data script fails partway.** The admin account is created FIRST,
    before RDP and any other logic, so later failures can't strand you. The
    script also never re-throws — partial success is preserved and logged to
-   `C:\Windows\Setup\Scripts\win-host-userdata.log`.
+   `C:\Windows\Setup\Scripts\win-client-userdata.log`.
 
 2. **cloudbase-init never runs / never reads the drive (worst case).** No
    account exists and the console has no usable login. Recover from the
@@ -195,12 +195,12 @@ Template 9203 config (verified 2026-06-05) the spike is matched against:
       optional `efi_disk` / `tpm_state` / `bios` / `operating_system`, so a
       Windows role can use the shared module instead of a raw resource.
 - [ ] Decide SATA vs virtio-scsi for the boot disk based on spike findings.
-- [ ] Make `vms/win-host/` canonical (file set, storage knobs, VMID per
+- [ ] Make `vms/win-client/` canonical (file set, storage knobs, VMID per
       ADR-0008) so `just check-roles` passes.
 - [ ] Wire the 5 new-VM monitoring touchpoints (see
       `vms/_template/README.md`) — node_exporter / windows_exporter for the
       guest, scrape marker, etc.
-- [ ] Write `vms/win-host/README.md` (runbook depth matching `vms/openbao/`).
+- [ ] Write `vms/win-client/README.md` (runbook depth matching `vms/openbao/`).
 - [ ] Revisit the cleartext-password caveat.
-- [ ] Add an Ansible role under `vms/win-host/ansible/` if post-boot config
+- [ ] Add an Ansible role under `vms/win-client/ansible/` if post-boot config
       beyond account creation is needed (domain join, software, etc.).

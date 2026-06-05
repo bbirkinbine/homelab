@@ -1,4 +1,4 @@
-# win-host SPIKE — clone the Windows 11 base template and inject a named
+# win-client SPIKE — clone the Windows 11 base template and inject a named
 # admin account at first boot via cloudbase-init.
 #
 # This is Phase 1 of feat/windows-host: a deliberately raw, single-file
@@ -25,7 +25,7 @@ provider "proxmox" {
 }
 
 locals {
-  vm_name = "win-host"
+  vm_name = "win-client"
 
   // Per-node Windows 11 base template VMIDs (ADR-0006 — VMIDs are cluster-
   // wide unique post-cluster, so one constant doesn't work). Parallel to the
@@ -98,7 +98,7 @@ resource "proxmox_virtual_environment_vm" "this" {
   name      = local.vm_name
   vm_id     = var.vm_id
   node_name = var.proxmox_node
-  tags      = ["win-host", "tofu", "spike"]
+  tags      = ["win-client", "tofu", "spike"]
 
   // Win11 hardware gates. The template was built q35 + OVMF + TPM 2.0; we
   // restate them here so the clone's shape is explicit and any drift is

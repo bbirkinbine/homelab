@@ -1,4 +1,4 @@
-# vms/win-host/terraform/terraform.tfvars.tpl
+# vms/win-client/terraform/terraform.tfvars.tpl
 #
 # Hydrate template for scripts/hydrate.sh. Each `kp://Homelab/...` placeholder
 # is resolved against KeePassXC via `keepassxc-cli show` and written to
@@ -14,7 +14,7 @@ proxmox_node      = "pve12t2"
 
 # Named admin. The username is non-secret (set literally below); only the
 # password comes from KeePassXC. Create a KeePassXC entry titled
-# `win-host-labadmin` in group `Homelab/Tofu`, and put the Windows admin
+# `win-client-labadmin` in group `Homelab/Tofu`, and put the Windows admin
 # password in its **Password** field (the kp:// ref has no #field, so it reads
 # Password). Type one in or use KeePassXC's generator — either way you know it.
 #
@@ -29,7 +29,7 @@ proxmox_node      = "pve12t2"
 #     exclude `"\{}` — that kills both and the ${/%{ risk. Everything else
 #     (~ ! @ # $ % ^ & * etc.) is fine; the Windows side gets it base64-encoded.
 win_admin_username = "labadmin"
-win_admin_password = "kp://Homelab/Tofu/win-host-labadmin"
+win_admin_password = "kp://Homelab/Tofu/win-client-labadmin"
 
 # Storage — spike defaults to local-lvm + local (matches the 9203 template, so
 # the clone is a same-storage op; node-pinned to pve12t2). Uncomment to make it
