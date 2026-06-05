@@ -14,7 +14,7 @@ sizing, storage, and the account-provisioning user-data into it.
 
 ## Layout
 
-```
+```text
 terraform/                  OpenTofu: calls modules/proxmox-vm-windows
   main.tf                   provider + per-node template map + the module block
   variables.tf              node, sizing, storage, the admin username/password
@@ -213,6 +213,45 @@ No ballooning (memory pinned) — one fewer variable while the clone path is you
 The base template ships with these reachable (firewall default-deny inbound,
 these allowed): **RDP 3389**, **OpenSSH 22**, **WinRM 5985**. The user-data
 re-asserts RDP on first boot.
+
+## Creating another Windows host
+
+Windows hosts are pets here — one role dir per VM, same as the Linux roles.
+There is no `_win-template` yet (one Windows role doesn't justify extracting a
+skeleton); **copy this role** — it is the canonical Windows starting point.
+To stand up e.g. `win-dev`, from the repo root:
+
+```bash
+cp -r vms/win-client vms/win-dev
+cd vms/win-dev
+
+# 1. Drop the copied LOCAL state + secrets — they belong to win-client's VM,
+#    NOT the new one. (gitignored, so the cp dragged them along.)
+rm -rf terraform/.terraform terraform/terraform.tfstate* terraform/terraform.tfvars
+
+# 2. Rename win-client -> win-dev across the copy. Two forms: the hyphenated
+#    name (win-client) and the HCL module label (win_client).
+git ls-files -o --exclude-standard | xargs \
+  sed -i '' -e 's/win-client/win-dev/g' -e 's/win_client/win_dev/g'   # macOS
+#   (Linux: sed -i -e 's/win-client/win-dev/g' -e 's/win_client/win_dev/g')
+
+# 3. Pick a unique VMID (workload range 100-399 per ADR-0008; confirm it's free
+#    cluster-wide with `qm list`) and edit `vm_id = 310` in terraform/main.tf.
+
+# 4. Register the new role as a workload in scripts/check-role-consistency.sh
+#    role_class() — add it next to win-client.
+
+# 5. Rewrite this README's opening + purpose for the new host.
+```
+
+Then create its KeePassXC entry `Homelab/Tofu/win-dev-labadmin` (the **Password**
+field — see [Credentials](#credentials-keepassxc)) and deploy exactly as above:
+`just hydrate win-dev --force` → preflight (`TEMPLATE_VM_ID=<92xx>`) → plan →
+apply. Confirm the copy is still canonical with `just check-roles`.
+
+> When a genuinely different second Windows *type* appears (e.g. a `win-server`
+> for general use), extract the real commonality between it and win-client into
+> a `_win-template/` then — built from two examples, not guessed from one.
 
 ## Related
 
