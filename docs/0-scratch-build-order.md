@@ -28,7 +28,7 @@ Per-node prep. Steps 1 + 2 can run in parallel (NAS-side prep doesn't depend on 
 
 2. **Bare-metal PVE 9.x install on each NUC** — [docs/proxmox-install.md](proxmox-install.md). USB media, BIOS prereqs (IOMMU on, Secure Boot off), installer click-through, per-node root password from KeePassXC, filesystem layout. On `pve12t` only: post-install creation of the `nuc12-fast` LVM-thin pool on a dedicated 2.5" SATA SSD (1 TB in this lab; see [docs/proxmox-install.md § 2](proxmox-install.md) for the `pvcreate` → `vgcreate nuc12fast_vg` → `lvcreate -T` → `pvesm add` sequence, plus the fallback if the node has no second drive). Repeat the install for `pve12t`, `pve13m`, `pve13t`. Outputs three PVE 9.x hosts reachable on the LAN.
 
-3. **TB4 cables** — physical wiring per the vault doc `[[Thunderbolt Mesh Networking — 3-Node Cluster Option]]`. Line topology: `pve12t ── pve13m ── pve13t`. Plug after the installs are done. Everything else TB is role-managed.
+3. **TB4 cables** — physical wiring per the vault doc `[[Thunderbolt Mesh Networking — 3-Node Cluster Option]]`. Line topology (extended to the 4th node): `pve12t ── pve13m ── pve13t ── pve12t2`, with `pve13t` acting as an L3 transit node. Plug after the installs are done. Everything else TB is role-managed.
 
 4. **Fill in `inventory.yml`** — [pve-hosts/ansible/inventory.yml.example](../pve-hosts/ansible/inventory.yml.example) → `inventory.yml`. Replace TODOs: LAN IPs, NAS IP, your SSH pubkey. Verify `pve_lan_iface` per host (`ip link` on each — PVE 9.x typically renames to `nic0`).
 

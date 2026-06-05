@@ -2,7 +2,7 @@
 
 Infrastructure-as-code for a small Proxmox VE homelab. Builds reproducible,
 hardened VM templates (Ubuntu Server 24.04 LTS, Windows 11 Pro x64) that
-serve as the universal parent images for downstream VMs across a 3-node
+serve as the universal parent images for downstream VMs across a 4-node
 Proxmox cluster.
 
 > ## Status
@@ -26,8 +26,9 @@ Proxmox cluster.
 | `pve12t` | Intel NUC 12 Tall | i7-1260P (12th gen, 4P+8E / 16T) | 64 GiB | Thunderbolt eGPU enclosure with NVIDIA RTX 3090 (24 GB VRAM) |
 | `pve13m` | Intel NUC 13 Pro Mini | i7-1360P (13th gen, 4P+8E / 16T) | 64 GiB | — |
 | `pve13t` | ASUS NUC 13 Pro Tall | i7-13620H (13th gen, 6P+4E / 16T) | 64 GiB | — |
+| `pve12t2` | Intel NUC 12 Pro Tall | i7-1260P (12th gen, 4P+8E / 16T) | 64 GiB | — (hardware twin of `pve12t`) |
 
-The three nodes form a 3-node Proxmox cluster (`homelab`) with corosync
+The four nodes form a Proxmox cluster (`homelab`) with corosync
 ring0 on the 2.5GbE LAN and ring1 over a Thunderbolt line-topology
 overlay for live-migration traffic. Users, tokens, and storage
 definitions replicate cluster-wide via pmxcfs. VMs whose disks live on
@@ -46,7 +47,7 @@ Operator-side build hosts (macOS for `proxmox-iso` targets, T480 + Ubuntu for th
 
 | Layer | Tool | Notes |
 | --- | --- | --- |
-| Hypervisor | Proxmox VE 9.x | 3-node cluster (`pvecm`), corosync ring0 + ring1 |
+| Hypervisor | Proxmox VE 9.x | 4-node cluster (`pvecm`), corosync ring0 + ring1 |
 | Shared storage | Asustor AS6706T (NFS) | `nas-vms` for cluster-mobile VM disks + snippets |
 | VM templates | Packer + cloud-init / Autounattend | Ubuntu 24.04 LTS, Windows 11 Pro x64; hardened, sysprep'd |
 | VM provisioning | OpenTofu + `bpg/proxmox` | Clones templates, attaches cloud-init drive, threads role config |
