@@ -250,8 +250,20 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     fi
     KP_ERR="$(mktemp)"
     if ! VALUE="$(kp_lookup "$SPEC" 2>"$KP_ERR")"; then
+      # Decompose the spec so the operator sees EXACTLY what was looked up:
+      # which group, which entry title, and which field (default: Password).
+      if [[ "$SPEC" == *"#"* ]]; then
+        ERR_PATH="${SPEC%%#*}"; ERR_FIELD="${SPEC#*#}"
+      else
+        ERR_PATH="$SPEC"; ERR_FIELD="Password (default — no #field in the ref)"
+      fi
+      ERR_ENTRY="${ERR_PATH##*/}"; ERR_GROUP="${ERR_PATH%/*}"
       echo "ERROR: line $LINE_NO: could not resolve kp://$SPEC" >&2
-      echo "       Check the entry exists in $KEEPASSXC_DB and the field name is correct." >&2
+      echo "       In KeePassXC DB $KEEPASSXC_DB, hydrate looked for:" >&2
+      echo "         group: $ERR_GROUP" >&2
+      echo "         entry: $ERR_ENTRY" >&2
+      echo "         field: $ERR_FIELD" >&2
+      echo "       Ensure that entry exists in that group with the field populated." >&2
       if [[ -s "$KP_ERR" ]]; then
         echo "       keepassxc-cli said:" >&2
         sed 's/^/         /' "$KP_ERR" >&2
