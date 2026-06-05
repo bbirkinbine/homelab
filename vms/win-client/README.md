@@ -82,7 +82,12 @@ host's `terraform.tfvars.tpl` `kp://` ref at it — don't share one password.
 
 ## Deploy
 
+Steps 1–2 run from the **repo root** (where the `Justfile` and `scripts/` live);
+step 3 runs from **`vms/win-client/terraform/`**. Each block below is labelled.
+
 ```bash
+# ===== from the REPO ROOT =====================================================
+
 # 1. Hydrate kp:// → terraform.tfvars (gitignored, 0600). MUST use --force if
 #    terraform.tfvars already exists (hydrate is a no-op otherwise). DB is on
 #    YubiKey slot 2.
@@ -92,11 +97,18 @@ KEEPASSXC_YUBIKEY=2 just hydrate win-client --force
 #    override it to verify the WINDOWS template exists (e.g. 9203 on pve12t2):
 TEMPLATE_VM_ID=9203 ./scripts/preflight.sh win-client
 
+# ===== from vms/win-client/terraform/ ========================================
+cd vms/win-client/terraform
+
 # 3. Plan, read it (expect "3 to add, 0 to destroy"; check the efi_disk /
 #    tpm_state / single ide3 cloud-init drive), then apply. Never -auto-approve.
-cd vms/win-client/terraform && tofu init -upgrade && tofu plan
+tofu init -upgrade && tofu plan
 tofu apply
 ```
+
+> `just` recipes always run from the repo root regardless of your current
+> directory (that's where the `Justfile` is); `tofu` acts on the workspace in
+> the current directory, so it must be run from `vms/win-client/terraform/`.
 
 First boot takes a few minutes: the clone boots, `cloudbase-init` sets the
 hostname (which **reboots Windows once**), then runs the user-data that creates
@@ -108,7 +120,7 @@ is often *before* that reboot finishes — give it ~2–3 minutes to settle.
 `cloudbase-init` runs **once per instance-id**, and `meta_data_file_id` is
 `ForceNew`/`ignore_changes`. So editing the password or user-data and re-running
 `tofu apply` will **not** re-provision an existing VM. To apply cloud-init
-changes, recreate it:
+changes, recreate it (from `vms/win-client/terraform/`):
 
 ```bash
 tofu destroy && tofu apply
