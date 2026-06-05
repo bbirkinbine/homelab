@@ -69,7 +69,7 @@ so any downstream VM can clone from it.
 - **Ubuntu 24.04.x live-server ISO** uploaded to the node's ISO storage pool,
   OR a reachable URL Proxmox can download. The variable `iso_file` controls
   which (default expects an already-uploaded ISO at
-  `local:iso/ubuntu-24.04.1-live-server-amd64.iso`).
+  `local:iso/ubuntu-24.04.4-live-server-amd64.iso`).
 - **Network reach**: your workstation must be able to reach the Proxmox API
   AND the SSH IP the VM gets during the build (from autoinstall, the VM uses
   DHCP on `vmbr0`). If the build VM ends up on a VLAN you can't route to,
@@ -204,10 +204,11 @@ roles which need to stay quiet can.
 
 ## Updating the Ubuntu point release
 
-1. Bump `iso_file` (and `iso_checksum` if using `iso_url`) in each
-   `.env.<node>` to the newer point release (24.04.2, .3, etc.).
-2. Verify the SHA256 against
-   <https://releases.ubuntu.com/24.04/SHA256SUMS>.
+1. Upload the newer point-release ISO (24.04.5, etc.) to each node's `local`
+   storage (Proxmox UI > node > local > ISO Images > Upload, or scp into
+   /var/lib/vz/template/iso/), verifying its SHA256 against
+   <https://releases.ubuntu.com/24.04/SHA256SUMS> first.
+2. Point `ISO_FILE` in each `.env.<node>` at the newer file.
 3. Re-run `./build-pve.sh <node>` for each Proxmox host. Packer creates a fresh
    template; if the VM ID is unchanged you'll need to delete the old
    template first.

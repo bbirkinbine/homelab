@@ -87,33 +87,14 @@ variable "vlan_tag" {
 variable "iso_file" {
   type        = string
   description = <<EOT
-Existing ISO on a Proxmox storage pool, in 'storage:iso/filename' form.
-e.g. 'local:iso/ubuntu-24.04.1-live-server-amd64.iso'.
-Set to empty string if you want Packer/Proxmox to download via iso_url instead.
+Existing ISO on a Proxmox storage pool, in 'storage:iso/filename' form,
+e.g. 'local:iso/ubuntu-24.04.4-live-server-amd64.iso'. Upload the ISO to
+the target node first (Proxmox UI > node > local > ISO Images > Upload, or
+scp into /var/lib/vz/template/iso/) — the build attaches it as the install
+CD. The per-node ISO library is a node-pinned exception (see CLAUDE.md), so
+the file must be present on the node you're building on.
 EOT
-  default     = "local:iso/ubuntu-24.04.1-live-server-amd64.iso"
-}
-
-variable "iso_url" {
-  type        = string
-  description = "URL to download the Ubuntu live-server ISO. Used only if iso_file is empty."
-  default     = "https://releases.ubuntu.com/24.04/ubuntu-24.04.1-live-server-amd64.iso"
-}
-
-variable "iso_checksum" {
-  type        = string
-  description = <<EOT
-SHA256 checksum of the live-server ISO. Used only if iso_file is empty.
-Verify against the SHA256SUMS file at https://releases.ubuntu.com/24.04/
-before each build — the value here may go stale across point releases.
-EOT
-  default     = "sha256:e240e4b801f7bb68c20d1356b60968ad0c33a41d00d828e74ceb3364a0317be9"
-}
-
-variable "iso_storage_pool" {
-  type        = string
-  description = "Proxmox storage pool to upload the ISO into when downloading via iso_url."
-  default     = "local"
+  default     = "local:iso/ubuntu-24.04.4-live-server-amd64.iso"
 }
 
 // ----------------------------------------------------------------------------

@@ -59,16 +59,15 @@ source "proxmox-iso" "ubuntu-24-04-base" {
   qemu_agent = true
 
   // ---------- ISO source ----------
-  // Use existing ISO if iso_file is set; otherwise have Proxmox download it
-  // into iso_storage_pool.
+  // Attach an ISO that already lives on a Proxmox storage pool (var.iso_file,
+  // 'storage:iso/filename' form). The ISO must be uploaded to the target node
+  // beforehand — see the iso_file variable description. (A prior URL-download
+  // path via Proxmox's server-side download-url was dropped: it proved
+  // unreliable on this hardware and the upload-first flow matches every node.)
   boot_iso {
-    type             = "scsi"
-    iso_file         = var.iso_file != "" ? var.iso_file : null
-    iso_url          = var.iso_file == "" ? var.iso_url : null
-    iso_checksum     = var.iso_file == "" ? var.iso_checksum : null
-    iso_storage_pool = var.iso_storage_pool
-    unmount          = true
-    iso_download_pve = var.iso_file == "" ? true : false
+    type     = "scsi"
+    iso_file = var.iso_file
+    unmount  = true
   }
 
   // ---------- Boot command (Ubuntu 24.04 autoinstall via GRUB) ----------
