@@ -86,7 +86,7 @@ heading() {
 role_class() {
   case "$1" in
     openbao|openclaw|nemoclaw|hermes|rootca|monitoring) echo service ;;
-    amp-game|llm)                                       echo workload ;;
+    amp-game|llm|win-client)                            echo workload ;;
     *)                                           echo unknown ;;
   esac
 }

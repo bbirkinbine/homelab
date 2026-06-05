@@ -1,0 +1,35 @@
+# vms/win-client/terraform/terraform.tfvars.example
+#
+# Copy to terraform.tfvars (gitignored) and fill in real values, OR use the
+# committed terraform.tfvars.tpl with kp:// placeholders and run
+# `just hydrate win-client` to resolve them against KeePassXC.
+#
+# See vms/win-client/README.md for the full deploy flow and password rules.
+
+# Proxmox API endpoint URL. Trailing slash is OK.
+proxmox_endpoint = "https://pve12t2:8006/"
+
+# Full API token in `user@realm!tokenid=secret-uuid` form.
+# See docs/proxmox-tofu-permissions.md for how to mint one.
+proxmox_api_token = "tofu@pve!apply=00000000-0000-0000-0000-000000000000"
+
+# Proxmox node to create the VM on. The Windows base template must already be
+# built on this node (per-node VMIDs 9200/9201/9202/9203, ADR-0006).
+proxmox_node = "pve12t2"
+
+# The local admin cloud-init creates on first boot (added to Administrators).
+# The username is non-secret; only the password is sensitive.
+win_admin_username = "labadmin"
+
+# Windows admin password. Must meet Windows complexity (>=12 chars, 3 of 4 of
+# upper/lower/digit/special) and NOT contain the username. Tooling constraint:
+# do NOT include `"` `\` `${` `%{` (HCL tfvars string). See README password rules.
+win_admin_password = "Replace-Me-20chars-no-quote-backslash-brace"
+
+# --- Storage -----------------------------------------------------------------
+# Defaults (variables.tf) are local-lvm (disk/EFI/TPM) + local (snippets) to
+# match the template, so the clone is a same-storage operation. Uncomment to
+# make the host cluster-mobile on nas-vms once that path is verified.
+#
+# disk_storage     = "nas-vms"
+# snippets_storage = "nas-vms"

@@ -52,12 +52,8 @@ variable "win_admin_password" {
 }
 
 # --- Sizing -------------------------------------------------------------------
-
-variable "vm_id" {
-  type        = number
-  default     = 310
-  description = "VMID for this Windows host. Workloads range 100-399 per ADR-0008 (services live 8000-8099). 310 is a spike default — change before Phase 2 if it collides; check `qm list` cluster-wide."
-}
+# The VMID is hardcoded in main.tf (310, workload range per ADR-0008), matching
+# the convention in every other role — it's role identity, not a per-deploy knob.
 
 variable "cores" {
   type        = number

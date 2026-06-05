@@ -6,23 +6,24 @@ cloud-init (`cloudbase-init`). The result is a Windows VM you can RDP into with
 a password you control from your password manager — no manual OOBE, no baked-in
 credentials.
 
-> **Phase-1 spike.** This role is a deliberately raw, single-file terraform
-> workspace — it does **not** yet use the shared `modules/proxmox-vm/` and will
-> not pass `just check-roles`. It is proven working end-to-end; the remaining
-> canonicalization is tracked in [SPIKE-NOTES.md](SPIKE-NOTES.md). Treat the
-> account-injection flow below as stable.
+The Windows-specific hardware (q35/OVMF/TPM, SATA disk, configdrive2 JSON
+meta-data, ide3 cloud-init) lives in the shared
+[`modules/proxmox-vm-windows/`](../../modules/proxmox-vm-windows/) module — the
+Windows counterpart to `modules/proxmox-vm/`. This role just wires identity,
+sizing, storage, and the account-provisioning user-data into it.
 
 ## Layout
 
 ```
-terraform/                  OpenTofu: clone template, size, attach cloud-init
-  main.tf                   the VM + two cloud-init snippets (user-data, meta-data)
-  variables.tf              node, VMID, sizing, storage, the admin username/password
+terraform/                  OpenTofu: calls modules/proxmox-vm-windows
+  main.tf                   provider + per-node template map + the module block
+  variables.tf              node, sizing, storage, the admin username/password
+  outputs.tf                vm_id / name / ipv4_addresses (re-exported)
   terraform.tfvars.tpl      kp:// placeholders → hydrate.sh → terraform.tfvars
+  terraform.tfvars.example  manual (non-KeePassXC) copy-and-fill template
 cloud-init/
   user-data.ps1.tftpl       #ps1_sysnative PowerShell run on first boot:
                             creates the admin, adds to Administrators, enables RDP
-SPIKE-NOTES.md              experiment log + Phase-2 checklist
 ```
 
 ## Prerequisites
@@ -175,11 +176,26 @@ exists separately from the Linux roles:
 
 ## Storage
 
-The spike defaults to **`local-lvm`** (disk/EFI/TPM) + **`local`** (snippets) to
-match the template, so the clone is a same-storage operation — fast, and it
-keeps EFI/TPM off NFS. For a cluster-mobile host that can live-migrate, set
-`disk_storage` and `snippets_storage` to `nas-vms` (verify NFS handles the
-EFI/TPM disks first; this is a Phase-2 follow-on, not yet exercised).
+Defaults to **`local-lvm`** (disk/EFI/TPM) + **`local`** (snippets) to match the
+template, so the clone is a same-storage operation — fast, and it keeps EFI/TPM
+off NFS. For a cluster-mobile host that can live-migrate, set `disk_storage` and
+`snippets_storage` to `nas-vms` (verify NFS handles the EFI/TPM disks first;
+not yet exercised).
+
+## Config management and monitoring (not wired)
+
+Two deliberate gaps, each to be filled when there's a real consumer rather than
+as empty scaffolding:
+
+- **No Ansible role.** This role is provisioning + first-boot identity only.
+  Add `ansible/` (over WinRM/SSH) when post-boot config is needed — domain join,
+  software, hardening beyond the template baseline.
+- **No monitoring scrape target.** The lab's monitoring uses `node_exporter`
+  (Linux); Windows needs **`windows_exporter`** (port 9182), which is not yet
+  installed by the template or this role, and the Linux
+  `install-node-exporter-guests.yml` playbook does not apply. Wiring Windows
+  telemetry means: add a windows_exporter install step (template or user-data),
+  a Windows scrape job in `vms/monitoring/`, and a Windows dashboard.
 
 ## Sizing
 
@@ -200,7 +216,7 @@ re-asserts RDP on first boot.
 
 ## Related
 
+- [modules/proxmox-vm-windows/](../../modules/proxmox-vm-windows/) — the Windows VM module this role calls
 - [packer/windows-11-base/README.md](../../packer/windows-11-base/README.md) — building the base template
 - [docs/cloning-templates.md](../../docs/cloning-templates.md) — clone + per-clone identity model (both bases)
 - [docs/decisions/0006-packer-templates-per-node.md](../../docs/decisions/0006-packer-templates-per-node.md) — per-node template VMIDs
-- [SPIKE-NOTES.md](SPIKE-NOTES.md) — experiment log + remaining Phase-2 work

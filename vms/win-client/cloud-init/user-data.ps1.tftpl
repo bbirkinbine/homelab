@@ -14,7 +14,7 @@
 # other logic (RDP, etc.), so a failure in a later step cannot leave the VM
 # with no usable login. If cloudbase-init fails to run this script at all,
 # recover from the Proxmox host via `qm guest exec` (qemu-guest-agent is
-# independent of cloudbase-init) — see ../SPIKE-NOTES.md "Break-glass".
+# independent of cloudbase-init) — see ../README.md "Account model and recovery".
 #
 # templatefile() escaping rules for this file (the doubled $$ / %% below are
 # how you write a LITERAL $-brace / %-brace without Terraform interpreting it):
