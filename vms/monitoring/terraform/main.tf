@@ -45,9 +45,10 @@ provider "proxmox" {
 // same map.
 locals {
   ubuntu_template_ids = {
-    pve12t = 9100
-    pve13m = 9101
-    pve13t = 9102
+    pve12t  = 9100
+    pve13m  = 9101
+    pve13t  = 9102
+    pve12t2 = 9103
   }
 }
 

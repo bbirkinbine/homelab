@@ -21,7 +21,7 @@ alone.
 
 | Layer | What | Where | Re-runnable? |
 | --- | --- | --- | --- |
-| 1. **Packer** | Universal hardening baked into a template | Per-node templates: [`packer/ubuntu-24-04-base/`](../packer/ubuntu-24-04-base/) → 9100/9101/9102, [`packer/windows-11-base/`](../packer/windows-11-base/) → 9200/9201/9202 (see [ADR-0006](decisions/0006-packer-templates-per-node.md)) | Rarely (OS or universal-base changes) |
+| 1. **Packer** | Universal hardening baked into a template | Per-node templates: [`packer/ubuntu-24-04-base/`](../packer/ubuntu-24-04-base/) → 9100/9101/9102/9103, [`packer/windows-11-base/`](../packer/windows-11-base/) → 9200/9201/9202 (see [ADR-0006](decisions/0006-packer-templates-per-node.md)) | Rarely (OS or universal-base changes) |
 | 2. **OpenTofu** | VM shape — clone, size, NIC, USB, storage | `vms/<role>/terraform/` + the shared [`modules/proxmox-vm/`](../modules/proxmox-vm/) | Every config change |
 | 3. **cloud-init** | Per-VM identity (hostname, admin user, SSH key) | `vms/<role>/cloud-init/user-data.yaml.tftpl` | Once per VM instance |
 | 4. **Ansible** | Role-specific software install + config | `vms/<role>/ansible/` | Idempotently, forever |

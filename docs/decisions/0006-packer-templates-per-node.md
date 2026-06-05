@@ -13,14 +13,15 @@ The lab also has cluster-mobile and node-pinned roles ([0004](0004-three-node-pr
 
 ## Decision
 
-Build the Ubuntu 24.04 base template on **every cluster node**, at **distinct VMIDs**: `9100` on `pve12t`, `9101` on `pve13m`, `9102` on `pve13t`. Each role's terraform looks up the right VMID for its target node via a local map keyed on `proxmox_node`:
+Build the Ubuntu 24.04 base template on **every cluster node**, at **distinct VMIDs**: `9100` on `pve12t`, `9101` on `pve13m`, `9102` on `pve13t` (and `9103` on `pve12t2`, added when the cluster grew to four nodes — the convention extends by +1 per node joined). Each role's terraform looks up the right VMID for its target node via a local map keyed on `proxmox_node`:
 
 ```hcl
 locals {
   ubuntu_template_ids = {
-    pve12t = 9100
-    pve13m = 9101
-    pve13t = 9102
+    pve12t  = 9100
+    pve13m  = 9101
+    pve13t  = 9102
+    pve12t2 = 9103
   }
 }
 

@@ -1,7 +1,7 @@
 # hermes VM — provisioning shape only.
 #
 // What this file owns:
-//   * Cloning the per-node Ubuntu 24.04 base template (9100/9101/9102)
+//   * Cloning the per-node Ubuntu 24.04 base template (9100/9101/9102/9103)
 //     to VM 8034.
 //   * Sizing (4 vCPU, 16 GiB RAM, 64 GiB disk, balloon disabled).
 //   * Cloud-init drive populated with identity data only (hostname,
@@ -52,9 +52,10 @@ provider "proxmox" {
 // exception.
 locals {
   ubuntu_template_ids = {
-    pve12t = 9100
-    pve13m = 9101
-    pve13t = 9102
+    pve12t  = 9100
+    pve13m  = 9101
+    pve13t  = 9102
+    pve12t2 = 9103
   }
 }
 

@@ -201,7 +201,7 @@ enough for anything in this lab.
 > [`docs/0-scratch-build-order.md` step 11](0-scratch-build-order.md)
 > (`packer/ubuntu-24-04-base/build-pve.sh <node>`, once per cluster
 > node you'll deploy roles to — VMIDs are per-node: `pve12t=9100`,
-> `pve13m=9101`, `pve13t=9102`; see [ADR-0006](decisions/0006-packer-templates-per-node.md)).
+> `pve13m=9101`, `pve13t=9102`, `pve12t2=9103`; see [ADR-0006](decisions/0006-packer-templates-per-node.md)).
 > The Packer build itself only needs the API token from step 8; the
 > workstation→PVE SSH setup in §2 above is OpenTofu-specific (bpg/proxmox
 > uploads snippets over SSH) and is not a prerequisite for the Packer

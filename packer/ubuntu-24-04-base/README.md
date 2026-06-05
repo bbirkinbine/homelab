@@ -14,13 +14,15 @@ brew install packer
 # 2. Configure local credentials — ONE .env.<node> PER PROXMOX HOST you'll build on.
 #    `build-pve.sh <node>` sources `.env.<node>`, so a missing file = 401 or env-not-found.
 #    Each node also needs a DIFFERENT VM_ID — cluster VMIDs are unique post-cluster
-#    (see ADR-0006). Convention: pve12t=9100, pve13m=9101, pve13t=9102.
+#    (see ADR-0006). Convention: pve12t=9100, pve13m=9101, pve13t=9102, pve12t2=9103.
 cp .env.example .env.pve12t && $EDITOR .env.pve12t      # fill PROXMOX_TOKEN_* once
 sed -e 's/pve12t/pve13m/g' -e 's/^VM_ID="9100"/VM_ID="9101"/' \
     .env.pve12t > .env.pve13m
 sed -e 's/pve12t/pve13t/g' -e 's/^VM_ID="9100"/VM_ID="9102"/' \
     .env.pve12t > .env.pve13t
-chmod 600 .env.pve12t .env.pve13m .env.pve13t
+sed -e 's/pve12t/pve12t2/g' -e 's/^VM_ID="9100"/VM_ID="9103"/' \
+    .env.pve12t > .env.pve12t2
+chmod 600 .env.pve12t .env.pve13m .env.pve13t .env.pve12t2
 
 # 3. Initialize the Proxmox plugin (one-time)
 packer init .
@@ -29,12 +31,13 @@ packer init .
 ./build-pve.sh pve12t         # VM 9100 on pve12t
 ./build-pve.sh pve13m         # VM 9101 on pve13m
 ./build-pve.sh pve13t         # VM 9102 on pve13t
+./build-pve.sh pve12t2        # VM 9103 on pve12t2
 ```
 
 The build takes ~20-30 minutes on an NUC12. When it's done you have a
 Proxmox template named `ubuntu-24-04-base` at the VMID configured in
-`.env.<node>` (per-node convention: `9100`/`9101`/`9102` for
-`pve12t`/`pve13m`/`pve13t` — see [ADR-0006](../../docs/decisions/0006-packer-templates-per-node.md)).
+`.env.<node>` (per-node convention: `9100`/`9101`/`9102`/`9103` for
+`pve12t`/`pve13m`/`pve13t`/`pve12t2` — see [ADR-0006](../../docs/decisions/0006-packer-templates-per-node.md)).
 
 ## What's in the image
 

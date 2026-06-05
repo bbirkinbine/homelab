@@ -18,7 +18,7 @@ variable "proxmox_api_token" {
 variable "proxmox_node" {
   type        = string
   default     = "pve13t"
-  description = "Proxmox cluster node to create the VM on. Default pve13t (newest hardware, no GPU). The local.ubuntu_template_ids map in main.tf picks the right per-node template VMID automatically (pve12t=9100, pve13m=9101, pve13t=9102)."
+  description = "Proxmox cluster node to create the VM on. Default pve13t (newest hardware, no GPU). The local.ubuntu_template_ids map in main.tf picks the right per-node template VMID automatically (pve12t=9100, pve13m=9101, pve13t=9102, pve12t2=9103)."
 }
 
 variable "admin_username" {

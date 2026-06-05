@@ -50,7 +50,7 @@ already be in place from any prior VM role you've deployed.
 
 1. **Workstation tooling.** `brew install opentofu just keepassxc ansible`.
    First-time setup in [`docs/opentofu-setup.md`](../../docs/opentofu-setup.md).
-2. **Packer base template.** VM 9100/9101/9102 must exist on the target
+2. **Packer base template.** VM 9100/9101/9102/9103 must exist on the target
    node (per ADR-0006). If not: `packer/ubuntu-24-04-base/build-pve.sh <node>`.
 3. **`tofu@pve` API token.** See [`docs/proxmox-tofu-permissions.md`](../../docs/proxmox-tofu-permissions.md).
    Stash in KeePassXC at `Homelab/Tofu/proxmox-api-token`.

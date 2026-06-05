@@ -128,6 +128,7 @@ if [[ -z "${TEMPLATE_VM_ID:-}" ]]; then
     pve12t) TEMPLATE_VM_ID=9100 ;;
     pve13m) TEMPLATE_VM_ID=9101 ;;
     pve13t) TEMPLATE_VM_ID=9102 ;;
+    pve12t2) TEMPLATE_VM_ID=9103 ;;
     *)
       echo "ERROR: no Ubuntu template VMID mapped for node '$PROXMOX_NODE'." >&2
       echo "       Update the case statement in $0 (or set TEMPLATE_VM_ID)." >&2
