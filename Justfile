@@ -178,5 +178,16 @@ check-roles:
 # every `ssh host "cmd $localvar"` pattern even when client-side
 # expansion is exactly the intent).
 shell-lint:
-    bash -n scripts/preflight.sh scripts/hydrate.sh scripts/check-role-consistency.sh
-    shellcheck -S warning scripts/preflight.sh scripts/hydrate.sh scripts/check-role-consistency.sh
+    bash -n scripts/preflight.sh scripts/hydrate.sh scripts/check-role-consistency.sh scripts/cluster-shutdown.sh
+    shellcheck -S warning scripts/preflight.sh scripts/hydrate.sh scripts/check-role-consistency.sh scripts/cluster-shutdown.sh
+
+# --- cluster ops -------------------------------------------------------------
+
+# Graceful ACPI shutdown of every running VM cluster-wide, for a
+# maintenance window. DRY RUN by default — pass --apply to act. Set the
+# NODES env var to your cluster's LAN IPs first; see the script header
+# for --timeout/--force/EXCLUDE (e.g. the Minecraft host).
+#   NODES="10.0.0.12 10.0.0.13 ..." just shutdown
+#   NODES="..." just shutdown --apply --force
+shutdown *FLAGS:
+    @./scripts/cluster-shutdown.sh {{FLAGS}}
