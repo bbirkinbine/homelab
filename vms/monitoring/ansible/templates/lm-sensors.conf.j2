@@ -1,0 +1,12 @@
+# /etc/modules-load.d/lm-sensors.conf — managed by Ansible
+# (vms/monitoring/ansible/install-node-exporter.yml). Do not edit by hand.
+#
+# Kernel hwmon modules loaded at boot so node_exporter's hwmon collector
+# exposes temperature / fan metrics (node_hwmon_temp_celsius,
+# node_hwmon_fan_rpm). The list is set per host/group in inventory via
+# `sensors_kernel_modules` (default [coretemp]). On the ASUS NUCs fan RPM
+# comes from asus_nb_wmi; other hardware uses a super-I/O module (nct6775
+# / it87) found by `sensors-detect`. See vms/monitoring/README.md Phase 3.
+{% for mod in sensors_modules %}
+{{ mod }}
+{% endfor %}

@@ -32,6 +32,7 @@
 #       -i vms/amp-game/ansible/inventory.yml \
 #       -i vms/openclaw/ansible/inventory.yml \
 #       -i vms/nemoclaw/ansible/inventory.yml \
+#       -i vms/hermes/ansible/inventory.yml \
 #       vms/monitoring/ansible/install-node-exporter-guests.yml
 #
 # Idempotent — re-running is a no-op once green. monitoring's own

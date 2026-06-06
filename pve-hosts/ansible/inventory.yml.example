@@ -36,6 +36,18 @@ pve_hosts:
     # Repos — PVE 9.x = Debian 13 (trixie)
     pve_repo_distribution: "trixie"
 
+    # hwmon modules for node_exporter (consumed by vms/monitoring/ansible/
+    # install-node-exporter.yml, NOT the pve-host role). coretemp gives
+    # CPU temps. On these ASUS NUCs the CPU fan tach is NOT on a super-I/O
+    # chip — `sensors-detect` finds none — it comes through the ASUS WMI
+    # path: `asus_nb_wmi` instantiates `asus_wmi`, which exposes cpu_fan
+    # RPM (hwmon name "asus"). Group var so all four nodes get it. On
+    # non-ASUS hardware, run `sensors-detect --auto && sensors` to find
+    # your fan driver. See vms/monitoring/README.md Phase 3.
+    sensors_kernel_modules:
+      - coretemp
+      - asus_nb_wmi
+
     # Time sync targets
     chrony_servers:
       - "time.cloudflare.com"

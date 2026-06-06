@@ -28,6 +28,26 @@
   gather_facts: true
 
   tasks:
+    # Resolve the effective hwmon module list, defaulting to [coretemp]
+    # when inventory doesn't set sensors_kernel_modules for a host.
+    #
+    # The default lives HERE (set_fact, via the default() filter) and NOT
+    # in a play-level `vars:` block on purpose: play vars outrank
+    # inventory group/host vars in Ansible's precedence, so a play-level
+    # default would silently SHADOW a per-host / per-group override in
+    # inventory. set_fact only fires when the inventory var is unset, so
+    # inventory stays authoritative.
+    #
+    # coretemp covers CPU package/core temps on every Intel host. Fan RPM
+    # is hardware-specific: these ASUS NUCs expose it via asus_nb_wmi (set
+    # as a group var in pve-hosts inventory); other hardware uses a
+    # super-I/O module (nct6775 / it87) found by `sensors-detect`. Hosts
+    # with no readable fan chip (e.g. pbs01's unsupported ITE IT8613E)
+    # keep the coretemp-only default. See vms/monitoring/README.md Phase 3.
+    - name: Resolve hwmon kernel module list
+      ansible.builtin.set_fact:
+        sensors_modules: "{{ sensors_kernel_modules | default(['coretemp'], true) }}"
+
     - name: Install prometheus-node-exporter
       ansible.builtin.apt:
         name: prometheus-node-exporter
@@ -40,6 +60,32 @@
         name: prometheus-node-exporter
         enabled: true
         state: started
+
+    # lm-sensors is the hwmon prerequisite for node_exporter above — it
+    # provides the `sensors` CLI for operator verification and pulls in
+    # the hwmon userspace. The metrics themselves come from the kernel
+    # modules pinned below, not the package. Co-located with node_exporter
+    # because they're one concern; when the host node_exporter install
+    # folds into the pve-host / pbs-host roles, this folds with it.
+    - name: Install lm-sensors
+      ansible.builtin.apt:
+        name: lm-sensors
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    # Pin the hwmon modules to load at boot. Mirrors the pve-host role's
+    # /etc/modules-load.d/thunderbolt.conf + modprobe-handler pattern:
+    # the modules-load.d file only takes effect at next boot, so the
+    # handler modprobes them now to populate /sys/class/hwmon this run.
+    - name: Pin hwmon kernel modules via modules-load.d
+      ansible.builtin.template:
+        src: templates/lm-sensors.conf.j2
+        dest: /etc/modules-load.d/lm-sensors.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Load hwmon kernel modules
 
     # The PVE + PBS host firewalls (managed by the pve-host /
     # pbs-host roles) ship a default-deny inbound posture from
@@ -82,3 +128,17 @@
         proto: tcp
         comment: "prometheus-node-exporter from monitoring VM"
       when: "'pbs_hosts' in group_names"
+
+  handlers:
+    # Load the pinned hwmon modules immediately so /sys/class/hwmon is
+    # populated this run (modules-load.d only fires at next boot).
+    # community.general.modprobe with state=present is idempotent — a
+    # module already loaded reports ok, not changed. A module that
+    # doesn't exist on this host (e.g. a fan chip the operator added to
+    # inventory speculatively) fails loudly here rather than silently
+    # producing empty panels.
+    - name: Load hwmon kernel modules
+      community.general.modprobe:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ sensors_modules }}"

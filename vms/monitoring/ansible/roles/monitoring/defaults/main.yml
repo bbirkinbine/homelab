@@ -20,6 +20,8 @@ monitoring_node_exporter_targets:
     instance: pve13m
   - host: pve13t
     instance: pve13t
+  - host: pve12t2
+    instance: pve12t2
   - host: pbs01
     instance: pbs01
   # Guest VMs — node_exporter installed via install-node-exporter-guests.yml.
@@ -38,6 +40,8 @@ monitoring_node_exporter_targets:
     instance: openclaw
   - host: nemoclaw
     instance: nemoclaw
+  - host: hermes
+    instance: hermes
 
 # Where pve_exporter pulls from. One target per cluster node so a node-local
 # outage doesn't blind the whole cluster view. The exporter scrapes the API
@@ -47,6 +51,7 @@ monitoring_pve_targets:
   - pve12t
   - pve13m
   - pve13t
+  - pve12t2
 
 # Where pbs_exporter pulls from. Single-host today per project_pbs01_baseline.
 monitoring_pbs_target: pbs01
@@ -178,6 +183,7 @@ monitoring_guest_inventory_groups:
   - amp_game_servers
   - openclaw_servers
   - nemoclaw_servers
+  - hermes_servers
 
 # --- Grafana ----------------------------------------------------------------
 

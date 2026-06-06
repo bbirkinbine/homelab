@@ -115,6 +115,43 @@ playbook installs the apt package, enables the service, and opens
 port 9100 on each host's firewall (pve-firewall for cluster nodes;
 ufw on pbs01).
 
+It also installs `lm-sensors` and pins the hwmon kernel modules
+(`sensors_kernel_modules`, default `[coretemp]`) via
+`/etc/modules-load.d/lm-sensors.conf`, so node_exporter's hwmon
+collector exports `node_hwmon_temp_celsius` / `node_hwmon_fan_rpm` —
+this is what feeds the temperature + fan rows of dashboard 1860.
+
+#### One-time per-host sensor discovery
+
+`coretemp` (CPU package/core temps) is the safe baseline and is loaded
+on every host with no extra work. **Fan RPM** needs a super-I/O
+controller module (`nct6775` / `it87` family) that does not auto-load
+and is not guaranteed to exist — many Intel NUCs expose `coretemp`
+only. To find out what a host can report, run once per host:
+
+```bash
+ssh <host> 'apt-get install -y lm-sensors && sensors-detect --auto'
+ssh <host> 'sensors'   # confirm readings; note any fan / super-I/O chip
+```
+
+If `sensors` shows a fan reading, note the driver module it loaded and
+add it to `sensors_kernel_modules` in inventory, then re-run this play.
+If no fan chip is found, that's a hardware limit — the host's temp
+panels still populate; its fan panel stays empty.
+
+On this lab's hardware the result is:
+
+- **The four ASUS NUCs** (`pve12t` / `pve13m` / `pve13t` / `pve12t2`)
+  expose CPU fan RPM through the ASUS WMI path, NOT a super-I/O chip —
+  `sensors-detect` finds no super-I/O controller. The `asus_nb_wmi`
+  module instantiates `asus_wmi`, which surfaces `cpu_fan` (hwmon name
+  `asus`, `node_hwmon_fan_rpm{chip="platform_asus_nb_wmi"}`). It's set
+  as a `pve_hosts` group var, so all four nodes get
+  `sensors_kernel_modules: [coretemp, asus_nb_wmi]`.
+- **`pbs01`** (GMKtec G3 Pro) has an ITE IT8613E super-I/O chip but no
+  mainline Linux driver exists for it, and it's not ASUS — so no fan
+  RPM is available; it reports CPU temps (`coretemp`) only.
+
 ### Phase 4 — install node_exporter inside guest VMs (workstation)
 
 ```bash
@@ -124,6 +161,7 @@ ansible-playbook \
   -i vms/amp-game/ansible/inventory.yml \
   -i vms/openclaw/ansible/inventory.yml \
   -i vms/nemoclaw/ansible/inventory.yml \
+  -i vms/hermes/ansible/inventory.yml \
   vms/monitoring/ansible/install-node-exporter-guests.yml
 ```
 
@@ -181,7 +219,7 @@ dir every 30s and loads them — no UI step needed.
 
 | Source (pinned) | What it shows |
 | --- | --- |
-| [grafana.com 1860](https://grafana.com/grafana/dashboards/1860) (Node Exporter Full) | CPU/RAM/disk/network/fans/temps for every `node_exporter` target |
+| [grafana.com 1860](https://grafana.com/grafana/dashboards/1860) (Node Exporter Full) | CPU/RAM/disk/network/fans/temps for every `node_exporter` target. The "Hardware Temperature Monitor" / "Hardware Fan Speed" rows populate once Phase 3's `lm-sensors` + pinned hwmon modules are in place; fan rows depend on the host exposing a fan chip (see Phase 3 discovery) |
 | [grafana.com 10347](https://grafana.com/grafana/dashboards/10347) (Proxmox via Prometheus) | **Per-VM CPU/RAM/disk-IO** — the dashboard that answers the RAM-trend question |
 | [natrontech/pbs-exporter `grafana-dashboard/pbs-exporter.json`](https://github.com/natrontech/pbs-exporter/tree/main/grafana-dashboard) | Datastore usage, last-backup ages, verify status — pinned to the same tag as the exporter binary |
 | [grafana.com 12239](https://grafana.com/grafana/dashboards/12239) (NVIDIA DCGM Exporter) | GPU util/memory/power/temp/clocks from the llm VM's 3090 — only populated when `monitoring_dcgm_target` is set AND the DCGM container is running on the llm VM (see [`vms/llm/README.md`](../llm/README.md) "Expose GPU metrics to Prometheus"). Authored for K8s deployments; K8s-label-filtered panels (namespace/pod) will be empty on this single-host setup |
@@ -239,8 +277,8 @@ this order:
 
    | Job | Targets |
    | --- | --- |
-   | `node_exporter` | 10 — monitoring, pve12t, pve13m, pve13t, pbs01, openbao, llm, amp-game, openclaw, nemoclaw (5 host targets always; 5 guest targets after Phase 4 runs against them) |
-   | `pve` | 3 — pve12t, pve13m, pve13t (scraped via the pve-exporter multi-target relabel) |
+   | `node_exporter` | 12 — monitoring, pve12t, pve13m, pve13t, pve12t2, pbs01, openbao, llm, amp-game, openclaw, nemoclaw, hermes (6 host targets always; 6 guest targets after Phase 4 runs against them) |
+   | `pve` | 4 — pve12t, pve13m, pve13t, pve12t2 (scraped via the pve-exporter multi-target relabel) |
    | `pbs-exporter` | 1 — pbs01 (job name matches natrontech's dashboard convention; see prometheus.yml.j2 header) |
    | `dcgm-exporter` | 1 — llm (only if `monitoring_dcgm_target` is non-empty AND the DCGM container is up on the llm VM; will report DOWN otherwise) |
    | `nut-exporter` | 1 — nas (only if `monitoring_nut_target` is non-empty AND the Asustor NAS has network UPS enabled in ADM; multi-target via `?target=` relabel — the exporter itself runs locally on the monitoring VM at 127.0.0.1:9995, scraping the NAS's `upsd` on port 3493) |
@@ -279,7 +317,7 @@ this order:
    shorter window.
 7. **(If Phase 4 guest node_exporters are up)** In Grafana Explore,
    query `rate(node_pressure_cpu_waiting_seconds_total[5m])` — one series
-   per guest VM (plus the 5 host targets). Values near 0 = sized right;
+   per guest VM (plus the 6 host targets). Values near 0 = sized right;
    sustained values above ~0.05 = CPU starvation worth bumping. Then
    open the **Lab Rightsizing** dashboard — stat panels at the top
    show current values across all VMs, time-series below show trend.

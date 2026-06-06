@@ -26,3 +26,4 @@ vms/llm/ansible/inventory.yml
 vms/amp-game/ansible/inventory.yml
 vms/openclaw/ansible/inventory.yml
 vms/nemoclaw/ansible/inventory.yml
+vms/hermes/ansible/inventory.yml

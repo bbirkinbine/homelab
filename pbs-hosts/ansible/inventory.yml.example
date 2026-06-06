@@ -47,6 +47,15 @@ pbs_hosts:
       ansible_host: 192.0.2.20              # replace with real LAN IP
       pbs_lan_ip: "192.0.2.20"              # replace with real LAN IP
 
+      # hwmon sensor modules (consumed by vms/monitoring/ansible/
+      # install-node-exporter.yml, NOT the pbs-host role). Defaults to
+      # [coretemp] (CPU temps). pbs01 (GMKtec G3 Pro) has an ITE IT8613E
+      # super-I/O chip but no mainline Linux driver exists for it, and
+      # it's not ASUS so there's no WMI fan path — so NO fan RPM is
+      # available here; coretemp is all this host exposes. Override only
+      # if a future PBS host has a `sensors-detect`-supported fan chip.
+      # See vms/monitoring/README.md Phase 3.
+
       # Datastores. The bulk datastore is required; the local fast
       # datastore is optional (off by default — flip the toggle below
       # AND add a second entry here to enable). Paths are absolute;
