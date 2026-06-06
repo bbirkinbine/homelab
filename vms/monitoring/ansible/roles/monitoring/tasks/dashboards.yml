@@ -99,3 +99,10 @@
     # via a templating variable so VMs not yet running node_exporter just
     # show empty rather than NaN.
     - rightsizing.json.j2
+    # Physical Hosts — Temps & Fans — per-host CPU/NVMe/board temps + fan RPM,
+    # one host at a time via a templating variable. Replaces digging through
+    # Node Exporter Full's Hardware Temperature panel (whose 100 C lines are
+    # mostly crit-threshold series, not live temps). Cores get friendly names
+    # via a node_hwmon_sensor_label group_left join. pbs01 has no fan sensor,
+    # so its fan panels render empty.
+    - physical-hosts-temps.json.j2

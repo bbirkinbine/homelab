@@ -119,7 +119,8 @@ It also installs `lm-sensors` and pins the hwmon kernel modules
 (`sensors_kernel_modules`, default `[coretemp]`) via
 `/etc/modules-load.d/lm-sensors.conf`, so node_exporter's hwmon
 collector exports `node_hwmon_temp_celsius` / `node_hwmon_fan_rpm` —
-this is what feeds the temperature + fan rows of dashboard 1860.
+this is what feeds the temperature + fan rows of dashboard 1860 and the
+lab-local `homelab-physical-hosts-temps` dashboard.
 
 #### One-time per-host sensor discovery
 
@@ -211,11 +212,13 @@ hand-edited files — the templates that lay them down use `force: false`.
 
 ## Dashboards (provisioned by Ansible)
 
-The role's `dashboards.yml` task fetches three community dashboards on
-every `just ansible monitoring`, substitutes `${DS_PROMETHEUS}` for the
-provisioned datasource name, and drops them into
-`/var/lib/grafana/dashboards/`. Grafana's file provider re-scans the
-dir every 30s and loads them — no UI step needed.
+The role's `dashboards.yml` task does two things on every
+`just ansible monitoring`: it fetches the pinned community dashboards
+and substitutes `${DS_PROMETHEUS}` for the provisioned datasource name,
+and it renders the lab-local Jinja2-templated dashboards (datasource UID
+swapped inline). Both land in `/var/lib/grafana/dashboards/`, where
+Grafana's file provider re-scans the dir every 30s and loads them — no
+UI step needed.
 
 | Source (pinned) | What it shows |
 | --- | --- |
@@ -226,6 +229,7 @@ dir every 30s and loads them — no UI step needed.
 | [grafana.com 14371](https://grafana.com/grafana/dashboards/14371) (Prometheus NUT Exporter, HON95) | UPS metrics — battery charge/runtime, input voltage, load %, status (OL/OB), temp. Populated when `monitoring_nut_target` is set AND the NUT server on the Asustor NAS accepts remote reads (ADM → Services → UPS → enable network UPS). Multi-target via `?target=` (relabel pattern); the `ups` dashboard dropdown auto-populates from whatever NUT reports |
 | `homelab-ups-power` (lab-local — `templates/dashboards/ups-power.json.j2`) | UPS power & energy derived from `nut_load × nut_real_power_nominal_watts` (CyberPower BR-series doesn't expose `ups.realpower` directly — HON95 emits the metric but the underlying driver doesn't surface the variable on BR1000MS / BR1500MS2). Stat panels for current watts / UPS load / rated capacity / 24h kWh / 7d avg kWh, plus a time-series with the nominal-capacity ceiling overlaid. Pairs with the `nut_real_power_derived_watts` recording rule (see [Recording rules](#recording-rules)). |
 | `homelab-rightsizing` (lab-local — `templates/dashboards/rightsizing.json.j2`) | Per-VM CPU/memory pressure for right-sizing decisions. Four signals plotted as instant stats + trend lines: CPU PSI rate (`node_pressure_cpu_waiting_seconds_total`), Memory PSI rate (`node_pressure_memory_waiting_seconds_total`), MemAvailable% (`node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes`), and Load1 / vCPUs. Hypervisor-view metrics from `pve-exporter` can't surface guest-internal memory pressure (page cache hides it) or runqueue depth — PSI inside the guest is the honest signal. Thresholds use a deutan-safe orange→purple ramp instead of red/yellow/green. VM dropdown defaults to All. Empty when guest node_exporter isn't running (Phase 4 not yet applied). |
+| `homelab-physical-hosts-temps` (lab-local — `templates/dashboards/physical-hosts-temps.json.j2`) | Per-host CPU package / per-core / NVMe / board temps + fan RPM, from the `node_exporter` hwmon collector (`node_hwmon_temp_celsius`, `node_hwmon_fan_rpm`). All-hosts overview on top — CPU temp, fan RPM, and a **hottest-NVMe-per-host** stat strip + NVMe trend so a hot drive on any host is visible without drilling in — then a collapsed per-host drill-down row (driven by the `Host` dropdown) with per-core temps joined to `node_hwmon_sensor_label` for friendly names, per-drive NVMe, and board/ACPI temps. A focused alternative to digging through 1860's "Hardware Temperature" panel, whose 100 C lines are mostly crit-threshold series rather than live temps. CPU temp thresholds use the deutan-safe neutral→orange→purple ramp at 90 C / 100 C TjMax; **NVMe panels use NVMe-appropriate 70 C (watch) / 80 C (throttle) thresholds** — a drive sitting orange/purple, or whose baseline creeps up over weeks, is the cue to re-check its heatsink / thermal-pad contact; fans use a blue ramp with no threshold (high RPM is the cooling working, not a fault). Same prerequisites as 1860's hardware rows (Phase 3 `lm-sensors` + pinned hwmon modules); hosts with no exposed fan chip (e.g. pbs01) render empty fan panels. |
 
 To pick up a newer revision, edit `monitoring_dashboards[].url` in
 [ansible/roles/monitoring/defaults/main.yml](ansible/roles/monitoring/defaults/main.yml)

@@ -1,0 +1,480 @@
+{
+  "title": "Physical Hosts — Temps & Fans",
+  "uid": "homelab-physical-hosts-temps",
+  "tags": ["homelab", "hardware", "temperature"],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "timezone": "",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "liveNow": false,
+  "weekStart": "",
+  "style": "dark",
+  "templating": {
+    "list": [
+      {
+        "name": "host",
+        "label": "Host (drill-down)",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+        "definition": "label_values(node_hwmon_temp_celsius, instance)",
+        "query": { "query": "label_values(node_hwmon_temp_celsius, instance)", "refId": "StandardVariableQuery" },
+        "regex": "",
+        "multi": false,
+        "includeAll": false,
+        "current": { "selected": false, "text": "pve13t", "value": "pve13t" },
+        "refresh": 1,
+        "sort": 1,
+        "options": [],
+        "hide": 0,
+        "skipUrlSync": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "CPU package temp — all hosts (now)",
+      "description": "Live coretemp package temp per physical host. Neutral below 90 C, orange 90-100 C, purple at the 100 C TjMax (deutan-safe ramp; numbers are authoritative).",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "node_hwmon_temp_celsius{chip=\"platform_coretemp_0\",sensor=\"temp1\"}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "legendFormat": "{% raw %}{{instance}}{% endraw %}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "decimals": 0,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "text" },
+              { "value": 90, "color": "orange" },
+              { "value": 100, "color": "purple" }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "graphMode": "none",
+        "colorMode": "background",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Fan speed — all hosts (now)",
+      "description": "Live fan RPM per physical host. Hosts with no exposed fan sensor (e.g. pbs01) do not appear. No threshold colors — high RPM isn't a fault, it's the cooling working; watch RPM track CPU temp instead (flat RPM during a temp spike = a stuck/failing fan).",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "node_hwmon_fan_rpm",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "legendFormat": "{% raw %}{{instance}}{% endraw %}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "rotrpm",
+          "decimals": 0,
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [ { "value": null, "color": "blue" } ] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "graphMode": "none",
+        "colorMode": "background",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "CPU package temp — all hosts",
+      "description": "One line per host (coretemp Package id 0). Orange/purple threshold lines mark 90 C and the 100 C TjMax. Use the Host drop-down + the drill-down row below for per-core detail.",
+      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "node_hwmon_temp_celsius{chip=\"platform_coretemp_0\",sensor=\"temp1\"}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "legendFormat": "{% raw %}{{instance}}{% endraw %}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "thresholdsStyle": { "mode": "line" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "text" },
+              { "value": 90, "color": "orange" },
+              { "value": 100, "color": "purple" }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Fan speed — all hosts",
+      "description": "One line per host. Watch fans ramp during CPU temp spikes — the cooling kicking in and recovering.",
+      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 9 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "node_hwmon_fan_rpm",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "legendFormat": "{% raw %}{{instance}}{% endraw %}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "rotrpm",
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "thresholds": { "mode": "absolute", "steps": [ { "value": null, "color": "text" } ] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Hottest NVMe per host (now)",
+      "description": "Hottest NVMe sensor on each host right now (max across all of the host's NVMe drives). Neutral below 70 C; orange 70-80 C; purple at/above 80 C. NVMe throttles well below the CPU's 100 C — a drive sitting orange/purple at idle (or creeping up week-over-week on the trend below) is the cue to re-check its heatsink / thermal-pad contact and case airflow. One tile per host so a hot drive anywhere is visible without drilling in.",
+      "gridPos": { "x": 0, "y": 15, "w": 24, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "max by (instance) (node_hwmon_temp_celsius{chip=~\"nvme.*\"})",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "legendFormat": "{% raw %}{{instance}}{% endraw %}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "decimals": 0,
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "text" },
+              { "value": 70, "color": "orange" },
+              { "value": 80, "color": "purple" }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "graphMode": "none",
+        "colorMode": "background",
+        "textMode": "value_and_name",
+        "justifyMode": "auto",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "NVMe temps — all hosts",
+      "description": "Every NVMe sensor on every host (composite + per-controller sensors). Threshold lines at 70 C (watch) and 80 C (throttle territory). The long-term shape is the tell: a drive whose baseline temp drifts upward over weeks is losing thermal-pad contact.",
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+      "targets": [
+        {
+          "expr": "node_hwmon_temp_celsius{chip=~\"nvme.*\"}",
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "legendFormat": "{% raw %}{{instance}} {{chip}} {{sensor}}{% endraw %}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5, "showPoints": "never", "thresholdsStyle": { "mode": "line" } },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "text" },
+              { "value": 70, "color": "orange" },
+              { "value": 80, "color": "purple" }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 50,
+      "type": "row",
+      "title": "Per-host detail — pick a Host above, then expand",
+      "collapsed": true,
+      "gridPos": { "x": 0, "y": 28, "w": 24, "h": 1 },
+      "panels": [
+        {
+          "id": 10,
+          "type": "stat",
+          "title": "CPU Package now — $host",
+          "gridPos": { "x": 0, "y": 29, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "targets": [
+            {
+              "expr": "node_hwmon_temp_celsius{instance=\"$host\",chip=\"platform_coretemp_0\",sensor=\"temp1\"}",
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "celsius",
+              "decimals": 0,
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [ { "value": null, "color": "text" }, { "value": 90, "color": "orange" }, { "value": 100, "color": "purple" } ] }
+            },
+            "overrides": []
+          },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "area", "colorMode": "value", "textMode": "auto", "justifyMode": "auto" }
+        },
+        {
+          "id": 11,
+          "type": "stat",
+          "title": "CPU max (window) — $host",
+          "gridPos": { "x": 6, "y": 29, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "targets": [
+            {
+              "expr": "max(max_over_time(node_hwmon_temp_celsius{instance=\"$host\",chip=\"platform_coretemp_0\"}[$__range]))",
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "celsius",
+              "decimals": 0,
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [ { "value": null, "color": "text" }, { "value": 90, "color": "orange" }, { "value": 100, "color": "purple" } ] }
+            },
+            "overrides": []
+          },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none", "colorMode": "value", "textMode": "auto", "justifyMode": "auto" }
+        },
+        {
+          "id": 12,
+          "type": "stat",
+          "title": "Fan now — $host",
+          "gridPos": { "x": 12, "y": 29, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "targets": [
+            {
+              "expr": "max(node_hwmon_fan_rpm{instance=\"$host\"})",
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "rotrpm",
+              "decimals": 0,
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [ { "value": null, "color": "blue" } ] }
+            },
+            "overrides": []
+          },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "area", "colorMode": "value", "textMode": "auto", "justifyMode": "auto" }
+        },
+        {
+          "id": 13,
+          "type": "stat",
+          "title": "Fan max (window) — $host",
+          "gridPos": { "x": 18, "y": 29, "w": 6, "h": 4 },
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "targets": [
+            {
+              "expr": "max(max_over_time(node_hwmon_fan_rpm{instance=\"$host\"}[$__range]))",
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "rotrpm",
+              "decimals": 0,
+              "color": { "mode": "thresholds" },
+              "thresholds": { "mode": "absolute", "steps": [ { "value": null, "color": "blue" } ] }
+            },
+            "overrides": []
+          },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none", "colorMode": "value", "textMode": "auto", "justifyMode": "auto" }
+        },
+        {
+          "id": 14,
+          "type": "timeseries",
+          "title": "CPU Temperature (cores) — $host",
+          "description": "Per-core + package coretemp readings, joined to node_hwmon_sensor_label for friendly core names. Plots live temps only (the stock Node Exporter Full panel's '100 C' clutter is mostly crit-threshold series).",
+          "gridPos": { "x": 0, "y": 33, "w": 24, "h": 10 },
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "targets": [
+            {
+              "expr": "node_hwmon_temp_celsius{instance=\"$host\",chip=\"platform_coretemp_0\"} * on(instance,chip,sensor) group_left(label) node_hwmon_sensor_label{instance=\"$host\"}",
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+              "legendFormat": "{% raw %}{{label}}{% endraw %}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "celsius",
+              "color": { "mode": "palette-classic" },
+              "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 8, "showPoints": "never", "thresholdsStyle": { "mode": "line" } },
+              "thresholds": { "mode": "absolute", "steps": [ { "value": null, "color": "text" }, { "value": 90, "color": "orange" }, { "value": 100, "color": "purple" } ] }
+            },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+        },
+        {
+          "id": 15,
+          "type": "timeseries",
+          "title": "Fan Speed — $host",
+          "gridPos": { "x": 0, "y": 43, "w": 12, "h": 9 },
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "targets": [
+            {
+              "expr": "node_hwmon_fan_rpm{instance=\"$host\"}",
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+              "legendFormat": "{% raw %}{{chip}} {{sensor}}{% endraw %}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "rotrpm",
+              "color": { "mode": "palette-classic" },
+              "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 8, "showPoints": "never", "thresholdsStyle": { "mode": "off" } },
+              "thresholds": { "mode": "absolute", "steps": [ { "value": null, "color": "text" } ] }
+            },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+        },
+        {
+          "id": 16,
+          "type": "timeseries",
+          "title": "NVMe Temps — $host",
+          "description": "Every NVMe sensor on this host (composite + per-controller). Threshold lines at 70 C (watch) and 80 C (throttle territory) — NVMe-appropriate, NOT the CPU's 90/100. A drive parked near/above 80 C, or whose baseline has crept up over time, is the one to pull and re-seat the heatsink / thermal pad on.",
+          "gridPos": { "x": 12, "y": 43, "w": 12, "h": 9 },
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "targets": [
+            {
+              "expr": "node_hwmon_temp_celsius{instance=\"$host\",chip=~\"nvme.*\"}",
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+              "legendFormat": "{% raw %}{{chip}} {{sensor}}{% endraw %}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "celsius",
+              "color": { "mode": "palette-classic" },
+              "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 8, "showPoints": "never", "thresholdsStyle": { "mode": "line" } },
+              "thresholds": { "mode": "absolute", "steps": [ { "value": null, "color": "text" }, { "value": 70, "color": "orange" }, { "value": 80, "color": "purple" } ] }
+            },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+        },
+        {
+          "id": 17,
+          "type": "timeseries",
+          "title": "Board / ACPI Temps — $host",
+          "description": "Motherboard / ACPI thermal-zone sensors (chip names matching thermal* / acpitz*). Informational — no fixed threshold (board sensors have no universal limit and vary by platform); watch for drift relative to a host's own baseline.",
+          "gridPos": { "x": 0, "y": 52, "w": 24, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+          "targets": [
+            {
+              "expr": "node_hwmon_temp_celsius{instance=\"$host\",chip=~\"thermal.*|acpitz.*\"}",
+              "refId": "A",
+              "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
+              "legendFormat": "{% raw %}{{chip}} {{sensor}}{% endraw %}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "celsius",
+              "color": { "mode": "palette-classic" },
+              "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 8, "showPoints": "never", "thresholdsStyle": { "mode": "off" } },
+              "thresholds": { "mode": "absolute", "steps": [ { "value": null, "color": "text" } ] }
+            },
+            "overrides": []
+          },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } }
+        }
+      ]
+    }
+  ]
+}
