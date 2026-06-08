@@ -1,12 +1,128 @@
-# Cluster bring-up — `pvecm create` + `pvecm add` + corosync ring1
+# Cluster bring-up — formation, cold-start, and corosync ring1
 
-The procedure to form the 3-node Proxmox cluster after the `pve-host` Ansible role has baselined every host individually. This is **manual and quorum-aware** — botched re-join can fence a node, and edits to `/etc/pve/corosync.conf` from multiple places fight each other through pmxcfs. The role deliberately stops at this boundary; see `pve-hosts/CLAUDE.md` § "What this role MUST NOT do".
+Operational runbook for the Proxmox cluster's power-cycle lifecycle: forming it the first time (`pvecm create` + `pvecm add` + corosync ring1), cold-starting the whole thing after a full power-off, and scaling it by a node. Pick your procedure from the router below.
 
 This doc covers the operational commands. The design rationale (why corosync, why a TB ring1, why 2.5GbE for ring0) lives in the Obsidian vault at `Projects/Homelab/VM Mobility — 3-Node Cluster on 2.5GbE.md`. Read that first if you want context; this doc is the runbook.
 
 ---
 
-## Where this fits
+## Which procedure do you need?
+
+This runbook covers three distinct points in the cluster's power-cycle lifecycle. Jump to the one you're doing:
+
+- **[Cold-start bring-up](#cold-start-bring-up)** — every node was powered off (a maintenance window) and you're bringing the whole cluster back. This is the recurring case.
+- **[First-time formation](#first-time-formation)** — the hosts are individually baselined by the `pve-host` role but have never been a cluster. Once, ever.
+- **Adding or removing a node** — [add a node](#adding-a-node-to-an-existing-cluster) / [remove a node](#removing-a-node-for-completeness) from the running cluster.
+
+---
+
+## Cold-start bring-up
+
+*Restarting the whole cluster after a full power-off — the recurring maintenance-window case.*
+
+The cluster's configuration is **persistent**. `corosync.conf` (both rings), the migration network in `datacenter.cfg`, `cluster.fw`, and the `nas-vms` entry in `storage.cfg` all live in pmxcfs or on-disk and survive a power cycle — a cold start re-creates **none** of it. The only manual intervention a cold start needs is restoring the Thunderbolt fabric (Step C3), because the `tbnet-*` interfaces come up admin-DOWN after every host reboot.
+
+The cluster also reaches quorum on its own over ring0 (the LAN) as the nodes boot — it does not wait for the TB fabric. That's the trap: the cluster looks fully healthy on the LAN while ring1 and the TB migration path are still down. Don't skip Step C3 just because `pvecm status` reports `Quorate: Yes`.
+
+### The full shutdown (the reverse, for reference)
+
+A cold start follows a deliberate full power-off, done in this order:
+
+1. [`scripts/cluster-shutdown.sh --apply`](../scripts/cluster-shutdown.sh) — graceful ACPI shutdown of every running guest, cluster-wide.
+2. By hand: anything you held out of that sweep via `EXCLUDE` — `amp-game` (let the Minecraft JVM save and stop cleanly) and any HA-managed guest.
+3. `pbs01` — powered off by hand; it's a separate host, not a corosync member.
+4. [`scripts/cluster-poweroff.sh --apply`](../scripts/cluster-poweroff.sh) — powers off every PVE node.
+
+Quorum loss as the nodes drop is expected and harmless during a full shutdown: quorum is a split-brain guard for a *running* cluster, and nothing writes cluster state once everything is going down. The real pre-flight is HA, not quorum — confirm `ha-manager status` shows nothing active (this lab runs no HA) so no node self-fences on the way out. Both scripts default to a dry run and carry this rationale in their headers.
+
+### Step C1 — Power the nodes back on
+
+Power on each NUC (front button, or Wake-on-LAN if configured). Order doesn't matter for quorum: ring0 is a flat 2.5GbE LAN, so the cluster forms quorum as soon as a majority of nodes are up, whichever order they arrive in. Give them a minute to boot.
+
+### Step C2 — Confirm quorum on ring0 (LAN)
+
+```bash
+ssh root@192.0.2.12 'pvecm status'
+```
+
+Expect `Quorate: Yes`, every powered-on node listed, `Link 0 status: active`. **`Link 1 status` will show down / not-connected on every node here — that's expected**; Step C3 fixes it. The cluster is already usable read-write on ring0 alone, but it is not yet redundant and live migration over TB won't work until ring1 is back.
+
+### Step C3 — Restore the Thunderbolt fabric (the `ifreload` gotcha)
+
+The one manual step a cold start requires. After every host reboot the `tbnet-*` interfaces come up **admin-DOWN** — a boot-ordering race. The systemd `.link` files pin the interface *name*, not its up-state, and the `pve-host` role stages `/etc/network/interfaces` but never auto-reloads, so nothing brings the TB links up on boot.
+
+Run `ifreload -a` on **every** node, **twice**. A TB link carries traffic only once *both* ends are up, so the first pass brings interfaces admin-up and establishes carriers (its route installs fail with `Nexthop has invalid gateway` — expected), and the second pass installs the `src`-hinted routes now that carriers exist:
+
+```bash
+NODES="192.0.2.12 192.0.2.13 192.0.2.14 192.0.2.15"
+
+# Pass 1 — bring tbnet-* admin-up (route installs fail this pass; expected)
+for ip in $NODES; do echo "=== $ip pass 1 ==="; ssh root@"$ip" 'ifreload -a'; done
+
+# Pass 2 — install the src-hinted routes now that carriers are up
+for ip in $NODES; do echo "=== $ip pass 2 ==="; ssh root@"$ip" 'ifreload -a'; done
+```
+
+`vmbr0` (the LAN bridge) is untouched, so your SSH sessions stay up throughout. (If a node's TB device still shows as `thunderbolt0` rather than `tbnet-*`, the `.link` rename didn't apply — the `udevadm trigger ... thunderbolt0` fix under [Adding a node](#if-the-new-node-extends-the-tb-line-topology) covers it, but after a plain power cycle the names are already pinned, so this is rare.)
+
+### Step C4 — Verify both rings and the migration path
+
+```bash
+NODES="192.0.2.12 192.0.2.13 192.0.2.14 192.0.2.15"
+for ip in $NODES; do echo "=== $ip ==="; ssh root@"$ip" 'corosync-cfgtool -s'; done
+```
+
+Expect both ring0 (`192.0.2.0/24`) and ring1 (`10.10.10.0/24`) `enabled` and `connected` on every node, and `pvecm status` showing `Link 0` *and* `Link 1` active for each member. Confirm the migration network survived:
+
+```bash
+ssh root@192.0.2.12 'grep ^migration: /etc/pve/datacenter.cfg'
+# → migration: type=secure,network=10.10.10.0/24
+```
+
+### Step C5 — Bring storage and PBS back
+
+`nas-vms` (the Asustor NFS export) re-activates on its own once networking is up — Proxmox's storage layer remounts it. Verify rather than assume:
+
+```bash
+NODES="192.0.2.12 192.0.2.13 192.0.2.14 192.0.2.15"
+for ip in $NODES; do echo "=== $ip ==="; ssh root@"$ip" 'pvesm status | grep -E "^Name|nas-vms"'; done
+```
+
+Expect `nas-vms` `active` on every node. If it's `inactive`, the NFS server isn't reachable yet — confirm the Asustor is powered on and its export is up, then wait for `pvestatd` to retry (or `pvesm set nas-vms --disable 0` if it got disabled).
+
+Power `pbs01` back on. It sits outside the corosync cluster, so it has no bring-up ordering constraint relative to the PVE nodes — but bring it up before any backup window so its datastore is reachable.
+
+### Step C6 — Start the guests
+
+Guests with **Start at boot** (`onboot: 1`) already came up during the host boot. Start the rest as needed — UI → select the VM → Start, or `qm start <vmid>` on its node. There's no cluster-wide start helper (the inverse of `cluster-shutdown.sh`); start per need.
+
+`amp-game` (the Minecraft host) carries live worlds — start it on its own and give the JVM time to load the worlds before anyone connects.
+
+### Cold-start verify checklist
+
+```bash
+NODES="192.0.2.12 192.0.2.13 192.0.2.14 192.0.2.15"
+
+# Quorate, both rings active on every node
+ssh root@192.0.2.12 'pvecm status'
+for ip in $NODES; do echo "=== $ip ==="; ssh root@"$ip" 'corosync-cfgtool -s'; done
+
+# Shared storage active cluster-wide
+for ip in $NODES; do echo "=== $ip ==="; ssh root@"$ip" 'pvesm status'; done
+
+# Guests running where you expect
+for ip in $NODES; do echo "=== $ip ==="; ssh root@"$ip" 'qm list'; done
+```
+
+When `Link 0` *and* `Link 1` are active on every node, `nas-vms` is `active`, and the guests are where you expect them, the cold start is complete.
+
+---
+
+## First-time formation
+
+*Forming the cluster once, from hosts the `pve-host` role has individually baselined.* A routine restart repeats none of this — use [Cold-start bring-up](#cold-start-bring-up) instead. This part is **manual and quorum-aware**: a botched re-join can fence a node, and edits to `/etc/pve/corosync.conf` from multiple places fight each other through pmxcfs. The role deliberately stops at this boundary; see `pve-hosts/CLAUDE.md` § "What this role MUST NOT do".
+
+### Where this fits
 
 You should arrive here from:
 
@@ -22,7 +138,7 @@ The next things after this doc complete are:
 
 ---
 
-## Prerequisites — must all be true before `pvecm create`
+### Prerequisites — must all be true before `pvecm create`
 
 A miscount here can lock out a node. Verify every item.
 
@@ -49,7 +165,7 @@ If any of these aren't true, fix before proceeding. **There is no "undo" for `pv
 
 ---
 
-## Step 1 — Create the cluster on pve12t
+### Step 1 — Create the cluster on pve12t
 
 Pick the creator. We use **pve12t** because it's the node with the most state (Razer Core X enrolled, eGPU passthrough config eventually). The creator's `/etc/pve/` contents become the cluster's; everyone else's gets replaced. pve12t's existing `cluster.fw` (with `enable: 0`) is what we want everywhere.
 
@@ -76,7 +192,7 @@ If `Quorate: No` or the node fails to start, look at `journalctl -u corosync -n 
 
 ---
 
-## Step 2 — Join pve13m
+### Step 2 — Join pve13m
 
 `pvecm add` prompts for pve12t's root password on stdin, which the non-interactive `ssh root@<ip> 'cmd'` form can't supply cleanly — the command hangs. Use an interactive SSH session instead:
 
@@ -114,7 +230,7 @@ Expect: `cluster.fw` present, `enable: 0` — pmxcfs replicated the file from pv
 
 ---
 
-## Step 3 — Join pve13t
+### Step 3 — Join pve13t
 
 Same shape, different node. Again use interactive SSH so the password prompt works:
 
@@ -148,7 +264,7 @@ If all three reads return the same string, pmxcfs is healthy.
 
 ---
 
-## Step 4 — Add corosync ring1 over the Thunderbolt fabric
+### Step 4 — Add corosync ring1 over the Thunderbolt fabric
 
 Ring0 is live on the 2.5GbE LAN. We now add ring1 over the TB fabric so corosync has two independent paths and live-migration traffic rides TB. This is an edit to `/etc/pve/corosync.conf` — pmxcfs-replicated, so changes from any one node propagate cluster-wide.
 
@@ -344,7 +460,7 @@ If ring1 fails to come up:
 
 ---
 
-## Step 5 — Route live-migration traffic over the TB fabric
+### Step 5 — Route live-migration traffic over the TB fabric
 
 Ring1 covers corosync heartbeat over TB, but `qm migrate` (and the web UI's "Migrate" action) still uses the management LAN by default. Tell Proxmox to route migration over the TB loopback subnet by adding one line to `/etc/pve/datacenter.cfg`. The file is pmxcfs-replicated, so the change propagates cluster-wide.
 
@@ -365,7 +481,7 @@ After this, any `qm migrate <vmid> <target-node>` or live-migration triggered vi
 
 ---
 
-## Step 6 — Enable the cluster-wide firewall
+### Step 6 — Enable the cluster-wide firewall
 
 The `pve-host` role staged `/etc/pve/firewall/cluster.fw` with `enable: 0` so the firewall was inert pre-cluster (avoiding the asymmetric-state hazard where the delegate filters but peers don't). Now that pmxcfs replicates the file cluster-wide, flip `enable: 0` → `enable: 1`:
 
@@ -395,7 +511,7 @@ If SSH dies on a node after this step, the lockout-recovery path is via the host
 
 ---
 
-## Step 7 — Enable `snippets` content type on `local`
+### Step 7 — Enable `snippets` content type on `local`
 
 Required before any `tofu apply` against the cluster. The `bpg/proxmox` OpenTofu provider uploads cloud-init snippets to a Proxmox storage that has the `snippets` content type enabled. Proxmox doesn't enable `snippets` on `local` by default; without it, the snippet upload silently no-ops and VMs boot with no cloud-init customization. Caught the hard way 2026-05-10 — see `scripts/preflight.sh`.
 
@@ -415,7 +531,7 @@ Alternative: Datacenter → Storage → `local` → Edit → tick **Snippets** u
 
 ---
 
-## Step 8 — Register the NAS NFS as cluster storage `nas-vms`
+### Step 8 — Register the NAS NFS as cluster storage `nas-vms`
 
 The `pve-host` role already mounted the Asustor NFS export at `/mnt/nas-vms` via fstab. This step tells Proxmox's storage layer about it, so the cluster can use it as a destination for VM disks, backups, and snippets. Including `snippets` in `--content` from the start means cluster-mobile VMs whose cloud-init snippet sits on shared storage stay reachable post-live-migration.
 
@@ -441,7 +557,7 @@ Alternative: UI → Datacenter → Storage → Add → NFS, tick Disk image + VZ
 
 ---
 
-## What to verify before moving on
+### What to verify before moving on
 
 ```bash
 # 3-node quorate, both rings up
@@ -470,7 +586,7 @@ done
 
 ---
 
-## What comes next
+### What comes next
 
 After this runbook completes, return to [docs/0-scratch-build-order.md](0-scratch-build-order.md) **Phase 3** for IaC enablement: Packer + OpenTofu API users, workstation setup, base template builds. The eGPU passthrough plumbing on pve12t (for the future LLM VM) is deferred until you're ready to deploy that role.
 
@@ -568,6 +684,9 @@ The joiner is asked to trust the cluster node's host key. Type `yes`. To avoid t
 **Web UI shows nodes as "?" or red.**
 Almost always a corosync ring problem. `corosync-cfgtool -s` on the affected node will show which ring is down. If ring0 is down, check LAN connectivity / firewall. If ring1 is down, re-run the TB 8-ping suite.
 
+**Cluster quorate but `Link 1` (ring1 / TB) down after a power cycle.**
+Expected after a cold start — the `tbnet-*` interfaces come up admin-DOWN on every boot. Run `ifreload -a` on each node twice (Cold-start bring-up, Step C3). Until you do, the cluster runs single-ring on the LAN: no TB redundancy, and live migration over the TB fabric is broken.
+
 **Cluster `pvecm status` shows quorum lost after editing corosync.conf.**
 You bumped `config_version` but the edit had a syntax error. Restore from `/root/corosync.conf.pre-ring1` via:
 
@@ -603,6 +722,8 @@ The removed node is now in single-node pmxcfs mode and can be rejoined with `pve
 
 - [docs/0-scratch-build-order.md](0-scratch-build-order.md) — master index; this doc fills in Phase 2 step 7.
 - [pve-hosts/README.md](../pve-hosts/README.md) — the role baseline that runs *before* this doc.
+- [scripts/cluster-shutdown.sh](../scripts/cluster-shutdown.sh) — graceful cluster-wide guest shutdown for a maintenance window (the start of a full power-off).
+- [scripts/cluster-poweroff.sh](../scripts/cluster-poweroff.sh) — powers off every PVE node (the end of a full power-off; the cold-start section above is the reverse).
 - Vault: `Projects/Homelab/VM Mobility — 3-Node Cluster on 2.5GbE.md` — cluster + NFS architecture, authoritative on design.
 - Vault: `Projects/Homelab/Thunderbolt Mesh Networking — 3-Node Cluster Option.md` — TB fabric design + Phase 7 ring1 details.
 - Proxmox upstream: <https://pve.proxmox.com/wiki/Cluster_Manager>
