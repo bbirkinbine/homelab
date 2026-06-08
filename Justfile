@@ -178,8 +178,8 @@ check-roles:
 # every `ssh host "cmd $localvar"` pattern even when client-side
 # expansion is exactly the intent).
 shell-lint:
-    bash -n scripts/preflight.sh scripts/hydrate.sh scripts/check-role-consistency.sh scripts/cluster-shutdown.sh
-    shellcheck -S warning scripts/preflight.sh scripts/hydrate.sh scripts/check-role-consistency.sh scripts/cluster-shutdown.sh
+    bash -n scripts/preflight.sh scripts/hydrate.sh scripts/check-role-consistency.sh scripts/cluster-shutdown.sh scripts/cluster-poweroff.sh scripts/cluster-coldstart.sh
+    shellcheck -S warning scripts/preflight.sh scripts/hydrate.sh scripts/check-role-consistency.sh scripts/cluster-shutdown.sh scripts/cluster-poweroff.sh scripts/cluster-coldstart.sh
 
 # --- cluster ops -------------------------------------------------------------
 
@@ -191,3 +191,12 @@ shell-lint:
 #   NODES="..." just shutdown --apply --force
 shutdown *FLAGS:
     @./scripts/cluster-shutdown.sh {{FLAGS}}
+
+# Restore + verify corosync ring1 / the TB fabric after a cold start (the
+# recurring maintenance-window case). DRY RUN (read-only verify) by default —
+# pass --apply to ifreload the tbnet-* interfaces and re-verify. Set the
+# NODES env var to your cluster's LAN IPs first; see the script header.
+#   NODES="10.0.0.12 10.0.0.13 ..." just coldstart           # verify only
+#   NODES="..." just coldstart --apply                       # remediate
+coldstart *FLAGS:
+    @./scripts/cluster-coldstart.sh {{FLAGS}}

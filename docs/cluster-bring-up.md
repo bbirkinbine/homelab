@@ -51,7 +51,15 @@ Expect `Quorate: Yes`, every powered-on node listed, `Link 0 status: active`. **
 
 The one manual step a cold start requires. After every host reboot the `tbnet-*` interfaces come up **admin-DOWN** — a boot-ordering race. The systemd `.link` files pin the interface *name*, not its up-state, and the `pve-host` role stages `/etc/network/interfaces` but never auto-reloads, so nothing brings the TB links up on boot.
 
-Run `ifreload -a` on **every** node, **twice**. A TB link carries traffic only once *both* ends are up, so the first pass brings interfaces admin-up and establishes carriers (its route installs fail with `Nexthop has invalid gateway` — expected), and the second pass installs the `src`-hinted routes now that carriers exist:
+Run `ifreload -a` on **every** node, **twice**. A TB link carries traffic only once *both* ends are up, so the first pass brings interfaces admin-up and establishes carriers (its route installs fail with `Nexthop has invalid gateway` — expected), and the second pass installs the `src`-hinted routes now that carriers exist.
+
+The one-shot: [`scripts/cluster-coldstart.sh`](../scripts/cluster-coldstart.sh) `--apply` does both passes on every node and then runs the Step C4 verification (ring1 status + loopback ping mesh + `nas-vms`) in a single command. Run it from your workstation, not a node:
+
+```bash
+NODES="192.0.2.12 192.0.2.13 192.0.2.14 192.0.2.15" scripts/cluster-coldstart.sh --apply
+```
+
+Or do it by hand — this is exactly the remediation the script runs:
 
 ```bash
 NODES="192.0.2.12 192.0.2.13 192.0.2.14 192.0.2.15"
@@ -115,6 +123,8 @@ for ip in $NODES; do echo "=== $ip ==="; ssh root@"$ip" 'qm list'; done
 ```
 
 When `Link 0` *and* `Link 1` are active on every node, `nas-vms` is `active`, and the guests are where you expect them, the cold start is complete.
+
+Or let [`scripts/cluster-coldstart.sh`](../scripts/cluster-coldstart.sh) (no `--apply`) run the ring1 + loopback-mesh + `nas-vms` checks read-only — it exits non-zero if anything is degraded, so it doubles as a health probe. (It does not check guest placement; the `qm list` sweep above covers that.)
 
 ---
 
@@ -724,6 +734,7 @@ The removed node is now in single-node pmxcfs mode and can be rejoined with `pve
 - [pve-hosts/README.md](../pve-hosts/README.md) — the role baseline that runs *before* this doc.
 - [scripts/cluster-shutdown.sh](../scripts/cluster-shutdown.sh) — graceful cluster-wide guest shutdown for a maintenance window (the start of a full power-off).
 - [scripts/cluster-poweroff.sh](../scripts/cluster-poweroff.sh) — powers off every PVE node (the end of a full power-off; the cold-start section above is the reverse).
+- [scripts/cluster-coldstart.sh](../scripts/cluster-coldstart.sh) — the reverse of the two above: restores corosync ring1 / the TB fabric (`ifreload -a` ×2) and verifies it after a cold start. Dry-run (read-only verify) by default; `--apply` to remediate.
 - Vault: `Projects/Homelab/VM Mobility — 3-Node Cluster on 2.5GbE.md` — cluster + NFS architecture, authoritative on design.
 - Vault: `Projects/Homelab/Thunderbolt Mesh Networking — 3-Node Cluster Option.md` — TB fabric design + Phase 7 ring1 details.
 - Proxmox upstream: <https://pve.proxmox.com/wiki/Cluster_Manager>
