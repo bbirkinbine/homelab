@@ -7,6 +7,7 @@
 #   hosts_file      → other tasks may rely on hostname resolution
 #   tuning          → sysctl drop-in (TCP buffers for chunk transfers)
 #   nfs             → mount the Asustor share at /mnt/pbs-bulk
+#   ups             → autonomous drain + poweroff on UPS low battery (opt-in)
 #   firewall        → ufw rules + enable
 #   users           → operator SSH key for root@<host>
 #   pbs_datastore   → create datastores via proxmox-backup-manager
@@ -54,6 +55,10 @@
 
 - name: NFS mount (bulk datastore)
   ansible.builtin.import_tasks: nfs.yml
+
+- name: UPS shutdown guardian (drain + poweroff on low battery)
+  ansible.builtin.import_tasks: ups.yml
+  when: pbs_host_manage_ups_guardian | bool
 
 - name: Host firewall (ufw)
   ansible.builtin.import_tasks: firewall.yml

@@ -104,3 +104,47 @@ pbs_pve_ingress_token_name: "cluster"
 # less-trusted PVE instance, switch to a tighter pair: keep
 # DatastoreBackup for write, add a second ACL grant for DatastoreAudit.
 pbs_pve_ingress_role: "DatastoreAdmin"
+
+# ----- UPS shutdown guardian ------------------------------------------
+# On UPS power loss, halt new backup/verify/GC work, let in-flight chunk
+# writes settle, then power the host off BEFORE the NAS (which serves the
+# chunk store over NFS) reaches its own low-battery cutoff. pbs01 is the
+# highest-value NFS client, so it triggers FIRST (60% charge) — ahead of
+# the PVE nodes (50%) and well above the NAS's 10% cutoff. Ordering is a
+# battery-charge gap, not the NUT primary/secondary handshake (the
+# Asustor upsd does not wait for network clients). See pbs-hosts/README.md
+# and the design vault [[nut-ordered-shutdown-design]].
+#
+# OFF by default: this powers the host off on trigger, so it's opt-in.
+# Enable in inventory AFTER setting pbs_host_ups_nut_target and testing
+# with pbs_host_ups_dry_run: true.
+pbs_host_manage_ups_guardian: false
+
+# "<upsname>@<host>" of the NAS upsd that owns the UPS (read-only upsc
+# access is all that's needed). Placeholder is an RFC 5737 doc address —
+# set the real value in inventory and verify with `upsc <target>`.
+pbs_host_ups_nut_target: "asustor@192.0.2.10"
+
+# Begin the shutdown when on battery AND charge <= this percent. 60 sits
+# ABOVE the PVE nodes' 50% so pbs01 (the backup datastore) clears first,
+# and far above the NAS's battery.charge.low (10%) — the gap is the
+# ordering guarantee.
+pbs_host_ups_charge_threshold: 60
+
+# Seconds to let in-flight chunk writes settle after stopping the proxy,
+# before the orderly poweroff aborts whatever remains. PBS is
+# crash-consistent and GC/verify are resumable, so a short grace is fine.
+pbs_host_ups_drain_grace: 30
+
+# upsd-unreachable behavior: "log" (conservative default — a network blip
+# must not power off the host) or "shutdown".
+pbs_host_ups_comms_loss_action: "log"
+
+# Simulate without powering anything off (logs the intended drain). Set
+# true for the first validation run.
+pbs_host_ups_dry_run: false
+
+# Poll cadence and the post-boot delay before the first poll (systemd
+# time spans). The poll is cheap and a no-op on line power.
+pbs_host_ups_poll_interval: "20s"
+pbs_host_ups_poll_boot_delay: "2min"

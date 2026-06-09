@@ -171,3 +171,21 @@ A second NUC12 Pro Tall (`pve12t2`) joined the cluster, cabled into pve13t's for
 - **Renaming a new TB netdev without a reboot:** `udevadm trigger --action=add /sys/class/net/thunderbolt0` re-applies the `.link` rename to a DOWN interface (targeted at the one device, so `vmbr0`/`nic0` are untouched). Used to bring pve13t's new `thunderbolt0` → `tbnet-12t2` without bouncing the node (its VMs stayed up). A reboot would also work but offers no advantage here — you still need the post-boot `ifreload`, and the rename via udev avoids the downtime.
 
 - **Joining a 4th node to the existing cluster** used `pvecm add <creator-lan> --link0 <new-lan> --link1 <new-tb-loopback>` — one shot, both corosync rings, no hand-edit of `corosync.conf` (pvecm wrote the ring1 address and bumped `config_version` itself). Cleaner and lower-risk than the create-time two-step (join link0, then edit `corosync.conf` for ring1) documented in `docs/cluster-bring-up.md` for the original 3-node formation.
+
+---
+
+## 2026-06-08 — UPS shutdown guardian (opt-in)
+
+Added `tasks/ups.yml` (+ three templates under `templates/etc/`) and an `ups` import in `main.yml`, gated on `pve_host_manage_ups_guardian` (default **false**). On a UPS low-battery event each node gracefully shuts down its guests then powers off, before the NAS reaches its own 10%-charge cutoff — so the NFS backing the guests' disks stays up until they're down. Mirrors a sibling addition in the `pbs-host` role; pbs01 triggers first at 60%, PVE nodes at 50%, NAS last at 10%.
+
+- **The guardian script is a single source of truth at `scripts/nas-ups-guardian.sh`**, deployed by both roles via `copy: src: "{{ playbook_dir }}/../../scripts/nas-ups-guardian.sh"` (resolves to `<repo>/scripts`). It carries `# noqa: no-relative-paths` because ansible-lint flags the `../` and the shared-script intent is deliberate. It is covered by `just shell-lint`. The PVE-vs-PBS behavior split is a `GUARDIAN_MODE` env var (`pve` = `qm shutdown` sweep; `pbs` = drain backup/verify/GC), not two scripts.
+
+- **Poll-based, not upsmon.** The watcher is a systemd timer → oneshot running `upsc` reads, NOT a NUT secondary. Rationale: read-only `upsc` access is already proven to work and needs no upsd-user provisioning on the Asustor; the NUT primary/secondary handshake is moot here because the Asustor upsd does not wait for network clients, so ordering comes from a charge gap instead. Documented in the role README and the design vault `[[nut-ordered-shutdown-design]]`.
+
+- **Applying the role never powers off a host.** The guardian acts only when the UPS is on battery AND at/below threshold; on line power every poll is a no-op. This keeps the role's "no autonomous reboots" rule intact — the trigger is a real power event, not the apply. The timer is safe to (re)start during an apply.
+
+- **Idempotency:** the systemd reload + timer-restart tasks are `when: <unit> is changed` rather than a blanket `daemon_reload: true` (which would report changed on every run). A healthy re-run reports `changed=0`.
+
+- **`nut-client` is installed only when the guardian is enabled** (inside `ups.yml`, not the baseline `pve_host_packages`) so disabling the feature leaves the package footprint untouched. It ships upsmon too, but `/etc/nut/nut.conf` MODE stays `none`, so no upsmon daemon runs.
+
+- **Operator preconditions** (can't be enforced by the role): the node AND the LAN switch carrying the `upsc` poll must both be on the UPS. Confirmed 2026-06-08 that pbs01 and the switch are on the BR1500MS2.

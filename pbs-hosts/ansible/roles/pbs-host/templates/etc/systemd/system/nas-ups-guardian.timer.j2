@@ -1,0 +1,16 @@
+# Managed by Ansible (pbs-host role, tasks/ups.yml).
+# Polls the UPS every {{ pbs_host_ups_poll_interval }}; the first poll is
+# delayed {{ pbs_host_ups_poll_boot_delay }} after boot so PBS settles.
+# Each poll is cheap (two upsc reads) and a no-op unless the UPS is on
+# battery and low.
+[Unit]
+Description=Poll the UPS; drain PBS and shut down on low battery
+
+[Timer]
+OnBootSec={{ pbs_host_ups_poll_boot_delay }}
+OnUnitActiveSec={{ pbs_host_ups_poll_interval }}
+AccuracySec=5s
+Unit=nas-ups-guardian.service
+
+[Install]
+WantedBy=timers.target

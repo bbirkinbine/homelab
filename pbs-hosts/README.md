@@ -23,6 +23,7 @@ Brings a freshly-installed Proxmox Backup Server 4.x host (Debian 13 / trixie ba
 - Drops a baseline `ufw` config and enables the firewall.
 - Installs the operator's SSH public key for `root`.
 - Tunes sysctl for high-throughput chunk transfers.
+- Optionally installs a **UPS shutdown guardian** (opt-in) that drains in-flight backup/verify/GC and powers the host down on a UPS low-battery event, before the NAS cuts power — see [UPS shutdown guardian](#ups-shutdown-guardian-opt-in) below.
 
 ## What the role does NOT do
 
@@ -129,6 +130,42 @@ pbs-hosts/
 2. **Schedule a PVE backup job.** Datacenter → Backup → Add. Pick VMs, set retention, optionally encrypt with a key from OpenBao.
 
 3. **TLS cert migration (future).** PBS ships a self-signed cert; PVE pins it by fingerprint. Migration to a cert from the offline Root CA (`[[CardLogix as Offline Root CA]]`) is a separate task.
+
+## UPS shutdown guardian (opt-in)
+
+`pbs01` is the **highest-value NFS client** on the lab's UPS. Its datastore (the `proxmox-backups` export) is the disaster-recovery tier, and PBS runs long, NFS-heavy operations — garbage collection and verify rewrite/read the chunk-store index independent of any PVE VM. If the Asustor NAS (the NUT primary, on the UPS's USB) auto-powers-off at its low-battery flag while a GC is mid-write, it can corrupt the datastore — the one store you'd recover *from*. So on a power event pbs01 must shut down cleanly, and **first**.
+
+This role can install the same autonomous guardian the `pve-host` role uses, in `pbs` mode. It is **opt-in** because it powers the host off on trigger.
+
+**How it works.** A systemd timer runs `/usr/local/sbin/nas-ups-guardian` every ~20s, reading the UPS over the network with `upsc` (read-only; no upsd user provisioning on the NAS). When the UPS is **on battery** and **`battery.charge` ≤ `pbs_host_ups_charge_threshold`** (default 60%), it stops `proxmox-backup-proxy` to halt new work, waits `pbs_host_ups_drain_grace` seconds for in-flight chunk writes to settle, then powers the host off. The subsequent orderly stop aborts any still-running task and unmounts NFS cleanly while the NAS is still up. PBS is crash-consistent and GC/verify are resumable, so the guardian does **not** wait for a long task to finish — aborting it is safe and preserves battery margin. On line power every poll is a no-op.
+
+**Ordering across the lab** is a battery-charge gap, not the NUT primary/secondary handshake (the Asustor upsd does not wait for network clients):
+
+| Tier | Trigger | Action |
+|---|---|---|
+| pbs01 | ~60% charge | drain backup/verify/GC, power off **first** |
+| PVE nodes | ~50% charge | `qm shutdown` guests, power off |
+| NAS | ~10% charge (its LB flag) | powers off last |
+
+pbs01 triggers above the PVE 50% on purpose: it is the priority asset and a winding-down GC/verify gets runway to settle before the battery gets tight.
+
+**Preconditions.** Both pbs01 **and the LAN switch** carrying this poll must be on the UPS; if the switch drops on mains failure, pbs01 can't read the UPS and nothing triggers.
+
+**Enable it:**
+
+1. Set the target and (optionally) the threshold in `inventory.yml`:
+   ```yaml
+   pbs_host_manage_ups_guardian: true
+   pbs_host_ups_nut_target: "asustor@<nas-ip>"   # verify: upsc asustor@<nas-ip>
+   ```
+2. **Test first with a dry run** — set `pbs_host_ups_dry_run: true`, apply, then watch the journal during a simulated outage and confirm it logs the intended drain without powering off:
+   ```bash
+   journalctl -t nas-ups-guardian -f
+   systemctl list-timers nas-ups-guardian.timer
+   ```
+3. Flip `pbs_host_ups_dry_run: false` and re-apply once the dry run looks right.
+
+All knobs (`pbs_host_ups_charge_threshold`, `pbs_host_ups_drain_grace`, `pbs_host_ups_comms_loss_action`, poll cadence) are documented in `defaults/main.yml`. The guardian script is shared with `pve-host` (`scripts/nas-ups-guardian.sh`); the PBS-vs-PVE behavior split is the `GUARDIAN_MODE` env var.
 
 ## When to run this role
 

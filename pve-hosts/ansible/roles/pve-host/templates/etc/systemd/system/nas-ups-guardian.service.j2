@@ -1,0 +1,16 @@
+# Managed by Ansible (pve-host role, tasks/ups.yml).
+# One-shot UPS check, driven by nas-ups-guardian.timer. Reads
+# /etc/default/nas-ups-guardian for mode + NUT target + thresholds. A
+# no-op on line power; only sweeps guests + powers off this node when the
+# UPS is on battery at/below the configured charge threshold.
+[Unit]
+Description=NAS UPS guardian - shut this node down before the NAS loses power
+ConditionFileIsExecutable=/usr/local/sbin/nas-ups-guardian
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/default/nas-ups-guardian
+ExecStart=/usr/local/sbin/nas-ups-guardian
+# The script powers the node off itself once guests are drained; it must
+# never be killed mid-sweep by a start-timeout.
+TimeoutStartSec=0

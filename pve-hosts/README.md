@@ -20,6 +20,7 @@ Brings a freshly-installed Proxmox VE 9.x host (Debian 13 / trixie base) to a co
 - Drops a baseline `pve-firewall` cluster config.
 - Installs the operator's SSH public key for `root`.
 - Tunes sysctl for high-MTU TB-net flows.
+- Optionally installs a **UPS shutdown guardian** (opt-in) that gracefully powers the node down on a UPS low-battery event, before the NAS cuts power — see [UPS shutdown guardian](#ups-shutdown-guardian-opt-in) below.
 
 ## What the role does NOT do
 
@@ -119,6 +120,42 @@ These aren't blockers for `just pve-hosts` or for any VM deploy, but they're rea
 - **Outbound mail destination.** The Proxmox installer prompted for an email at install time, but PVE 9.x has no SMTP relay configured by default — SMART warnings, cron output, and backup-job failure notices accumulate in `/var/spool/postfix/maildrop/` unread. To actually receive them: install + configure `postfix` in satellite mode pointing at an SMTP relay you trust (Cloudflare Email Routing, Fastmail, Gmail SMTP with an app password, or a local relay). The `pve-host` role does NOT manage mail — wire up only when the lab has a stable SMTP target.
 
 - **Non-root `pveum` admin user for daily web UI access.** Logging into the web UI as `root@pam` works but treats every UI session as the highest-privilege identity. Convention is to add `admin@pve` (or `<name>@pam` if you make a local Linux user) with the built-in `Administrator` role and reserve `root@pam` for break-glass + Ansible's SSH path. Add via Datacenter → Permissions → Users → Add, then assign Administrator at the Datacenter level. Optional hardening; not currently in the design.
+
+## UPS shutdown guardian (opt-in)
+
+On mains failure the lab runs on an APC Back-UPS RS (BR1500MS2). The Asustor NAS is the NUT primary (the UPS is on its USB) and serves the NFS that backs both the cluster-mobile VM disks (`nas-vms`) and the PBS chunk store. The NAS auto-powers-off when the UPS hits its low-battery flag (`battery.charge.low` = 10%). Nothing stock tells the NFS clients to go first — so if the NAS cuts power while a node is mid-write, you get hung I/O and a dirty guest filesystem (or a corrupted PBS datastore).
+
+This role can install a small, autonomous guardian that fixes the ordering. It is **opt-in** because it powers the host off on trigger.
+
+**How it works.** A systemd timer runs `/usr/local/sbin/nas-ups-guardian` every ~20s. Each poll reads the UPS over the network with `upsc` (read-only; no upsd user provisioning on the NAS). When the UPS is **on battery** and **`battery.charge` ≤ `pve_host_ups_charge_threshold`** (default 50%), it gracefully `qm shutdown`s every running guest on that node, force-stops any straggler, then powers the node off. On line power every poll is a no-op, so the timer firing during an Ansible apply is harmless.
+
+**Ordering across the lab** is a battery-charge gap, not the NUT primary/secondary handshake (the Asustor upsd does not wait for network clients):
+
+| Tier | Trigger | Action |
+|---|---|---|
+| pbs01 | ~60% charge | drain backup/verify/GC, power off first (highest-value NFS client — see `pbs-hosts/README.md`) |
+| PVE nodes | ~50% charge | `qm shutdown` guests, power off |
+| NAS | ~10% charge (its LB flag) | powers off last |
+
+Shutting the PVE guests — the LLM VM especially — also collapses the GPU load, which makes the UPS recompute runtime upward and widens the margin for everything downstream.
+
+**Preconditions.** Both the node **and the LAN switch** carrying this poll must be on the UPS; if the switch drops on mains failure, no node can read the UPS and nothing triggers. Corosync ring0 rides the same switch, so it is likely already on the UPS — confirm it.
+
+**Enable it:**
+
+1. Set the target and (optionally) the threshold in `inventory.yml`:
+   ```yaml
+   pve_host_manage_ups_guardian: true
+   pve_host_ups_nut_target: "asustor@<nas-ip>"   # verify: upsc asustor@<nas-ip>
+   ```
+2. **Test first with a dry run** — set `pve_host_ups_dry_run: true`, apply, then simulate an outage (pull mains, or watch a real one) and confirm the journal logs the intended sweep without powering anything off:
+   ```bash
+   journalctl -t nas-ups-guardian -f
+   systemctl list-timers nas-ups-guardian.timer
+   ```
+3. Flip `pve_host_ups_dry_run: false` and re-apply once the dry run looks right.
+
+All knobs (`pve_host_ups_charge_threshold`, `pve_host_ups_shutdown_timeout`, `pve_host_ups_exclude_vmids`, `pve_host_ups_comms_loss_action`, poll cadence) are documented in `defaults/main.yml`. Note `pve_host_ups_exclude_vmids` is empty by design: for an unattended outage you want everything — amp-game included — down gracefully via guest agent rather than NFS-yanked.
 
 ## When to run this role
 

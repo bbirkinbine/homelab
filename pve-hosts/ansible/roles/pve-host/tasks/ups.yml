@@ -1,0 +1,91 @@
+---
+# UPS shutdown guardian (PVE side). Installs a poll-based watcher
+# (systemd timer -> oneshot) that, when the UPS is on battery and
+# battery.charge falls to pve_host_ups_charge_threshold, gracefully shuts
+# down this node's guests then powers the node off. The NAS is left
+# running until its own low-battery cutoff so the NFS backing the guests'
+# disks stays up until they are safely down. Ordering is the charge gap,
+# NOT the NUT primary/secondary handshake (the Asustor upsd does not wait
+# for network clients). See pve-hosts/README.md and the design vault
+# [[nut-ordered-shutdown-design]].
+#
+# IMPORTANT: applying this task NEVER powers off a host. The guardian
+# acts only when the UPS is actually on battery AND low; on line power
+# every poll is a no-op. This keeps the role's "no autonomous reboots"
+# rule intact — the trigger is a real power event, not the apply.
+#
+# Guarded by pve_host_manage_ups_guardian (default false — opt-in,
+# because it powers off hosts). When false the import in main.yml is
+# skipped entirely.
+
+- name: Install NUT client (provides the upsc reader)
+  ansible.builtin.apt:
+    name: nut-client
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  # nut-client also ships upsmon, but it stays dormant: /etc/nut/nut.conf
+  # MODE defaults to 'none', so no upsmon daemon starts. We use only the
+  # upsc client binary for read-only polling.
+
+- name: Install the NAS UPS guardian script
+  # Single source of truth lives in scripts/ alongside the other cluster
+  # shutdown helpers (and is covered by `just shell-lint`). pbs-host
+  # deploys the same file. playbook_dir is <repo>/pve-hosts/ansible, so
+  # ../../scripts resolves to <repo>/scripts.
+  ansible.builtin.copy:  # noqa: no-relative-paths
+    src: "{{ playbook_dir }}/../../scripts/nas-ups-guardian.sh"
+    dest: /usr/local/sbin/nas-ups-guardian
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render the UPS guardian environment file
+  ansible.builtin.template:
+    src: etc/default/nas-ups-guardian.j2
+    dest: /etc/default/nas-ups-guardian
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install the UPS guardian systemd service
+  ansible.builtin.template:
+    src: etc/systemd/system/nas-ups-guardian.service.j2
+    dest: /etc/systemd/system/nas-ups-guardian.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: pve_ups_service_unit
+
+- name: Install the UPS guardian systemd timer
+  ansible.builtin.template:
+    src: etc/systemd/system/nas-ups-guardian.timer.j2
+    dest: /etc/systemd/system/nas-ups-guardian.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: pve_ups_timer_unit
+
+# Explicit reload only when a unit file changed, so a healthy re-run
+# reports changed=0 (a blanket daemon_reload: true would always show
+# changed). Ordered before the enable so first-apply units are visible.
+- name: Reload systemd when the guardian units changed
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: pve_ups_service_unit is changed or pve_ups_timer_unit is changed
+
+- name: Enable and start the UPS guardian timer
+  ansible.builtin.systemd:
+    name: nas-ups-guardian.timer
+    enabled: true
+    state: started
+
+# Pick up a changed schedule (OnUnitActiveSec etc.) on a running timer.
+# noqa no-handler: not a handler on purpose — the reload above must run
+# BEFORE the enable task (handlers fire only at end-of-play), so this
+# whole reload/enable/restart sequence is ordered inline.
+- name: Restart the guardian timer when its unit changed  # noqa: no-handler
+  ansible.builtin.systemd:
+    name: nas-ups-guardian.timer
+    state: restarted
+  when: pve_ups_timer_unit is changed

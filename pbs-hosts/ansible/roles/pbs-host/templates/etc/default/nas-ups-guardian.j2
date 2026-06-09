@@ -1,0 +1,24 @@
+# Managed by Ansible (pbs-host role, tasks/ups.yml). Re-rendered on each
+# `just pbs-hosts` run. Tunables for /usr/local/sbin/nas-ups-guardian.
+#
+# Mode: pbs = halt new backup/verify/GC work, settle, then power off.
+GUARDIAN_MODE=pbs
+# NUT target "<upsname>@<host>" of the NAS upsd that owns the UPS.
+# Read-only `upsc` access is all the guardian needs. Verify with:
+#   upsc {{ pbs_host_ups_nut_target }}
+NAS_NUT_TARGET={{ pbs_host_ups_nut_target }}
+# Begin the shutdown when on battery AND charge <= this percent. pbs01 is
+# the highest-value NFS client (the backup datastore), so it triggers
+# ABOVE the PVE nodes' 50% — a GC/verify run gets runway to wind down,
+# and the chunk store is well clear of the NAS's 10% cutoff.
+CHARGE_THRESHOLD={{ pbs_host_ups_charge_threshold }}
+# Seconds to let in-flight chunk writes settle after stopping the proxy,
+# before the orderly poweroff aborts whatever remains. PBS is
+# crash-consistent and GC/verify are resumable, so we don't wait for a
+# long task to finish — just settle, then go.
+PBS_DRAIN_GRACE={{ pbs_host_ups_drain_grace }}
+# upsd-unreachable behavior: "log" (conservative; a network blip must not
+# power off the host) or "shutdown".
+COMMS_LOSS_ACTION={{ pbs_host_ups_comms_loss_action }}
+# 1 = simulate (log the intended drain, never power off). For testing.
+DRY_RUN={{ pbs_host_ups_dry_run | int }}

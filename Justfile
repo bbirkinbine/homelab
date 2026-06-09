@@ -178,8 +178,8 @@ check-roles:
 # every `ssh host "cmd $localvar"` pattern even when client-side
 # expansion is exactly the intent).
 shell-lint:
-    bash -n scripts/preflight.sh scripts/hydrate.sh scripts/check-role-consistency.sh scripts/cluster-shutdown.sh scripts/cluster-poweroff.sh scripts/cluster-coldstart.sh
-    shellcheck -S warning scripts/preflight.sh scripts/hydrate.sh scripts/check-role-consistency.sh scripts/cluster-shutdown.sh scripts/cluster-poweroff.sh scripts/cluster-coldstart.sh
+    bash -n scripts/preflight.sh scripts/hydrate.sh scripts/check-role-consistency.sh scripts/cluster-shutdown.sh scripts/cluster-poweroff.sh scripts/cluster-coldstart.sh scripts/nas-ups-guardian.sh
+    shellcheck -S warning scripts/preflight.sh scripts/hydrate.sh scripts/check-role-consistency.sh scripts/cluster-shutdown.sh scripts/cluster-poweroff.sh scripts/cluster-coldstart.sh scripts/nas-ups-guardian.sh
 
 # --- cluster ops -------------------------------------------------------------
 

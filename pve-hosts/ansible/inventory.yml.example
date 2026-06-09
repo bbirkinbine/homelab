@@ -33,6 +33,17 @@ pve_hosts:
     nas_nfs_export: "/volume1/proxmox-vms"  # confirm against ADM Shared Folders
     nas_mount_point: "/mnt/nas-vms"
 
+    # ----- UPS shutdown guardian (opt-in) -----
+    # On UPS power loss each node shuts down its guests then powers off
+    # BEFORE the NAS reaches its own low-battery cutoff (10% charge), so
+    # the NFS backing the guests' disks stays up until they're down. OFF
+    # by default (it powers off hosts); enable after setting the target
+    # and testing with pve_host_ups_dry_run. PRECONDITIONS: the LAN switch
+    # carrying this poll must also be on the UPS. See pve-hosts/README.md.
+    pve_host_manage_ups_guardian: false
+    pve_host_ups_nut_target: "asustor@192.0.2.10"   # <upsname>@<nas-ip>; verify with `upsc <target>`
+    pve_host_ups_charge_threshold: 50               # trigger at <=50% (NAS cuts off at 10%; pbs01 leads at 60%)
+
     # Repos — PVE 9.x = Debian 13 (trixie)
     pve_repo_distribution: "trixie"
 

@@ -139,6 +139,24 @@ Acceptance results from the pre-hardware pass (recorded 2026-05-16):
 
 ---
 
+## 2026-06-08 — UPS shutdown guardian (opt-in)
+
+Added `tasks/ups.yml` (+ three templates under `templates/etc/`) and a `ups` import in `main.yml`, gated on `pbs_host_manage_ups_guardian` (default **false**). On a UPS low-battery event pbs01 halts new backup/verify/GC work, lets in-flight chunk writes settle, then powers off — before the NAS reaches its own 10%-charge cutoff, so the chunk store is never NFS-yanked mid-write. Mirrors a sibling addition in the `pve-host` role.
+
+- **pbs01 leads the shutdown order.** It is the highest-value NFS client (the backup datastore is the DR tier, and a GC/verify mid-write is corruption-prone), so it triggers at 60% charge — ahead of the PVE nodes (50%) and well above the NAS (10%). Confirmed with Brian 2026-06-08 that this priority is intended.
+
+- **`pbs` drain mode** (the `GUARDIAN_MODE` env split): stop `proxmox-backup-proxy` to halt new work, `sleep pbs_host_ups_drain_grace` (default 30s) for in-flight writes to settle, then `systemctl poweroff` — which aborts any still-running task and unmounts NFS cleanly while the NAS is up. We deliberately do NOT wait for a long GC/verify to finish: PBS is crash-consistent and those tasks are resumable, so aborting is safe and preserves battery margin.
+
+- **Shared script, single source of truth** at `scripts/nas-ups-guardian.sh`, deployed by both roles via `copy: src: "{{ playbook_dir }}/../../scripts/nas-ups-guardian.sh"` (carries `# noqa: no-relative-paths`). Covered by `just shell-lint`. The PVE-vs-PBS behavior is a `GUARDIAN_MODE` env var, not two scripts.
+
+- **Poll-based, not upsmon.** Read-only `upsc` is all it needs (no upsd-user provisioning on the Asustor); the NUT handshake is moot because the Asustor upsd doesn't wait for clients, so ordering is a charge gap. `nut-client` installs upsmon too, but `/etc/nut/nut.conf` MODE stays `none`.
+
+- **Applying the role never powers off the host** — the guardian acts only on a real on-battery + low event; on line power every poll is a no-op. Reload/restart tasks are `when: <unit> is changed` so a healthy re-run reports `changed=0`.
+
+- **Operator precondition** (can't be enforced by the role): pbs01 AND the LAN switch carrying the poll must be on the UPS. Confirmed 2026-06-08.
+
+---
+
 ## Design vault
 
 The authoritative PBS architecture lives in the project's private Obsidian vault under `[[Proxmox Backup Server — Capabilities and Tiered Storage]]`. Tiering decisions, dedicated-vs-VM rationale, and the future TLS-from-Root-CA plan all live there.

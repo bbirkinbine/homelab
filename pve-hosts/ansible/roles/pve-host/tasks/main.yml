@@ -9,6 +9,7 @@
 #   thunderbolt → modules, .link pinning, transit-node ip_forward
 #   tuning      → sysctl drop-in for high-MTU TB-net flows
 #   nfs         → mount the Asustor share at /mnt/nas-vms
+#   ups         → autonomous cluster-safe shutdown on UPS low battery (opt-in)
 #   firewall    → /etc/pve/firewall/cluster.fw via delegate_to (pmxcfs race)
 #   users       → operator SSH key for root@<host>
 #
@@ -61,6 +62,10 @@
 
 - name: NFS mount
   ansible.builtin.import_tasks: nfs.yml
+
+- name: UPS shutdown guardian (cluster-safe poweroff on low battery)
+  ansible.builtin.import_tasks: ups.yml
+  when: pve_host_manage_ups_guardian | bool
 
 - name: Cluster firewall baseline (pve-firewall)
   ansible.builtin.import_tasks: firewall.yml

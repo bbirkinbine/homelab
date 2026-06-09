@@ -70,3 +70,48 @@ pve_host_manage_cluster_firewall: true
 # only in CI/molecule contexts where you've decoupled the play host from
 # the target's networking.
 pve_host_auto_reload_networking: false
+
+# ----- UPS shutdown guardian ------------------------------------------
+# On UPS power loss, gracefully shut down this node's guests then power
+# the node off BEFORE the NAS (which serves the NFS backing the guests'
+# disks) reaches its own low-battery cutoff. Ordering is enforced by a
+# battery-charge gap, not the NUT primary/secondary handshake (the
+# Asustor upsd does not wait for network clients). See pve-hosts/README.md
+# and the design vault [[nut-ordered-shutdown-design]].
+#
+# OFF by default: this powers off hosts on trigger, so it's opt-in.
+# Enable per-cluster in inventory AFTER setting pve_host_ups_nut_target
+# and testing with pve_host_ups_dry_run: true.
+pve_host_manage_ups_guardian: false
+
+# "<upsname>@<host>" of the NAS upsd that owns the UPS (read-only upsc
+# access is all that's needed). Placeholder is an RFC 5737 doc address —
+# set the real value in inventory and verify with `upsc <target>`.
+pve_host_ups_nut_target: "asustor@192.0.2.10"
+
+# Begin the shutdown when on battery AND charge <= this percent. 50
+# matches the UPS's battery.charge.warning and sits far above the NAS's
+# battery.charge.low (10%) — the 50->10 gap is the ordering guarantee.
+# pbs01 triggers higher (60%) so it clears first; see pbs-host's role.
+pve_host_ups_charge_threshold: 50
+
+# Per-guest ACPI shutdown timeout (seconds) before force-stop. Generous
+# for the amp-game Minecraft JVM to flush worlds on SIGTERM.
+pve_host_ups_shutdown_timeout: 180
+
+# VMIDs never auto-shut. Empty by design — for an unattended outage you
+# want everything down gracefully rather than NFS-yanked.
+pve_host_ups_exclude_vmids: []
+
+# upsd-unreachable behavior: "log" (conservative default — a network blip
+# must not power off the cluster) or "shutdown".
+pve_host_ups_comms_loss_action: "log"
+
+# Simulate without powering anything off (logs the intended sweep). Set
+# true for the first validation run.
+pve_host_ups_dry_run: false
+
+# Poll cadence and the post-boot delay before the first poll (systemd
+# time spans). The poll is cheap and a no-op on line power.
+pve_host_ups_poll_interval: "20s"
+pve_host_ups_poll_boot_delay: "2min"

@@ -1,0 +1,24 @@
+# Managed by Ansible (pve-host role, tasks/ups.yml). Re-rendered on each
+# `just pve-hosts` run. Tunables for /usr/local/sbin/nas-ups-guardian.
+#
+# Mode: pve = gracefully shut down this node's guests, then power off.
+GUARDIAN_MODE=pve
+# NUT target "<upsname>@<host>" of the NAS upsd that owns the UPS.
+# Read-only `upsc` access is all the guardian needs. Verify with:
+#   upsc {{ pve_host_ups_nut_target }}
+NAS_NUT_TARGET={{ pve_host_ups_nut_target }}
+# Begin the shutdown when on battery AND charge <= this percent. 50
+# matches the UPS's battery.charge.warning and sits far above the NAS's
+# battery.charge.low (10%); the 50->10 gap is the ordering guarantee.
+CHARGE_THRESHOLD={{ pve_host_ups_charge_threshold }}
+# Per-guest ACPI shutdown timeout (s) before force-stop. Generous so the
+# amp-game Minecraft JVM flushes worlds on SIGTERM.
+SHUTDOWN_TIMEOUT={{ pve_host_ups_shutdown_timeout }}
+# Space-separated VMIDs never auto-shut. Empty by design: for an
+# unattended outage you want everything down gracefully, not NFS-yanked.
+EXCLUDE_VMIDS={{ pve_host_ups_exclude_vmids | join(' ') }}
+# upsd-unreachable behavior: "log" (conservative; a network blip must not
+# power off the cluster) or "shutdown".
+COMMS_LOSS_ACTION={{ pve_host_ups_comms_loss_action }}
+# 1 = simulate (log the intended sweep, never power off). For testing.
+DRY_RUN={{ pve_host_ups_dry_run | int }}

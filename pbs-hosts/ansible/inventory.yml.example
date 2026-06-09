@@ -24,6 +24,17 @@ pbs_hosts:
     nas_pbs_nfs_export: "/volume1/proxmox-backups"  # TODO: confirm against ADM Shared Folders
     nas_pbs_mount_point: "/mnt/pbs-bulk"
 
+    # ----- UPS shutdown guardian (opt-in) -----
+    # pbs01 is the highest-value NFS client (the backup datastore), so on
+    # UPS power loss it drains + powers off FIRST, above the PVE nodes'
+    # 50% and well above the NAS's 10% cutoff. OFF by default (it powers
+    # the host off); enable after testing with pbs_host_ups_dry_run.
+    # PRECONDITION: pbs01 AND the LAN switch carrying this poll must be on
+    # the UPS. See pbs-hosts/README.md.
+    pbs_host_manage_ups_guardian: false
+    pbs_host_ups_nut_target: "asustor@192.0.2.10"   # <upsname>@<nas-ip>; verify with `upsc <target>`
+    pbs_host_ups_charge_threshold: 60               # trigger at <=60% (ahead of the PVE 50%)
+
     # Repos — PBS 4.x = Debian 13 (trixie)
     pbs_repo_distribution: "trixie"
 
