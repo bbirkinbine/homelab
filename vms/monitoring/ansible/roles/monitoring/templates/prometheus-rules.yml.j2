@@ -12,11 +12,11 @@
 groups: {% if not monitoring_nut_target %}[]{% endif %}
 
 {% if monitoring_nut_target %}
-  # CyberPower BR-series UPSes (BR1000MS, BR1500MS2, ...) do NOT expose
-  # `ups.realpower` — the usbhid-ups driver surfaces only `ups.load`
-  # (fraction, 0-1) and `ups.realpower.nominal` (the unit's rated wattage).
-  # Higher-tier CyberPower (CP/PR series) and APC Smart-UPS expose
-  # realpower directly; entry-level BR units don't. We derive watts by
+  # APC Back-UPS RS units (the lab runs a BR1500MS2; was a BR1000MS) do
+  # NOT expose live `ups.realpower` — the usbhid-ups driver surfaces only
+  # `ups.load` (fraction, 0-1) and `ups.realpower.nominal` (the unit's
+  # rated wattage). Pro-tier APC Smart-UPS (SMT/SRT) expose realpower
+  # directly; these entry-tier Back-UPS units don't. We derive watts by
   # multiplying load against nominal capacity, which the unit DOES
   # report.
   #

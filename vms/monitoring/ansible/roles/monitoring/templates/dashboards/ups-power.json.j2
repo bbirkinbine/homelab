@@ -121,7 +121,7 @@
       "id": 3,
       "type": "stat",
       "title": "UPS rated capacity",
-      "description": "The UPS's nominal real-power rating (ups.realpower.nominal). Useful as a swap indicator — when the BR1000MS is replaced with the BR1500MS2, this should jump 600W → 900W on the first scrape after the new unit is online.",
+      "description": "The UPS's nominal real-power rating (ups.realpower.nominal) — 900W on the APC Back-UPS RS BR1500MS2 currently installed (was 600W on the prior BR1000MS). Reads the live metric, so a future swap rescales it automatically.",
       "gridPos": { "x": 16, "y": 0, "w": 8, "h": 5 },
       "datasource": { "type": "prometheus", "uid": "{{ monitoring_grafana_datasource_uid }}" },
       "targets": [
