@@ -9,8 +9,8 @@ GUARDIAN_MODE=pbs
 NAS_NUT_TARGET={{ pbs_host_ups_nut_target }}
 # Begin the shutdown when on battery AND charge <= this percent. pbs01 is
 # the highest-value NFS client (the backup datastore), so it triggers
-# ABOVE the PVE nodes' 50% — a GC/verify run gets runway to wind down,
-# and the chunk store is well clear of the NAS's 10% cutoff.
+# ABOVE the PVE nodes' threshold — a GC/verify run gets runway to wind
+# down, and the chunk store is well clear of the NAS's 10% cutoff.
 CHARGE_THRESHOLD={{ pbs_host_ups_charge_threshold }}
 # Seconds to let in-flight chunk writes settle after stopping the proxy,
 # before the orderly poweroff aborts whatever remains. PBS is

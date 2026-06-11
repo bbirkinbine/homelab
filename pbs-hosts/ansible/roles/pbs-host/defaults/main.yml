@@ -125,11 +125,12 @@ pbs_host_manage_ups_guardian: false
 # set the real value in inventory and verify with `upsc <target>`.
 pbs_host_ups_nut_target: "asustor@192.0.2.10"
 
-# Begin the shutdown when on battery AND charge <= this percent. 60 sits
-# ABOVE the PVE nodes' 50% so pbs01 (the backup datastore) clears first,
+# Begin the shutdown when on battery AND charge <= this percent. 70 sits
+# ABOVE the PVE nodes' 60% so pbs01 (the backup datastore) clears first,
 # and far above the NAS's battery.charge.low (10%) — the gap is the
-# ordering guarantee.
-pbs_host_ups_charge_threshold: 60
+# ordering guarantee. Daily backups with 30-day retention make an early
+# pbs01 exit cheap; the aborted task just resumes on the next run.
+pbs_host_ups_charge_threshold: 70
 
 # Seconds to let in-flight chunk writes settle after stopping the proxy,
 # before the orderly poweroff aborts whatever remains. PBS is

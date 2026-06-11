@@ -20,8 +20,8 @@
 # battery.charge over the network and shuts ITSELF down early, leaving
 # the NAS to power off last:
 #
-#   ~60% charge  pbs01 drains in-flight backup/verify/GC, then powers off
-#   ~50% charge  PVE nodes shut down their guests, then power off
+#   ~70% charge  pbs01 drains in-flight backup/verify/GC, then powers off
+#   ~60% charge  PVE nodes shut down their guests, then power off
 #   ~10% charge  NAS reaches its own low-battery cutoff, powers off last
 #
 # The ordering guarantee is the charge GAP between each tier's trigger

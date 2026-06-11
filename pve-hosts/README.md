@@ -127,14 +127,14 @@ On mains failure the lab runs on an APC Back-UPS RS (BR1500MS2). The Asustor NAS
 
 This role can install a small, autonomous guardian that fixes the ordering. It is **opt-in** because it powers the host off on trigger.
 
-**How it works.** A systemd timer runs `/usr/local/sbin/nas-ups-guardian` every ~20s. Each poll reads the UPS over the network with `upsc` (read-only; no upsd user provisioning on the NAS). When the UPS is **on battery** and **`battery.charge` ≤ `pve_host_ups_charge_threshold`** (default 50%), it gracefully `qm shutdown`s every running guest on that node, force-stops any straggler, then powers the node off. On line power every poll is a no-op, so the timer firing during an Ansible apply is harmless.
+**How it works.** A systemd timer runs `/usr/local/sbin/nas-ups-guardian` every ~20s. Each poll reads the UPS over the network with `upsc` (read-only; no upsd user provisioning on the NAS). When the UPS is **on battery** and **`battery.charge` ≤ `pve_host_ups_charge_threshold`** (default 60%), it gracefully `qm shutdown`s every running guest on that node, force-stops any straggler, then powers the node off. On line power every poll is a no-op, so the timer firing during an Ansible apply is harmless.
 
 **Ordering across the lab** is a battery-charge gap, not the NUT primary/secondary handshake (the Asustor upsd does not wait for network clients):
 
 | Tier | Trigger | Action |
 |---|---|---|
-| pbs01 | ~60% charge | drain backup/verify/GC, power off first (highest-value NFS client — see `pbs-hosts/README.md`) |
-| PVE nodes | ~50% charge | `qm shutdown` guests, power off |
+| pbs01 | ~70% charge | drain backup/verify/GC, power off first (highest-value NFS client — see `pbs-hosts/README.md`) |
+| PVE nodes | ~60% charge | `qm shutdown` guests, power off |
 | NAS | ~10% charge (its LB flag) | powers off last |
 
 Shutting the PVE guests — the LLM VM especially — also collapses the GPU load, which makes the UPS recompute runtime upward and widens the margin for everything downstream.

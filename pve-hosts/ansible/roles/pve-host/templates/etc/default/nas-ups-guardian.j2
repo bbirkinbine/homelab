@@ -7,9 +7,11 @@ GUARDIAN_MODE=pve
 # Read-only `upsc` access is all the guardian needs. Verify with:
 #   upsc {{ pve_host_ups_nut_target }}
 NAS_NUT_TARGET={{ pve_host_ups_nut_target }}
-# Begin the shutdown when on battery AND charge <= this percent. 50
-# matches the UPS's battery.charge.warning and sits far above the NAS's
-# battery.charge.low (10%); the 50->10 gap is the ordering guarantee.
+# Begin the shutdown when on battery AND charge <= this percent. The
+# threshold sits far above the NAS's battery.charge.low (10%); that
+# charge gap is the ordering guarantee, sized so a worst-case drain
+# (sustained GPU load, a guest ignoring ACPI for the full timeout)
+# finishes before the UPS's runtime-based LB fires the NAS cutoff.
 CHARGE_THRESHOLD={{ pve_host_ups_charge_threshold }}
 # Per-guest ACPI shutdown timeout (s) before force-stop. Generous so the
 # amp-game Minecraft JVM flushes worlds on SIGTERM.

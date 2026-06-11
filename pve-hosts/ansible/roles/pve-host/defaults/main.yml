@@ -89,11 +89,16 @@ pve_host_manage_ups_guardian: false
 # set the real value in inventory and verify with `upsc <target>`.
 pve_host_ups_nut_target: "asustor@192.0.2.10"
 
-# Begin the shutdown when on battery AND charge <= this percent. 50
-# matches the UPS's battery.charge.warning and sits far above the NAS's
-# battery.charge.low (10%) — the 50->10 gap is the ordering guarantee.
-# pbs01 triggers higher (60%) so it clears first; see pbs-host's role.
-pve_host_ups_charge_threshold: 50
+# Begin the shutdown when on battery AND charge <= this percent. 60 sits
+# far above the NAS's battery.charge.low (10%) — that gap is the
+# ordering guarantee — and is sized for the measured worst case: under
+# sustained GPU load the full-charge runtime is ~11 min (~9%/min drain),
+# and a guest that ignores ACPI holds that load through the whole
+# SHUTDOWN_TIMEOUT, during which the UPS's runtime-based LB
+# (battery.runtime.low) can fire the NAS cutoff well above 10% charge.
+# 60 keeps the node poweroff clear of that window. pbs01 triggers
+# higher (70%) so it clears first; see pbs-host's role.
+pve_host_ups_charge_threshold: 60
 
 # Per-guest ACPI shutdown timeout (seconds) before force-stop. Generous
 # for the amp-game Minecraft JVM to flush worlds on SIGTERM.

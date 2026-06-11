@@ -137,17 +137,17 @@ pbs-hosts/
 
 This role can install the same autonomous guardian the `pve-host` role uses, in `pbs` mode. It is **opt-in** because it powers the host off on trigger.
 
-**How it works.** A systemd timer runs `/usr/local/sbin/nas-ups-guardian` every ~20s, reading the UPS over the network with `upsc` (read-only; no upsd user provisioning on the NAS). When the UPS is **on battery** and **`battery.charge` ≤ `pbs_host_ups_charge_threshold`** (default 60%), it stops `proxmox-backup-proxy` to halt new work, waits `pbs_host_ups_drain_grace` seconds for in-flight chunk writes to settle, then powers the host off. The subsequent orderly stop aborts any still-running task and unmounts NFS cleanly while the NAS is still up. PBS is crash-consistent and GC/verify are resumable, so the guardian does **not** wait for a long task to finish — aborting it is safe and preserves battery margin. On line power every poll is a no-op.
+**How it works.** A systemd timer runs `/usr/local/sbin/nas-ups-guardian` every ~20s, reading the UPS over the network with `upsc` (read-only; no upsd user provisioning on the NAS). When the UPS is **on battery** and **`battery.charge` ≤ `pbs_host_ups_charge_threshold`** (default 70%), it stops `proxmox-backup-proxy` to halt new work, waits `pbs_host_ups_drain_grace` seconds for in-flight chunk writes to settle, then powers the host off. The subsequent orderly stop aborts any still-running task and unmounts NFS cleanly while the NAS is still up. PBS is crash-consistent and GC/verify are resumable, so the guardian does **not** wait for a long task to finish — aborting it is safe and preserves battery margin. On line power every poll is a no-op.
 
 **Ordering across the lab** is a battery-charge gap, not the NUT primary/secondary handshake (the Asustor upsd does not wait for network clients):
 
 | Tier | Trigger | Action |
 |---|---|---|
-| pbs01 | ~60% charge | drain backup/verify/GC, power off **first** |
-| PVE nodes | ~50% charge | `qm shutdown` guests, power off |
+| pbs01 | ~70% charge | drain backup/verify/GC, power off **first** |
+| PVE nodes | ~60% charge | `qm shutdown` guests, power off |
 | NAS | ~10% charge (its LB flag) | powers off last |
 
-pbs01 triggers above the PVE 50% on purpose: it is the priority asset and a winding-down GC/verify gets runway to settle before the battery gets tight.
+pbs01 triggers above the PVE 60% on purpose: it is the priority asset and a winding-down GC/verify gets runway to settle before the battery gets tight. Backups run daily with a 30-day retention window, so an early exit costs nothing — an aborted task resumes on the next run.
 
 **Preconditions.** Both pbs01 **and the LAN switch** carrying this poll must be on the UPS; if the switch drops on mains failure, pbs01 can't read the UPS and nothing triggers.
 

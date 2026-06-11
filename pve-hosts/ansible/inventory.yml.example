@@ -42,7 +42,7 @@ pve_hosts:
     # carrying this poll must also be on the UPS. See pve-hosts/README.md.
     pve_host_manage_ups_guardian: false
     pve_host_ups_nut_target: "asustor@192.0.2.10"   # <upsname>@<nas-ip>; verify with `upsc <target>`
-    pve_host_ups_charge_threshold: 50               # trigger at <=50% (NAS cuts off at 10%; pbs01 leads at 60%)
+    pve_host_ups_charge_threshold: 60               # trigger at <=60% (NAS cuts off at 10%; pbs01 leads at 70%)
 
     # Repos — PVE 9.x = Debian 13 (trixie)
     pve_repo_distribution: "trixie"
