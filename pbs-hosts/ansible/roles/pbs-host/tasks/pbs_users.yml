@@ -181,6 +181,13 @@
   loop_control:
     loop_var: acl_entry
     label: "{{ acl_entry.path }} {{ acl_entry.roleid }} {{ acl_entry.ugid }} (stale)"
+  # The loop only iterates over grants pre-computed as stale (present in
+  # the live ACL with a role other than the configured one), so every
+  # executed iteration is a real deletion → changed_when: true. On a
+  # healthy run pbs_acl_grants_to_remove is empty, the loop runs zero
+  # times, and the task reports ok (changed=0). This keeps the "second
+  # run is changed=0" idempotency gate intact.
+  changed_when: true
 
 - name: Grant configured ACL role to user + token on each datastore
   ansible.builtin.command: >-
