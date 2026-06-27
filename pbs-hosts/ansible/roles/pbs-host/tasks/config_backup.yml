@@ -1,0 +1,95 @@
+---
+# Config self-backup (opt-in, gated on pbs_host_manage_config_backup in
+# main.yml — default OFF). Deploys the shared scripts/pbs-config-backup.sh
+# and a systemd timer that tars this host's /etc/proxmox-backup to a
+# directory on the NAS, on a schedule, so a bare-metal rebuild can restore
+# the config. PBS ships nothing for this. Once applied, the host backs
+# itself up with no further operator action.
+#
+# Deliberately a plain tarball, NOT proxmox-backup-client into a
+# datastore: a datastore is a chunk store readable only by a running PBS,
+# so a config backup living inside it can't be opened until PBS is
+# reinstalled + the datastore re-attached — backwards for a DR artifact.
+# A tarball on the NAS is openable from anywhere with no PBS in the loop,
+# and the NAS replicates it to the secondary. See the script header,
+# pbs-hosts/README.md "PBS config self-backup", and the SCAFFOLD-NOTES
+# entry for the full rationale.
+#
+# No API, no token, no namespace, no ACL, no secret on the host — this
+# never touches the PBS API. The job runs as root (via the timer) and
+# reads /etc/proxmox-backup directly. Idempotency: the only state changes
+# are file/template writes and the systemd enable; a healthy re-run is
+# changed=0 (reload/restart fire only when a unit file changed). Mirrors
+# the deploy pattern of tasks/ups.yml.
+
+- name: Install the PBS config-backup script
+  # Single source of truth in scripts/ alongside the other host helpers
+  # (covered by `just shell-lint`). playbook_dir is <repo>/pbs-hosts/
+  # ansible, so ../../scripts resolves to <repo>/scripts.
+  ansible.builtin.copy:  # noqa: no-relative-paths
+    src: "{{ playbook_dir }}/../../scripts/pbs-config-backup.sh"
+    dest: /usr/local/sbin/pbs-config-backup
+    owner: root
+    group: root
+    mode: "0755"
+
+# The destination sits on the NAS NFS mount (nfs.yml ran earlier in the
+# play, so /mnt/pbs-bulk is mounted by now). Creating it here — rather
+# than leaving it to the script's mkdir — sets the mode declaratively and
+# surfaces a non-writable export at apply time instead of at 04:30. Mode
+# 0700 because the tarballs carry authkey.key (a private key).
+- name: Ensure the config-backup destination directory exists on the NAS
+  ansible.builtin.file:
+    path: "{{ pbs_config_backup_dest_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Render the config-backup environment file
+  ansible.builtin.template:
+    src: etc/default/pbs-config-backup.j2
+    dest: /etc/default/pbs-config-backup
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install the config-backup systemd service
+  ansible.builtin.template:
+    src: etc/systemd/system/pbs-config-backup.service.j2
+    dest: /etc/systemd/system/pbs-config-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: pbs_cfgbk_service_unit
+
+- name: Install the config-backup systemd timer
+  ansible.builtin.template:
+    src: etc/systemd/system/pbs-config-backup.timer.j2
+    dest: /etc/systemd/system/pbs-config-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: pbs_cfgbk_timer_unit
+
+# Explicit reload only when a unit changed, so a healthy re-run reports
+# changed=0. Ordered before enable so first-apply units are visible.
+- name: Reload systemd when the config-backup units changed
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: pbs_cfgbk_service_unit is changed or pbs_cfgbk_timer_unit is changed
+
+- name: Enable and start the config-backup timer
+  ansible.builtin.systemd:
+    name: pbs-config-backup.timer
+    enabled: true
+    state: started
+
+# Pick up a changed schedule on an already-running timer. noqa no-handler:
+# intentionally inline — the reload above must run BEFORE this enable, and
+# handlers only fire at end-of-play.
+- name: Restart the config-backup timer when its unit changed  # noqa: no-handler
+  ansible.builtin.systemd:
+    name: pbs-config-backup.timer
+    state: restarted
+  when: pbs_cfgbk_timer_unit is changed

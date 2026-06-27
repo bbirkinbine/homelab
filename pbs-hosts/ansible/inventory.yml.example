@@ -35,6 +35,22 @@ pbs_hosts:
     pbs_host_ups_nut_target: "asustor@192.0.2.10"   # <upsname>@<nas-ip>; verify with `upsc <target>`
     pbs_host_ups_charge_threshold: 70               # trigger at <=70% (ahead of the PVE 60%)
 
+    # ----- config self-backup (opt-in) -----
+    # Tar /etc/proxmox-backup to a directory on the NAS so a rebuild can
+    # restore the config (datastore defs, jobs, auth keys, user/token
+    # shadows) fast. PBS ships nothing for this. The role deploys a
+    # systemd timer, so once enabled the host backs itself up on its own.
+    # A plain tarball (not a PBS datastore snapshot) so it's openable on a
+    # fresh box with no PBS running — see pbs-hosts/README.md "PBS config
+    # self-backup" for the restore runbook. OFF by default; low risk.
+    pbs_host_manage_config_backup: false
+    # Defaults are usually fine; override only to retarget the destination
+    # or change retention/schedule. The dest should be a sibling of the
+    # datastore on the NAS export so it rides replication to the secondary.
+    # pbs_config_backup_dest_dir: "/mnt/pbs-bulk/host-config"
+    # pbs_config_backup_keep_days: 30
+    # pbs_config_backup_schedule: "*-*-* 04:30:00"   # after verify/prune/GC
+
     # Repos — PBS 4.x = Debian 13 (trixie)
     pbs_repo_distribution: "trixie"
 

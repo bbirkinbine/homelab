@@ -149,3 +149,54 @@ pbs_host_ups_dry_run: false
 # time spans). The poll is cheap and a no-op on line power.
 pbs_host_ups_poll_interval: "20s"
 pbs_host_ups_poll_boot_delay: "2min"
+
+# ----- config self-backup (opt-in) ------------------------------------
+# Tar this host's own /etc/proxmox-backup to a directory on the NAS so a
+# bare-metal rebuild can restore the config quickly. PBS ships nothing
+# for this — it backs up clients, not itself. The role deploys the shared
+# scripts/pbs-config-backup.sh + a systemd timer, so once enabled the
+# host backs itself up with no further operator action.
+#
+# The backup's DR value is datastore.cfg (re-attach the existing chunk
+# store on a rebuilt host), the verify/prune/GC job defs, AND the auth
+# keys + user/token shadows — restoring those keeps already-issued tokens
+# (incl. the PVE cluster's pveingress token) valid, so a rebuild doesn't
+# force a cluster-wide re-tokenize. See pbs-hosts/README.md.
+#
+# A plain tarball, NOT proxmox-backup-client into a datastore, on
+# purpose: a datastore is a chunk store readable only by a running PBS,
+# so a config backup inside it can't be opened until PBS is reinstalled +
+# the datastore re-attached — backwards for a DR artifact. A tarball is
+# openable from anywhere with no PBS in the loop. See SCAFFOLD-NOTES for
+# why the API-based design was dropped.
+#
+# OFF by default (opt-in like the UPS guardian). Low risk — it only
+# writes a tarball to the NAS — but it depends on a writable NAS export,
+# so the operator enables it explicitly.
+pbs_host_manage_config_backup: false
+
+# What gets backed up.
+pbs_config_backup_source: "/etc/proxmox-backup"
+
+# Where the tarballs land. A directory on the NAS NFS mount, a sibling of
+# the datastore (not inside it, so PBS never sees these files). Survives
+# a pbs01 disk death and rides the NAS's replication to the secondary.
+# The systemd unit's RequiresMountsFor guards against writing to local
+# disk if the mount is down.
+pbs_config_backup_dest_dir: "/mnt/pbs-bulk/host-config"
+
+# Filename prefix (host name keeps a shared destination unambiguous).
+# Full name: <prefix>-<timestamp>.tar.gz
+pbs_config_backup_prefix: "{{ inventory_hostname }}-config"
+
+# Delete tarballs older than this many days (0 disables pruning). The
+# config is tiny, so retention is just housekeeping.
+pbs_config_backup_keep_days: 30
+
+# Schedule (systemd OnCalendar; placed after the verify/prune/GC
+# windows). The timer is Persistent so a run missed while the host was
+# off is caught up at next boot.
+pbs_config_backup_schedule: "*-*-* 04:30:00"
+
+# 1 = simulate (log intended actions, write/delete nothing). For testing.
+pbs_config_backup_dry_run: false

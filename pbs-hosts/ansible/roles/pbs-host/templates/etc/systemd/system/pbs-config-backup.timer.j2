@@ -1,0 +1,14 @@
+# Managed by Ansible (pbs-host role, tasks/config_backup.yml).
+# Fires the config snapshot on pbs_config_backup_schedule (systemd
+# OnCalendar). Persistent=true so a run missed while the host was off is
+# caught up at the next boot.
+[Unit]
+Description=Schedule the PBS host config self-backup
+
+[Timer]
+OnCalendar={{ pbs_config_backup_schedule }}
+Persistent=true
+Unit=pbs-config-backup.service
+
+[Install]
+WantedBy=timers.target

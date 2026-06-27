@@ -24,6 +24,7 @@ Brings a freshly-installed Proxmox Backup Server 4.x host (Debian 13 / trixie ba
 - Installs the operator's SSH public key for `root`.
 - Tunes sysctl for high-throughput chunk transfers.
 - Optionally installs a **UPS shutdown guardian** (opt-in) that drains in-flight backup/verify/GC and powers the host down on a UPS low-battery event, before the NAS cuts power — see [UPS shutdown guardian](#ups-shutdown-guardian-opt-in) below.
+- Optionally installs a **PBS config self-backup** (opt-in) — deploys a script + systemd timer that tars `/etc/proxmox-backup` to the NAS so a bare-metal rebuild can restore the config. PBS ships nothing for this. See [PBS config self-backup](#pbs-config-self-backup-opt-in) below.
 
 ## What the role does NOT do
 
@@ -63,7 +64,9 @@ pbs-hosts/
             │   ├── users.yml
             │   ├── pbs_datastore.yml
             │   ├── pbs_users.yml
-            │   └── pbs_jobs.yml
+            │   ├── pbs_jobs.yml
+            │   ├── ups.yml             # opt-in UPS shutdown guardian
+            │   └── config_backup.yml   # opt-in config self-backup
             ├── handlers/main.yml
             ├── templates/
             └── meta/main.yml
@@ -166,6 +169,61 @@ pbs01 triggers above the PVE 60% on purpose: it is the priority asset and a wind
 3. Flip `pbs_host_ups_dry_run: false` and re-apply once the dry run looks right.
 
 All knobs (`pbs_host_ups_charge_threshold`, `pbs_host_ups_drain_grace`, `pbs_host_ups_comms_loss_action`, poll cadence) are documented in `defaults/main.yml`. The guardian script is shared with `pve-host` (`scripts/nas-ups-guardian.sh`); the PBS-vs-PVE behavior split is the `GUARDIAN_MODE` env var.
+
+## PBS config self-backup (opt-in)
+
+PBS backs up *clients*, not itself — there's no built-in job that snapshots `/etc/proxmox-backup` (same stance as PVE, which doesn't back up `/etc/pve`). This role can deploy `scripts/pbs-config-backup.sh` plus a systemd timer that tars `/etc/proxmox-backup` to a directory on the NAS, so a rebuild of `pbs01` has a recent copy to restore from. Once applied, the host backs itself up nightly with no operator action; the NAS replicates the tarballs to the secondary, so they survive a NAS failure too.
+
+**What it buys you on a rebuild** — most of `/etc/proxmox-backup` is reconstructed by re-running this role (datastore defs, ACLs, verify/prune/GC jobs). The backup's unique DR value is the rest: `authkey.key` (the ticket-signing private key) plus `shadow.json` / `token.shadow` (user + token secret *hashes*). Restoring those after a reinstall keeps already-issued tokens valid — notably the `pveingress` token the PVE cluster authenticates with — so you don't re-tokenize the cluster and rewrite `storage.cfg`.
+
+**Why a plain tarball, not a PBS datastore snapshot** — a PBS datastore is a content-addressed chunk store, readable only by a *running* PBS server. A config backup that lives inside the datastore can't be opened until PBS has been reinstalled and the datastore re-attached — backwards for a disaster-recovery artifact, since the thing that would help you rebuild is locked behind the rebuild. A tarball on the NAS is self-contained: `tar xzf` it from anywhere — a rescue USB, your laptop, the half-installed box — with no PBS in the loop.
+
+### Enable it
+
+1. **Flip the toggle** in `inventory.yml` (the default destination is a `host-config/` dir beside the datastore on the NAS export):
+   ```yaml
+   pbs_host_manage_config_backup: true
+   # pbs_config_backup_dest_dir: "/mnt/pbs-bulk/host-config"   # override if needed
+   ```
+
+2. **Test with a dry run first.** Set `pbs_config_backup_dry_run: true`, apply, then trigger the unit once and confirm it logs the intended actions without writing:
+   ```bash
+   just pbs-hosts
+   ssh root@pbs01 systemctl start pbs-config-backup.service
+   ssh root@pbs01 journalctl -t pbs-config-backup -n 20
+   ```
+
+3. **Flip `pbs_config_backup_dry_run: false` and re-apply.** Confirm a real tarball lands:
+   ```bash
+   ssh root@pbs01 ls -lh /mnt/pbs-bulk/host-config/
+   ```
+
+The role deploys the script, creates the destination dir (mode `0700` — the tarball carries a private key), renders `/etc/default/pbs-config-backup`, and installs + enables the timer. The unit's `RequiresMountsFor` pins it to the NAS mount, so a run never silently writes to local disk if the export is down. Retention (`pbs_config_backup_keep_days`, default 30) and the schedule (`pbs_config_backup_schedule`, default `04:30` daily, after the verify/prune/GC windows) are documented in `defaults/main.yml`.
+
+### Restore after a rebuild
+
+No key, no PBS, no credentials needed to read the backup — it's a plain tarball. After a fresh PBS install on `pbs01` (hostname + IP set per [`docs/pbs-install.md`](../docs/pbs-install.md)):
+
+1. **Get the tarball.** It's on the NAS at `host-config/<host>-config-<timestamp>.tar.gz`. Reach it however is easiest on the fresh box — mount the export, `scp` it from another machine, or copy it off the secondary NAS.
+
+2. **Stage it and review** (never extract straight over the live config):
+   ```bash
+   mkdir /root/restored-config
+   tar -xzf <host>-config-<timestamp>.tar.gz -C /root/restored-config
+   ls /root/restored-config/proxmox-backup
+   ```
+
+3. **Stop PBS, copy the config in, restart:**
+   ```bash
+   systemctl stop proxmox-backup-proxy proxmox-backup
+   cp -a /root/restored-config/proxmox-backup/. /etc/proxmox-backup/
+   systemctl start proxmox-backup proxmox-backup-proxy
+   ```
+   With `datastore.cfg` restored, PBS re-attaches the existing chunk store on the NAS; with `authkey.key` + the shadow files back, previously-issued tokens (including the cluster's `pveingress`) work again — no PVE-side `storage.cfg` changes needed.
+
+### Security note
+
+The tarball contains `authkey.key` (a private key), so it's sensitive. It's written mode `0600` into a `0700` directory, and the NAS export is LAN-only and ACL'd to `pbs01`. The job never touches the PBS API, so — unlike a `proxmox-backup-client` approach — there are **no** credentials persisted on the host for it. If you want the tarball encrypted at rest, encrypt the NAS share (or pipe the tar through `age`/`gpg` with a key kept off the host) rather than relying on this job.
 
 ## When to run this role
 

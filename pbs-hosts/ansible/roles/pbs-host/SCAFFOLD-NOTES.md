@@ -157,6 +157,30 @@ Added `tasks/ups.yml` (+ three templates under `templates/etc/`) and a `ups` imp
 
 ---
 
+## 2026-06-22 — PBS config self-backup (opt-in)
+
+Added `tasks/config_backup.yml` (+ env/service/timer templates under `templates/etc/`), the shared `scripts/pbs-config-backup.sh`, and a final `config_backup` import in `main.yml` gated on `pbs_host_manage_config_backup` (default **false**). PBS ships nothing to back up its own `/etc/proxmox-backup`; the role deploys the script + a systemd timer that tars it to a directory on the NAS, so a `pbs01` rebuild can restore the config. Prompted by Brian noting PBS's lack of a built-in config backup. Mirrors the `ups.yml` deploy pattern (shared script in `scripts/`, env file + service + timer templates, opt-in toggle).
+
+- **The design pivoted from API-based to a plain tarball — record this so it isn't relitigated.** The first draft used `proxmox-backup-client` to write the config as a snapshot *into* the `bulk` datastore (Brian's original "same datastore the VMs are backed up to" framing). That dragged in a whole chain: a dedicated `configbackup@pbs!writer` token, an operator-managed 0600 secret file, a `host-config` namespace, an ACL grant on both user + token (PBS 4.x intersection privsep), runtime cert-fingerprint pinning, and `--crypt-mode none` (the client defaults to `encrypt`, and encrypting a host's own config with a host-resident key is circular DR). Brian's DR question killed it: **a datastore is a chunk store readable only by a running PBS, so a config backup inside the datastore can't be opened until PBS is reinstalled and the datastore re-attached** — the artifact that helps you rebuild is locked behind the rebuild. A plain `.tar.gz` on the NAS is openable from a rescue USB / laptop / half-installed box with no PBS in the loop, and the NAS already replicates it (SMB) to the secondary. We dropped the entire API path. (Upstream facts the API version verified, if it's ever revived: `--crypt-mode` default is `encrypt` per the PBS `command-syntax` docs; `DatastorePowerUser` is the tightest built-in role with prune-of-owned; token effective perms = user ∩ token.)
+
+- **Brief detour to script-only, then re-wired into the role.** After the pivot Brian first asked to keep *only* the script (drop the role wiring); we reverted to a single self-contained `scripts/pbs-config-backup.sh`, then he decided that since pbs01 is Ansible-managed it should deploy + self-install via the role. Net result: the script keeps baked-in defaults (so it still runs standalone / `DRY_RUN=1`), AND the role renders `/etc/default/pbs-config-backup` to override them from inventory + installs the timer. Best of both.
+
+- **Final shape is deliberately small.** `scripts/pbs-config-backup.sh` tars `PBS_CONFIG_SOURCE` (`/etc/proxmox-backup`) to `PBS_CONFIG_DEST_DIR/<prefix>-<timestamp>.tar.gz` on the NAS and `find -mtime +KEEP_DAYS -delete`s old copies. No PBS API, no token, no secret on the host. The task file is just: copy script, ensure dest dir (`0700`), render env + units, enable timer — no asserts, no `proxmox-backup-manager` calls.
+
+- **DR value is the same regardless of transport.** Most of `/etc/proxmox-backup` is reconstructed by re-running the role; the backup's unique value is `datastore.cfg` (re-attach the existing chunk store on a rebuilt host) + `authkey.key` + `shadow.json`/`token.shadow`. Restoring those keeps already-issued tokens valid — notably the cluster's `pveingress` token — so no cluster-wide re-tokenize / `storage.cfg` rewrite. Restore is just `tar xzf` over a fresh install (README has the staged procedure).
+
+- **Don't-write-to-local-disk guard.** The dest is on the NAS NFS mount. The service unit's `RequiresMountsFor={{ pbs_config_backup_dest_dir }}` pulls in + waits for the mount; the script *also* refuses to run if the dest isn't backed by a mount (`mountpoint`/`findmnt` check) — so a down NAS fails the run loudly instead of silently filling the local root fs (which would then be shadowed when the mount returns).
+
+- **tar race tolerance.** PBS may rewrite a ticket/shadow file mid-read; `tar` then exits 1 ("file changed as we read it"). The script tolerates exit 1 (logs it, snapshot still usable) and only fails on exit ≥ 2 — otherwise `set -e` would abort every run that races a PBS auth. Writes to a `.partial` name and renames on success so a crash never leaves a truncated-but-complete-looking tarball.
+
+- **Security.** The tarball carries `authkey.key` (private key): written `0600` into a `0700` dir, NAS export LAN-only + ACL'd. No credentials persisted on the host for this job at all (the API version's secret-file boundary is gone with the API). Encryption-at-rest, if wanted, is a NAS-share / `age` concern, not this job's.
+
+- **Local validation:** `bash -n` + `shellcheck -S warning` clean (script added to `just shell-lint`); `ansible-playbook --syntax-check` + `ansible-lint` (the new files) pass.
+
+- **Hardware-validated on pbs01 2026-06-22.** Role applied (toggle on), units installed, timer armed (daily 04:30). First live trigger FAILED, and it caught a real bug static analysis missed: the script's mount guard used `findmnt -T -- "$DEST_DIR" -no TARGET` — the `--` terminated option parsing, so `-no TARGET` were swallowed as junk path args, findmnt returned empty, and the guard refused with "resolved to 'none'" even though the NAS was mounted. Fixed to `findmnt -n -o TARGET --target "$DEST_DIR"` (verified it returns `/mnt/pbs-bulk`, fstype nfs4). After the fix the live run wrote `pbs01-config-<ts>.tar.gz` (5.3K, mode 0600) containing all 26 `/etc/proxmox-backup` entries incl. authkey/proxy.key/shadows. Lesson logged: shellcheck can't catch an `findmnt`/option-ordering logic bug — the on-host run is the only gate that does.
+
+---
+
 ## Design vault
 
 The authoritative PBS architecture lives in the project's private Obsidian vault under `[[Proxmox Backup Server — Capabilities and Tiered Storage]]`. Tiering decisions, dedicated-vs-VM rationale, and the future TLS-from-Root-CA plan all live there.

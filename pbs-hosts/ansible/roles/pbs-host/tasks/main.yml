@@ -13,6 +13,8 @@
 #   pbs_datastore   → create datastores via proxmox-backup-manager
 #   pbs_users       → service user + API token for PVE ingress
 #   pbs_jobs        → verify + GC schedules per datastore
+#   config_backup   → self-backup of /etc/proxmox-backup to the NAS
+#                     (opt-in); runs last so the NFS mount is up first
 #
 # import_tasks (not include_tasks) — static composition so syntax
 # errors in any sub-file surface during `--syntax-check`.
@@ -74,3 +76,7 @@
 
 - name: PBS scheduled jobs (verify, GC)
   ansible.builtin.import_tasks: pbs_jobs.yml
+
+- name: PBS config self-backup (tar /etc/proxmox-backup to the NAS)
+  ansible.builtin.import_tasks: config_backup.yml
+  when: pbs_host_manage_config_backup | bool
