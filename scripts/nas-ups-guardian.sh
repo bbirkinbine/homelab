@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # scripts/nas-ups-guardian.sh — autonomous, per-node UPS guardian.
 #
-# Deployed onto each PVE node (by the pve-host role) and onto pbs01 (by
-# the pbs-host role), where a systemd timer runs it every ~20s. Unlike
-# the sibling cluster-*.sh helpers, this is NOT operator-run from a
-# workstation — it fires by itself on a power event. It lives here, with
-# the other cluster shutdown scripts, so there's a single source of
-# truth that `just shell-lint` covers; both roles `copy` it onto the
-# host at /usr/local/sbin/nas-ups-guardian.
+# Deployed onto each PVE node (by the pve-host role), onto pbs01 (by the
+# pbs-host role), and onto pdm01 (by the pdm-host role), where a systemd
+# timer runs it every ~20s. Unlike the sibling cluster-*.sh helpers, this
+# is NOT operator-run from a workstation — it fires by itself on a power
+# event. It lives here, with the other cluster shutdown scripts, so
+# there's a single source of truth that `just shell-lint` covers; all
+# three roles `copy` it onto the host at /usr/local/sbin/nas-ups-guardian.
 #
 # Problem it solves: the Asustor NAS is the NUT primary (the UPS is on
 # its USB), the NFS server for both nas-vms (VM disks) and the PBS chunk
@@ -20,11 +20,16 @@
 # battery.charge over the network and shuts ITSELF down early, leaving
 # the NAS to power off last:
 #
+#   ~75% charge  pdm01 stops the PDM API daemons, then powers off
 #   ~70% charge  pbs01 drains in-flight backup/verify/GC, then powers off
 #   ~60% charge  PVE nodes shut down their guests, then power off
 #   ~10% charge  NAS reaches its own low-battery cutoff, powers off last
 #
-# The ordering guarantee is the charge GAP between each tier's trigger
+# pdm01 is NOT an NFS client and holds no data, so its tier carries no
+# data-path ordering constraint — it goes first only because a management
+# plane is useless during an outage and shedding it recovers a little
+# runtime. The ordering guarantee that matters (NFS writers clearing
+# before the NAS) is the charge GAP between each data-path tier's trigger
 # and the NAS's 10% cutoff — not a handshake. Shutting the PVE guests
 # (the LLM VM especially) also collapses the GPU load and recovers UPS
 # runtime, widening the margin further. See pve-hosts/README.md,
@@ -36,8 +41,8 @@
 # apply is harmless.
 #
 # Config comes from the EnvironmentFile /etc/default/nas-ups-guardian,
-# rendered by the role from inventory. Required: GUARDIAN_MODE (pve|pbs)
-# and NAS_NUT_TARGET (<upsname>@<host>).
+# rendered by the role from inventory. Required: GUARDIAN_MODE
+# (pve|pbs|pdm) and NAS_NUT_TARGET (<upsname>@<host>).
 
 set -euo pipefail
 
@@ -48,6 +53,7 @@ CHARGE_THRESHOLD="${CHARGE_THRESHOLD:-50}"
 SHUTDOWN_TIMEOUT="${SHUTDOWN_TIMEOUT:-180}"   # pve: per-guest ACPI timeout (s)
 EXCLUDE_VMIDS="${EXCLUDE_VMIDS:-}"            # pve: VMIDs never auto-shut
 PBS_DRAIN_GRACE="${PBS_DRAIN_GRACE:-30}"      # pbs: settle window after halting new work (s)
+PDM_DRAIN_GRACE="${PDM_DRAIN_GRACE:-10}"      # pdm: settle window after stopping the API daemons (s)
 COMMS_LOSS_ACTION="${COMMS_LOSS_ACTION:-log}" # log | shutdown
 DRY_RUN="${DRY_RUN:-0}"
 
@@ -120,6 +126,23 @@ drain_pbs() {
   # The subsequent `systemctl poweroff` stops proxmox-backup.service,
   # aborting any still-running task and flushing, then systemd unmounts
   # the NFS datastore — all while the NAS remains powered.
+}
+
+drain_pdm() {
+  # PDM is a management plane only — no guests, no datastore, not an NFS
+  # client — so there is nothing to drain. Stop the API daemons cleanly so
+  # in-flight UI/API requests end gracefully, pause briefly, then let the
+  # orderly poweroff take the host down. PDM has no data-path ordering
+  # constraint against the NAS; sending it early just sheds a
+  # useless-during-an-outage service and recovers a little UPS runtime.
+  if [ "$DRY_RUN" = "1" ]; then
+    log "[dry-run] would stop proxmox-datacenter-api(+privileged), wait ${PDM_DRAIN_GRACE}s, then power off"
+    return 0
+  fi
+  log "stopping PDM API daemons"
+  systemctl stop proxmox-datacenter-api.service proxmox-datacenter-privileged-api.service 2>/dev/null || true
+  log "grace ${PDM_DRAIN_GRACE}s before poweroff"
+  sleep "$PDM_DRAIN_GRACE"
 }
 
 power_off_node() {
@@ -206,7 +229,8 @@ log "TRIGGER on $(hostname) [mode=$MODE]: $reason"
 case "$MODE" in
   pve) drain_pve ;;
   pbs) drain_pbs ;;
-  *)   log "unknown GUARDIAN_MODE='$MODE' (expected pve|pbs) — powering off without a drain" ;;
+  pdm) drain_pdm ;;
+  *)   log "unknown GUARDIAN_MODE='$MODE' (expected pve|pbs|pdm) — powering off without a drain" ;;
 esac
 
 power_off_node

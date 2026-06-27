@@ -1,0 +1,119 @@
+---
+# Config self-backup (opt-in, gated on pdm_host_manage_config_backup in
+# main.yml — default OFF). Tars this host's /etc/proxmox-datacenter-manager
+# to a directory on the NAS, on a schedule, so a bare-metal rebuild can
+# restore the config (remote list, per-remote API tokens + fingerprints,
+# ACLs, users) without re-adding every remote by hand. PDM ships nothing
+# for this. Once applied, the host backs itself up with no further
+# operator action.
+#
+# PDM mounts no NFS by default, and this is the ONLY thing that needs the
+# NAS — so the NFS mount is folded in here rather than in a standing
+# nfs.yml. A default PDM install (this toggle OFF) mounts nothing and
+# pulls no nfs-common.
+#
+# Deliberately a plain tarball, NOT a backup-client snapshot: the artifact
+# stays openable on a fresh box with nothing running. The backup carries
+# per-remote API tokens, so it's sensitive — written 0600 into a 0700 dir
+# on a LAN-only, ACL'd NAS export. The job runs as root via the timer and
+# reads the dir directly; no PDM API, no extra credentials. Idempotency:
+# the only state changes are the mount, file/template writes, and the
+# systemd enable; a healthy re-run is changed=0 (reload/restart fire only
+# when a unit file changed). Mirrors the deploy pattern of tasks/ups.yml.
+#
+# DR value is lower than the PBS equivalent: PDM holds no data, so worst
+# case without this is reinstall-from-ISO + re-add a few remotes via the
+# web UI. The tarball just makes that faster and preserves exact ACL/user
+# state. See pdm-hosts/README.md "PDM config self-backup".
+
+- name: Install NFS client (for the config-backup destination mount)
+  ansible.builtin.apt:
+    name: nfs-common
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# Mount the NAS export that holds the config tarballs. _netdev keeps the
+# mount from blocking boot if the NAS is offline; the systemd unit's
+# RequiresMountsFor (below) is the real guard against writing the
+# token-bearing tarball to local disk. The export ACL on the NAS must
+# allow this host's LAN IP (operator step — see README).
+- name: Mount the NAS export for config backups
+  ansible.posix.mount:
+    path: "{{ pdm_config_backup_nfs_mount }}"
+    src: "{{ nas_ip }}:{{ pdm_config_backup_nfs_export }}"
+    fstype: nfs4
+    opts: "{{ pdm_config_backup_nfs_options }}"
+    state: mounted
+
+- name: Install the PDM config-backup script
+  # Single source of truth in scripts/ alongside the other host helpers
+  # (covered by `just shell-lint`). playbook_dir is <repo>/pdm-hosts/
+  # ansible, so ../../scripts resolves to <repo>/scripts.
+  ansible.builtin.copy:  # noqa: no-relative-paths
+    src: "{{ playbook_dir }}/../../scripts/pdm-config-backup.sh"
+    dest: /usr/local/sbin/pdm-config-backup
+    owner: root
+    group: root
+    mode: "0755"
+
+# The destination sits on the NAS NFS mount (mounted just above).
+# Creating it here — rather than leaving it to the script's mkdir — sets
+# the mode declaratively and surfaces a non-writable export at apply time
+# instead of at 04:30. Mode 0700 because the tarballs carry per-remote
+# API tokens.
+- name: Ensure the config-backup destination directory exists on the NAS
+  ansible.builtin.file:
+    path: "{{ pdm_config_backup_dest_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Render the config-backup environment file
+  ansible.builtin.template:
+    src: etc/default/pdm-config-backup.j2
+    dest: /etc/default/pdm-config-backup
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install the config-backup systemd service
+  ansible.builtin.template:
+    src: etc/systemd/system/pdm-config-backup.service.j2
+    dest: /etc/systemd/system/pdm-config-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: pdm_cfgbk_service_unit
+
+- name: Install the config-backup systemd timer
+  ansible.builtin.template:
+    src: etc/systemd/system/pdm-config-backup.timer.j2
+    dest: /etc/systemd/system/pdm-config-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: pdm_cfgbk_timer_unit
+
+# Explicit reload only when a unit changed, so a healthy re-run reports
+# changed=0. Ordered before enable so first-apply units are visible.
+- name: Reload systemd when the config-backup units changed
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: pdm_cfgbk_service_unit is changed or pdm_cfgbk_timer_unit is changed
+
+- name: Enable and start the config-backup timer
+  ansible.builtin.systemd:
+    name: pdm-config-backup.timer
+    enabled: true
+    state: started
+
+# Pick up a changed schedule on an already-running timer. noqa no-handler:
+# intentionally inline — the reload above must run BEFORE this enable, and
+# handlers only fire at end-of-play.
+- name: Restart the config-backup timer when its unit changed  # noqa: no-handler
+  ansible.builtin.systemd:
+    name: pdm-config-backup.timer
+    state: restarted
+  when: pdm_cfgbk_timer_unit is changed

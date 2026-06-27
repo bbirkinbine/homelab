@@ -39,3 +39,8 @@ pve-hosts/ansible/.ansible_galaxy
 pbs-hosts/ansible/inventory.yml
 pbs-hosts/ansible/*.retry
 pbs-hosts/ansible/.ansible_galaxy
+
+# Same patterns for the layer-0 pdm-host role under pdm-hosts/.
+pdm-hosts/ansible/inventory.yml
+pdm-hosts/ansible/*.retry
+pdm-hosts/ansible/.ansible_galaxy

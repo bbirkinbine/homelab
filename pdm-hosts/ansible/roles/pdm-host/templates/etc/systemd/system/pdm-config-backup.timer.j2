@@ -1,0 +1,14 @@
+# Managed by Ansible (pdm-host role, tasks/config_backup.yml).
+# Fires the config snapshot on pdm_config_backup_schedule (systemd
+# OnCalendar). Persistent=true so a run missed while the host was off is
+# caught up at the next boot.
+[Unit]
+Description=Schedule the PDM host config self-backup
+
+[Timer]
+OnCalendar={{ pdm_config_backup_schedule }}
+Persistent=true
+Unit=pdm-config-backup.service
+
+[Install]
+WantedBy=timers.target

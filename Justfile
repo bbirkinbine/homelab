@@ -150,6 +150,30 @@ pbs-hosts-check:
 pbs-hosts-one host:
     cd pbs-hosts/ansible && ansible-playbook -i inventory.yml site.yml --limit {{host}}
 
+# --- pdm-hosts (layer 0, parallel to pve-hosts / pbs-hosts) ------------------
+#
+# Mirror of the pbs-hosts-* recipes for the Proxmox Datacenter Manager
+# host under pdm-hosts/. Same separation rationale: layer 0 against the
+# bare-metal PDM host, not VMs; PDM's config surface diverges enough that
+# a shared recipe would mostly be branching.
+
+# Install Galaxy collections for the pdm-host role (one-time per workstation).
+pdm-hosts-deps:
+    cd pdm-hosts/ansible && ansible-galaxy collection install -r requirements.yml
+
+# Apply the pdm-host role across all PDM hosts in inventory.yml.
+pdm-hosts:
+    cd pdm-hosts/ansible && ansible-playbook -i inventory.yml site.yml
+
+# Same, but --check --diff (drift report only, no changes applied).
+pdm-hosts-check:
+    cd pdm-hosts/ansible && ansible-playbook -i inventory.yml site.yml --check --diff
+
+# Apply against a single PDM host (useful when more than one PDM host exists).
+#   just pdm-hosts-one pdm01
+pdm-hosts-one host:
+    cd pdm-hosts/ansible && ansible-playbook -i inventory.yml site.yml --limit {{host}}
+
 # --- housekeeping ------------------------------------------------------------
 
 # `tofu fmt -recursive` across every .tf file in the repo.

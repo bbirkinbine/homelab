@@ -1,0 +1,26 @@
+# Managed by Ansible (pdm-host role, tasks/config_backup.yml). Re-rendered
+# on each `just pdm-hosts` run. Tunables for /usr/local/sbin/pdm-config-backup.
+#
+# This job tars PDM_CONFIG_SOURCE to a timestamped .tar.gz under
+# PDM_CONFIG_DEST_DIR (on the NAS) and ages out copies older than
+# PDM_CONFIG_KEEP_DAYS. No PDM API is touched.
+
+# What to back up.
+PDM_CONFIG_SOURCE={{ pdm_config_backup_source }}
+
+# Where the tarballs land. Expected to be a directory on the NAS NFS mount
+# (a subdir of the export, distinct from any PBS datastore), so a pdm01
+# disk death doesn't take the backups with it and the NAS replicates them
+# to the secondary. The systemd unit's RequiresMountsFor guards against
+# writing to local disk if the mount is down.
+PDM_CONFIG_DEST_DIR={{ pdm_config_backup_dest_dir }}
+
+# Filename prefix (the host name keeps backups from different hosts
+# distinct in a shared destination). Full name: <prefix>-<timestamp>.tar.gz
+PDM_CONFIG_PREFIX={{ pdm_config_backup_prefix }}
+
+# Delete tarballs older than this many days (0 disables pruning).
+PDM_CONFIG_KEEP_DAYS={{ pdm_config_backup_keep_days }}
+
+# 1 = simulate (log the intended actions, write/delete nothing). For testing.
+DRY_RUN={{ pdm_config_backup_dry_run | int }}

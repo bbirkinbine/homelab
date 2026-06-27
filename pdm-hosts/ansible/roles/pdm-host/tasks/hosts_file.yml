@@ -1,0 +1,15 @@
+---
+# Render /etc/hosts from inventory. Lists the PDM host(s), all PVE
+# cluster members and the PBS host(s) — the remotes PDM manages — from
+# the mirror `pve_hosts` / `pbs_hosts` groups (see inventory.yml.example
+# for why), and the NAS (so the optional UPS guardian can name its poll
+# target). This lets PDM resolve remote hostnames in logs and the UI
+# without leaning on DNS.
+
+- name: Template /etc/hosts
+  ansible.builtin.template:
+    src: etc/hosts.j2
+    dest: /etc/hosts
+    owner: root
+    group: root
+    mode: "0644"

@@ -1,0 +1,17 @@
+# Managed by Ansible (pdm-host role, tasks/ups.yml).
+# One-shot UPS check, driven by nas-ups-guardian.timer. Reads
+# /etc/default/nas-ups-guardian for mode + NUT target + thresholds. A
+# no-op on line power; only stops the PDM API daemons + powers off this
+# host when the UPS is on battery at/below the configured charge threshold.
+[Unit]
+Description=NAS UPS guardian - stop PDM and shut down on low battery
+ConditionFileIsExecutable=/usr/local/sbin/nas-ups-guardian
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/default/nas-ups-guardian
+ExecStart=/usr/local/sbin/nas-ups-guardian
+# The script powers the host off itself once PDM is stopped; it must
+# never be killed mid-run by a start-timeout (the drain grace can run a
+# few seconds).
+TimeoutStartSec=0

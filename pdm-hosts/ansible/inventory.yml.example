@@ -1,0 +1,104 @@
+---
+# pdm-hosts/ansible/inventory.yml.example
+#
+# Copy to inventory.yml (gitignored) and fill in the placeholder values
+# marked with `# TODO` (the IPs here are RFC 5737 documentation ranges —
+# replace them). One PDM host (`pdm01`) — add more under `hosts:` if/when
+# the lab grows.
+#
+# `pve_hosts` and `pbs_hosts` mirror groups are included for /etc/hosts
+# resolution only. The play targets `pdm_hosts`; the mirror entries are
+# for var lookup, not connection. Keep them synchronized with
+# pve-hosts/ansible/inventory.yml and pbs-hosts/ansible/inventory.yml —
+# when a node IP changes, change it here too.
+
+pdm_hosts:
+  vars:
+    # ----- cluster-wide -----
+    pdm_lan_subnet: "192.0.2.0/24"          # RFC 5737 docs range — replace with real LAN subnet
+
+    # NAS — named only so the optional UPS guardian's poll target reads
+    # cleanly and (when config-backup is enabled) the NFS mount has a
+    # source. PDM does NOT use the NAS for any management function.
+    nas_hostname: "asustor.lan"             # TODO: confirm or change
+    nas_ip: "192.0.2.10"                    # replace with real NAS IP
+
+    # ----- UPS shutdown guardian (opt-in) -----
+    # PDM holds no data and is not an NFS client, so it carries no
+    # data-path ordering constraint — on a power event it just stops its
+    # API daemons and powers off FIRST (75%, above pbs01's 70% and the
+    # PVE nodes' 60%), because a management plane is useless during an
+    # outage. OFF by default (it powers the host off); enable after
+    # testing with pdm_host_ups_dry_run. PRECONDITION: pdm01 AND the LAN
+    # switch carrying this poll must be on the UPS. See pdm-hosts/README.md.
+    pdm_host_manage_ups_guardian: false
+    pdm_host_ups_nut_target: "asustor@192.0.2.10"   # <upsname>@<nas-ip>; verify with `upsc <target>`
+    pdm_host_ups_charge_threshold: 75               # trigger at <=75% (ahead of pbs01's 70%)
+
+    # ----- config self-backup (opt-in) -----
+    # Tar /etc/proxmox-datacenter-manager to the NAS so a rebuild can
+    # restore the remote list + per-remote API tokens + ACLs fast. PDM
+    # ships nothing for this. Lower DR value than the PBS equivalent (PDM
+    # holds no data — worst case is reinstall + re-add a few remotes), and
+    # it is the ONLY thing that makes PDM touch the NAS, so enabling it
+    # mounts an NFS export (pdm_config_backup_nfs_*). PRECONDITION: add
+    # this host's LAN IP to the NAS export ACL. OFF by default. See
+    # pdm-hosts/README.md "PDM config self-backup".
+    pdm_host_manage_config_backup: false
+    # Defaults reuse the PBS backups share with a host-config subdir;
+    # override only to retarget. The export ACL must allow this host.
+    # pdm_config_backup_nfs_export: "/volume1/proxmox-backups"
+    # pdm_config_backup_nfs_mount: "/mnt/pdm-config"
+    # pdm_config_backup_keep_days: 30
+    # pdm_config_backup_schedule: "*-*-* 04:30:00"
+
+    # Repos — PDM = Debian 13 (trixie)
+    pdm_repo_distribution: "trixie"
+
+    # Time sync — same targets as the PVE cluster for consistency
+    chrony_servers:
+      - "time.cloudflare.com"
+      - "0.pool.ntp.org"
+      - "1.pool.ntp.org"
+
+    # SSH key allowed to root@<host>. Single string; multi-line via
+    # YAML `|` if you have more than one.
+    admin_ssh_pubkey: ""                    # TODO: paste your pubkey
+
+    # Common Ansible connection bits — PDM ISO install ships python3.
+    ansible_user: root
+    ansible_python_interpreter: /usr/bin/python3
+
+  hosts:
+    # ---- pdm01 (Proxmox Datacenter Manager) ----
+    pdm01:
+      ansible_host: 192.0.2.30              # replace with real LAN IP
+      pdm_lan_ip: "192.0.2.30"             # replace with real LAN IP
+
+      # hwmon sensor modules (consumed by vms/monitoring/ansible/
+      # install-node-exporter.yml, NOT the pdm-host role). Defaults to
+      # [coretemp] (CPU temps). Override to add a fan-tach module if this
+      # host's super-I/O chip has a mainline driver (run sensors-detect on
+      # the box to find out). See vms/monitoring/README.md Phase 3.
+
+# Mirror of the PVE cluster's inventory for /etc/hosts resolution.
+# Keep synchronized with pve-hosts/ansible/inventory.yml.
+pve_hosts:
+  vars:
+    pve_lan_subnet: "192.0.2.0/24"
+  hosts:
+    pve12t:
+      pve_lan_ip: "192.0.2.12"
+    pve13m:
+      pve_lan_ip: "192.0.2.13"
+    pve13t:
+      pve_lan_ip: "192.0.2.14"
+    pve12t2:
+      pve_lan_ip: "192.0.2.15"
+
+# Mirror of the PBS inventory for /etc/hosts resolution.
+# Keep synchronized with pbs-hosts/ansible/inventory.yml.
+pbs_hosts:
+  hosts:
+    pbs01:
+      pbs_lan_ip: "192.0.2.20"

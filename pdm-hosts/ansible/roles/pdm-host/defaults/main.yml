@@ -1,0 +1,145 @@
+---
+# Defaults for the pdm-host role. Override anything here in inventory
+# (group_vars / host_vars / inline `vars:` blocks). Inventory wins; this
+# file is the fallback so a fresh `inventory.yml` doesn't need to list
+# every knob.
+#
+# See pdm-hosts/CLAUDE.md for the role's full intent. PDM is the central
+# management plane (web UI on 8443) for the PVE clusters + PBS; it holds
+# no guest workloads and no datastore, so this role is a slim cousin of
+# pbs-host — no NFS datastore, no jobs, no API-token ceremony.
+
+# ----- packages -------------------------------------------------------
+# Baseline package set installed by tasks/packages.yml. Aim small: only
+# things the role's own downstream tasks need. state: present, not latest
+# — upgrades are a separate operator decision (see "What this role MUST
+# NOT do" in CLAUDE.md). nfs-common is deliberately NOT here: PDM mounts
+# nothing by default; the optional config-backup pulls nfs-common itself
+# only when enabled.
+pdm_host_packages:
+  - chrony             # time.yml enables + configures chronyd
+  - ufw                # firewall.yml uses community.general.ufw → ufw binary
+
+# ----- apt repos ------------------------------------------------------
+# Where the .sources file lands. trixie + pdm-no-subscription, deb822
+# format. See templates/etc/apt/sources.list.d/pdm-no-subscription.sources.j2.
+pdm_host_sources_file: /etc/apt/sources.list.d/pdm-no-subscription.sources
+
+# Enterprise repo paths shipped by the PDM ISO (deb822 form is the real
+# one; the .list is defensive in case a future installer vintage ships
+# the legacy single-line form). tasks/repo.yml removes both — they point
+# at enterprise.proxmox.com and 401 without a subscription.
+pdm_host_enterprise_list: /etc/apt/sources.list.d/pdm-enterprise.list
+pdm_host_enterprise_sources: /etc/apt/sources.list.d/pdm-enterprise.sources
+
+# ----- firewall -------------------------------------------------------
+# Whether to enable ufw at the end of tasks/firewall.yml. Default on.
+# Set to false during initial bring-up if you want to validate
+# connectivity first without firewall confusion.
+pdm_host_firewall_enabled: true
+
+# Allowed inbound from the LAN subnet (besides ICMP). The PDM web UI +
+# API listen on 8443 (HTTPS).
+pdm_host_firewall_allowed_tcp_ports:
+  - 22                 # SSH
+  - 8443               # PDM web UI + API (HTTPS)
+
+# ----- UPS shutdown guardian (opt-in) ---------------------------------
+# On UPS power loss, stop the PDM API daemons cleanly and power the host
+# off. PDM holds no data and is NOT an NFS client, so it carries no
+# data-path ordering constraint against the NAS — it just needs a graceful
+# off before the NAS hard-cuts at 10%. We send it FIRST (75%, ahead of
+# pbs01's 70% and the PVE nodes' 60%) on the simple logic that a central
+# management plane is useless during an outage and shedding it recovers a
+# sliver of UPS runtime. Ordering is a battery-charge gap, not the NUT
+# primary/secondary handshake (the Asustor upsd does not wait for network
+# clients). See pdm-hosts/README.md and the design vault
+# [[nut-ordered-shutdown-design]].
+#
+# OFF by default: this powers the host off on trigger, so it's opt-in.
+# Enable in inventory AFTER setting pdm_host_ups_nut_target and testing
+# with pdm_host_ups_dry_run: true.
+pdm_host_manage_ups_guardian: false
+
+# "<upsname>@<host>" of the NAS upsd that owns the UPS (read-only upsc
+# access is all that's needed). Placeholder is an RFC 5737 doc address —
+# set the real value in inventory and verify with `upsc <target>`.
+pdm_host_ups_nut_target: "asustor@192.0.2.10"
+
+# Begin the shutdown when on battery AND charge <= this percent. 75 sits
+# ABOVE pbs01's 70% and the PVE nodes' 60% so the management plane clears
+# first. PDM has nothing to drain, so an early exit costs nothing.
+pdm_host_ups_charge_threshold: 75
+
+# Seconds to let the PDM API daemons settle after stopping them, before
+# the orderly poweroff. PDM holds no data, so this is a short courtesy
+# pause rather than a real drain.
+pdm_host_ups_drain_grace: 10
+
+# upsd-unreachable behavior: "log" (conservative default — a network blip
+# must not power off the host) or "shutdown".
+pdm_host_ups_comms_loss_action: "log"
+
+# Simulate without powering anything off (logs the intended action). Set
+# true for the first validation run.
+pdm_host_ups_dry_run: false
+
+# Poll cadence and the post-boot delay before the first poll (systemd
+# time spans). The poll is cheap and a no-op on line power.
+pdm_host_ups_poll_interval: "20s"
+pdm_host_ups_poll_boot_delay: "2min"
+
+# ----- config self-backup (opt-in) ------------------------------------
+# Tar this host's own /etc/proxmox-datacenter-manager to a directory on
+# the NAS so a bare-metal rebuild can restore the config (remote list,
+# per-remote API tokens + fingerprints, ACLs, users) without re-adding
+# every remote by hand. PDM ships nothing for this.
+#
+# PDM mounts no NFS by default, and this is the ONLY thing that would
+# need the NAS — so the NFS mount is folded into tasks/config_backup.yml
+# and comes up only when this toggle is on. A default PDM install mounts
+# nothing.
+#
+# Lower DR value than the PBS equivalent: PDM holds no data, so worst case
+# is reinstall-from-ISO + re-add a handful of remotes via the web UI. The
+# tarball just makes that faster and preserves the exact ACL/user state.
+# A plain tarball (not a backup-client snapshot) so it's openable on a
+# fresh box with nothing running. See pdm-hosts/README.md.
+#
+# OFF by default (opt-in like the UPS guardian). It mounts an NFS export
+# and writes a tarball carrying remote API tokens, so the operator turns
+# it on explicitly (and adds the NAS export ACL — see README).
+pdm_host_manage_config_backup: false
+
+# What gets backed up.
+pdm_config_backup_source: "/etc/proxmox-datacenter-manager"
+
+# NFS export + mount used ONLY when config-backup is enabled. Reuses the
+# PBS backups share by default (add a host-config subdir there); the NAS
+# export ACL must allow this host's LAN IP. Override to a dedicated export
+# if you prefer to keep PDM and PBS artifacts on separate ACLs.
+pdm_config_backup_nfs_export: "/volume1/proxmox-backups"
+pdm_config_backup_nfs_mount: "/mnt/pdm-config"
+pdm_config_backup_nfs_options: "vers=4.2,_netdev,noatime"
+
+# Where the tarballs land — a subdir of the mount, so PDM artifacts stay
+# distinct from the PBS datastore on a shared export. Survives a pdm01
+# disk death and rides the NAS's replication to the secondary. The
+# systemd unit's RequiresMountsFor guards against writing to local disk if
+# the mount is down.
+pdm_config_backup_dest_dir: "{{ pdm_config_backup_nfs_mount }}/host-config"
+
+# Filename prefix (host name keeps a shared destination unambiguous).
+# Full name: <prefix>-<timestamp>.tar.gz
+pdm_config_backup_prefix: "{{ inventory_hostname }}-config"
+
+# Delete tarballs older than this many days (0 disables pruning). The
+# config is tiny, so retention is just housekeeping.
+pdm_config_backup_keep_days: 30
+
+# Schedule (systemd OnCalendar). The timer is Persistent so a run missed
+# while the host was off is caught up at next boot.
+pdm_config_backup_schedule: "*-*-* 04:30:00"
+
+# 1 = simulate (log intended actions, write/delete nothing). For testing.
+pdm_config_backup_dry_run: false

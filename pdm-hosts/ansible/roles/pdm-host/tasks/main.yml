@@ -1,0 +1,66 @@
+---
+# Entry point for the pdm-host role. The order below matters:
+#
+#   repo            → pull packages from the right place before installing
+#   packages        → ufw, chrony land before tasks that need them
+#   time            → time agreement matters; do it early
+#   hosts_file      → other tasks may rely on hostname resolution
+#   ups             → stop the PDM API daemons + poweroff on UPS low battery (opt-in)
+#   firewall        → ufw rules + enable
+#   users           → operator SSH key for root@<host>
+#   config_backup   → self-backup of /etc/proxmox-datacenter-manager to the
+#                     NAS (opt-in); runs last because it mounts the NFS
+#                     export it writes to
+#
+# import_tasks (not include_tasks) — static composition so syntax
+# errors in any sub-file surface during `--syntax-check`.
+#
+# Notably absent vs pbs-host: no NFS datastore mount, no datastore /
+# jobs / API-user tasks, and no sysctl tuning. PDM is a lightweight
+# management plane (API proxy + web UI), not a high-throughput chunk
+# store, so the PBS TCP-buffer tuning has no rationale here.
+
+- name: Assert required per-host vars are set
+  ansible.builtin.assert:
+    that:
+      - pdm_lan_ip | default('') | length > 0
+    fail_msg: >-
+      Inventory is missing pdm_lan_ip for host {{ inventory_hostname }}.
+      See pdm-hosts/ansible/inventory.yml.example.
+    quiet: true
+
+# Empty pubkey is permitted so the initial scaffold runs cleanly.
+# Warn loudly though — root@<host> will not pick up a key.
+- name: Warn if admin_ssh_pubkey is empty
+  ansible.builtin.debug:
+    msg: >-
+      admin_ssh_pubkey is empty. tasks/users.yml will skip installing a
+      root authorized_keys entry. Set it in inventory before the first
+      production apply.
+  when: (admin_ssh_pubkey | default('')) | length == 0
+
+- name: APT repositories
+  ansible.builtin.import_tasks: repo.yml
+
+- name: Base packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Time sync (chrony)
+  ansible.builtin.import_tasks: time.yml
+
+- name: /etc/hosts
+  ansible.builtin.import_tasks: hosts_file.yml
+
+- name: UPS shutdown guardian (stop PDM + poweroff on low battery)
+  ansible.builtin.import_tasks: ups.yml
+  when: pdm_host_manage_ups_guardian | bool
+
+- name: Host firewall (ufw)
+  ansible.builtin.import_tasks: firewall.yml
+
+- name: Operator SSH keys
+  ansible.builtin.import_tasks: users.yml
+
+- name: PDM config self-backup (tar /etc/proxmox-datacenter-manager to the NAS)
+  ansible.builtin.import_tasks: config_backup.yml
+  when: pdm_host_manage_config_backup | bool

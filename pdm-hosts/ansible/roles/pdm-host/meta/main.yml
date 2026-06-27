@@ -1,0 +1,31 @@
+---
+# Galaxy metadata for the pdm-host role. Kept minimal — the role is only
+# ever applied via the sibling site.yml against an inventory of PDM hosts
+# Brian owns. There's no plan to publish to Galaxy.
+
+galaxy_info:
+  role_name: pdm_host
+  author: brian.birkinbine
+  description: >-
+    Layer-0 bootstrap for Proxmox Datacenter Manager hosts (Debian 13 /
+    trixie, installed from the PDM ISO). Configures APT, packages,
+    chrony, /etc/hosts, ufw, and the operator SSH key for root. Optional
+    opt-in extras: a UPS shutdown guardian and a self-backup of
+    /etc/proxmox-datacenter-manager to the NAS. Stops short of adding
+    remotes (that's a web-UI ceremony consuming per-remote API tokens).
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+
+dependencies: []
+
+collections:
+  # ansible.posix.mount — fstab + mount management for the optional
+  #   config-backup NFS share.
+  # ansible.posix.authorized_key — SSH key install for root.
+  - ansible.posix
+  # community.general.ufw — host firewall management.
+  - community.general
