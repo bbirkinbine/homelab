@@ -9,7 +9,7 @@
 # Proxmox API endpoint URL. The bpg/proxmox provider expects scheme
 # + host + port; trailing slash is OK. Any cluster node is fine —
 # pmxcfs replicates user.cfg so the token works against all nodes.
-proxmox_endpoint = "https://pve13m:8006/"
+proxmox_endpoint = "https://pve12t:8006/"
 
 # Full API token in `user@realm!tokenid=secret-uuid` form.
 # See docs/proxmox-tofu-permissions.md for how to mint one. The token's
@@ -19,10 +19,10 @@ proxmox_endpoint = "https://pve13m:8006/"
 #   proxmox_api_token = "kp://Homelab/Tofu/proxmox-api-token"
 proxmox_api_token = "tofu@pve!apply=00000000-0000-0000-0000-000000000000"
 
-# Proxmox node name to create the VM on. Default pve13m (lowest-
-# utilization node at planning time); switch to pve12t / pve13t to
+# Proxmox node name to create the VM on. Default pve12t (lowest-
+# utilization node at planning time); switch to pve13m / pve13t to
 # land elsewhere. Cluster-mobile, so live-migrate after deploy.
-proxmox_node = "pve13m"
+proxmox_node = "pve12t"
 
 # First-boot admin user. cloud-init creates this with sudo + the SSH
 # key below. Ansible runs against this user for all subsequent config.
@@ -33,8 +33,10 @@ admin_username = "monitoring-admin"
 ssh_public_key = "ssh-ed25519 AAAA...your-pubkey... brianbirkinbine@workstation"
 
 # Storage overrides — uncomment to deviate from the defaults in
-# variables.tf (nas-vms for both, which makes the VM cluster-mobile).
-# Flip to local-lvm + per-node `local` only if this role is hardware-
-# pinned (USB / eGPU passthrough) or has a hard I/O-latency requirement.
+# variables.tf. monitoring pins the boot disk to local-lvm (NVMe) because
+# Prometheus' TSDB is fsync-heavy and degrades on NFS; the cloud-init
+# snippet stays on shared nas-vms (I/O-neutral, and moving it on a live VM
+# would force a rebuild — see variables.tf). Flip disk_storage to "nas-vms"
+# for a node move that favors mobility over TSDB write latency.
 # disk_storage     = "local-lvm"
-# snippets_storage = "local"
+# snippets_storage = "nas-vms"

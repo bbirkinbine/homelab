@@ -17,8 +17,8 @@ variable "proxmox_api_token" {
 
 variable "proxmox_node" {
   type        = string
-  default     = "pve13m"
-  description = "Proxmox cluster node to create the VM on. Default pve13m (lowest-utilization node at planning time). Cluster-mobile, so live-migrate after deploy if utilization shifts."
+  default     = "pve12t"
+  description = "Proxmox cluster node to create the VM on. Default pve12t (lowest-utilization node at planning time). Cluster-mobile, so live-migrate after deploy if utilization shifts."
 }
 
 variable "admin_username" {
@@ -33,22 +33,29 @@ variable "ssh_public_key" {
 }
 
 # --- Storage ------------------------------------------------------------------
-# Cluster-mobile defaults: boot disk + cloud-init snippet land on `nas-vms`
-# (Asustor NFS, registered cluster-wide per ADR-0004) so the VM can live-
-# migrate without re-uploading the snippet from a stale per-node `local`
-# store. Override to local-lvm + per-node `local` ONLY if this role is
-# hardware-pinned (USB / eGPU passthrough) or has a hard I/O-latency
-# requirement (see vms/amp-game for the I/O rationale, vms/rootca for the
-# passthrough rationale).
+# monitoring is the I/O-latency exception to the cluster-mobile default:
+# the boot disk lives on `local-lvm` (NVMe) because Prometheus' TSDB is
+# fsync-heavy (frequent small writes + periodic compaction) and degrades
+# on NFS write-latency — same justification class as amp-game (see
+# vms/amp-game for the game-server I/O rationale, vms/rootca for the
+# passthrough rationale). That node-pins the VM.
+#
+# The cloud-init snippet deliberately STAYS on shared `nas-vms`: it is a
+# ~5 KB identity YAML read only when Proxmox regenerates the ide2 drive
+# (the running VM boots from that local-lvm drive, not from NFS), so its
+# location is I/O-neutral. Relocating it on a live VM is also not worth
+# it: `user_data_file_id` is ForceNew in bpg, so moving the snippet to
+# `local` would rebuild the whole VM (blocked by prevent_destroy). A
+# from-scratch rebuild would land it on `local` for free.
 
 variable "disk_storage" {
   type        = string
-  default     = "nas-vms"
-  description = "Proxmox storage pool for the boot disk. Defaults to nas-vms (cluster-shared NFS) so the role is cluster-mobile out of the box."
+  default     = "local-lvm"
+  description = "Proxmox storage pool for the boot disk. OVERRIDES the cluster-mobile nas-vms default (used by openbao / openclaw / nemoclaw): local-lvm (NVMe) suits Prometheus' fsync-heavy TSDB, which degrades on NFS write-latency. Node-pins this role despite the cluster-mobile role shape. Exposed (and shown commented in terraform.tfvars.example) so a planned node move can flip it back without editing the role definition."
 }
 
 variable "snippets_storage" {
   type        = string
   default     = "nas-vms"
-  description = "Proxmox storage for the cloud-init snippet (must allow `snippets` content). Defaults to nas-vms so the snippet stays reachable post-live-migration; per-node `local` breaks the migration target. See docs/cluster-bring-up.md step 8."
+  description = "Proxmox storage for the cloud-init snippet (must allow `snippets` content). Stays on shared nas-vms even though disk_storage node-pins this role: the snippet is a ~5 KB identity YAML read only on ide2-drive regen (I/O-neutral), and relocating it on a live VM would change the ForceNew user_data_file_id and rebuild the VM (see the Storage comment block above). docs/cluster-bring-up.md step 8."
 }

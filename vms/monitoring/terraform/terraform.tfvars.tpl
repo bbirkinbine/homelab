@@ -14,16 +14,18 @@
 # For a manual workflow (no KeePassXC), copy terraform.tfvars.example
 # instead and fill in real values directly.
 
-proxmox_endpoint  = "https://pve13m:8006/"
+proxmox_endpoint  = "https://pve12t:8006/"
 proxmox_api_token = "kp://Homelab/Tofu/proxmox-api-token"
-proxmox_node      = "pve13m"
+proxmox_node      = "pve12t"
 
 admin_username = "monitoring-admin"
 ssh_public_key = "kp://Homelab/Tofu/workstation-ssh-pubkey#Notes"
 
 # Storage overrides — uncomment to deviate from the defaults in
-# variables.tf (nas-vms for both, which makes the VM cluster-mobile).
-# Flip to local-lvm + per-node `local` only if this role is hardware-
-# pinned (USB / eGPU passthrough) or has a hard I/O-latency requirement.
+# variables.tf. monitoring pins the boot disk to local-lvm (NVMe) because
+# Prometheus' TSDB is fsync-heavy and degrades on NFS; the cloud-init
+# snippet stays on shared nas-vms (I/O-neutral, and moving it on a live VM
+# would force a rebuild — see variables.tf). Flip disk_storage to "nas-vms"
+# for a node move that favors mobility over TSDB write latency.
 # disk_storage     = "local-lvm"
-# snippets_storage = "local"
+# snippets_storage = "nas-vms"
