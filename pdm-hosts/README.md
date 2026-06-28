@@ -202,6 +202,8 @@ The tarball contains the per-remote API tokens PDM uses to reach its remotes, so
 |---|---|
 | `pdm01` | Central management plane (remotes: PVE clusters + PBS) |
 
+Hardware: GMKtec NucBox G3 Pro — Intel Core i3-10110U (2C/4T, Comet Lake-U), 16 GB DDR4, 256 GB SATA SSD, 1× 2.5GbE. Same chassis and CPU as `pbs01`; a management plane is undemanding, so the modest spec is deliberate.
+
 ## Related
 
 - Sibling layer-0 patterns: [`pbs-hosts/README.md`](../pbs-hosts/README.md), [`pve-hosts/README.md`](../pve-hosts/README.md).

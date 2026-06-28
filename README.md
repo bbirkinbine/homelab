@@ -41,6 +41,12 @@ nodes; roles pinned to specific hardware (eGPU, USB-HSM) stay node-local.
 | --- | --- |
 | `pbs01` | GMKtec G3 Pro mini-PC running Proxmox Backup Server 4.x — dedicated backup target for the PVE cluster. Bulk datastore lives on NFS from the Asustor. Not part of the corosync cluster. |
 
+### Management plane
+
+| Host | Role |
+| --- | --- |
+| `pdm01` | GMKtec G3 Pro mini-PC running Proxmox Datacenter Manager — central pane over the PVE cluster + `pbs01` (added as remotes). Holds no guest workloads or datastore. Not part of the corosync cluster. |
+
 Operator-side build hosts (macOS for `proxmox-iso` targets, T480 + Ubuntu for the Windows `virtualbox-iso` target) are described in the Tech stack table below — not lab infrastructure.
 
 ## Tech stack
@@ -55,6 +61,7 @@ Operator-side build hosts (macOS for `proxmox-iso` targets, T480 + Ubuntu for th
 | Task runner | `just` | `just plan openbao`, `just apply openbao`, etc. |
 | Host baseline | Ansible role `pve-host` | Brings a fresh PVE 9.x host to cluster-ready state |
 | Backup target | Proxmox Backup Server 4.x | Dedicated mini-PC; see [`pbs-hosts/README.md`](pbs-hosts/README.md) for the layer-0 role + tiering shape |
+| Management plane | Proxmox Datacenter Manager | Dedicated mini-PC (`pdm01`); central pane over the PVE cluster + PBS, see [`pdm-hosts/README.md`](pdm-hosts/README.md) for the layer-0 role |
 | Bootstrap secrets | KeePassXC + YubiKey HMAC | `scripts/hydrate.sh` resolves `kp://` placeholders in `terraform.tfvars.tpl` at apply time |
 | Runtime secrets | OpenBao (Shamir-sealed) | In-cluster KV / PKI store for service-to-service secrets; see [ADR-0002](docs/decisions/0002-openbao-seal-shamir-not-hsm.md) and [`vms/openbao/`](vms/openbao/README.md) |
 | AI / LLM | Ollama | Local model serving on the [eGPU RTX 3090](docs/proxmox-gpu-passthrough.md) (24 GB VRAM) attached to `pve12t`; see [`vms/llm/`](vms/llm/README.md) |

@@ -77,9 +77,10 @@ pdm_hosts:
 
       # hwmon sensor modules (consumed by vms/monitoring/ansible/
       # install-node-exporter.yml, NOT the pdm-host role). Defaults to
-      # [coretemp] (CPU temps). Override to add a fan-tach module if this
-      # host's super-I/O chip has a mainline driver (run sensors-detect on
-      # the box to find out). See vms/monitoring/README.md Phase 3.
+      # [coretemp] (CPU temps). pdm01 is the same GMKtec G3 Pro as pbs01:
+      # an ITE IT8613E super-I/O chip with no mainline Linux driver and no
+      # ASUS WMI fan path, so NO fan RPM is available here — coretemp is
+      # all this host exposes. See vms/monitoring/README.md Phase 3.
 
 # Mirror of the PVE cluster's inventory for /etc/hosts resolution.
 # Keep synchronized with pve-hosts/ansible/inventory.yml.

@@ -87,7 +87,7 @@ Each is a deliberate trim or change, small enough to revert in isolation.
 
 These live outside this role and need separate action:
 
-- **Monitoring.** pdm01 is a new physical host not yet scraped by the monitoring stack. Adding a node_exporter + a Prometheus target + a physical-hosts dashboard entry mirrors how the PVE nodes + pbs01 are wired. Not done here. The `sensors_kernel_modules` comment placeholder in the inventory is for that role's consumption (defaults to `[coretemp]`; run `sensors-detect` on pdm01 to find any fan-tach module).
+- **Monitoring.** pdm01 is a new physical host not yet scraped by the monitoring stack. Adding a node_exporter + a Prometheus target + a physical-hosts dashboard entry mirrors how the PVE nodes + pbs01 are wired. Not done here. pdm01 is the same GMKtec G3 Pro as pbs01 (i3-10110U, 16 GB, 256 GB SATA), so the same sensor story applies: `coretemp` only, no fan RPM (the IT8613E super-I/O has no mainline driver) — `sensors_kernel_modules` defaults to `[coretemp]`.
 - **Design vault** `[[nut-ordered-shutdown-design]]` — add the pdm01 75% tier above pbs01.
 - **`docs/0-scratch-build-order.md`** — a PDM phase could be added after the PBS phase if PDM becomes part of the canonical rebuild order. Left out pending the operator's call (PDM is a convenience layer, not a dependency of any other tier).
 
