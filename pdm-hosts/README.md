@@ -6,7 +6,7 @@ See [`CLAUDE.md`](CLAUDE.md) for the design spec and [`ansible/roles/pdm-host/SC
 
 This role is a slim cousin of [`pbs-hosts/`](../pbs-hosts/README.md): same layer-0 pattern (repo swap, packages, time, hosts, ufw, SSH key, opt-in UPS guardian, opt-in config self-backup), minus everything PBS-specific (no NFS datastore, no datastore/jobs/API-token tasks, no high-throughput sysctl tuning — PDM is a lightweight API proxy + web UI, not a chunk store).
 
-The PDM ISO install that produces a "freshly-installed PDM host" — USB media, BIOS, installer click-through, hostname/IP — is a manual one-time step, the same shape as the PBS ISO install in [`docs/pbs-install.md`](../docs/pbs-install.md). Do that first if you're rebuilding from scratch.
+The PDM ISO install that produces a "freshly-installed PDM host" — USB media, BIOS, installer click-through, hostname/IP — plus the remote/token ceremony live in [`docs/pdm-install.md`](../docs/pdm-install.md). Do the install first if you're rebuilding from scratch; come back here for the baseline, then return to that doc for adding remotes.
 
 ## What the role does
 
@@ -84,7 +84,7 @@ pdm-hosts/
 
 ## Post-baseline manual steps
 
-1. **Add the remotes.** In the PDM web UI (`https://pdm01:8443`, login `root@pam` with the install password) add each PVE cluster and PBS host as a remote: **Remotes → Add**, paste the per-remote API token + TLS fingerprint. Use the same token-from-KeePassXC convention the rest of the lab uses. This is what makes PDM useful; it's manual and one-time.
+1. **Add the remotes.** In the PDM web UI (`https://pdm01:8443`, login `root@pam`) add each PVE cluster and PBS host as a remote with a **dedicated, scoped API token** (not the broad `root@pam` token PDM's "Create token" button auto-makes). The full procedure — creating the scoped `pdm@pve` / `pdm@pbs` identities, storing the secret in the password manager, and migrating off an auto-created root token — is in [`docs/pdm-install.md` §5](../docs/pdm-install.md). This is what makes PDM useful; it's manual and one-time.
 
 2. **TLS cert (future).** PDM ships a self-signed cert. Migration to a cert from the offline Root CA is a separate task, shared with the PBS/PVE TLS work.
 
