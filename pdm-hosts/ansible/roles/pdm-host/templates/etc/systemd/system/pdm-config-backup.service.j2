@@ -1,0 +1,20 @@
+# Managed by Ansible (pdm-host role, tasks/config_backup.yml).
+# One-shot tar of /etc/proxmox-datacenter-manager to the NAS, driven by
+# pdm-config-backup.timer. Reads /etc/default/pdm-config-backup for the
+# source / destination / retention. No PDM API, no credentials.
+[Unit]
+Description=Back up this PDM host's /etc/proxmox-datacenter-manager to the NAS
+ConditionFileIsExecutable=/usr/local/sbin/pdm-config-backup
+# Pull in (and wait for) the NAS mount that backs the destination, so the
+# job never runs before the export is available — and never silently
+# writes the token-bearing tarball to the local root filesystem if the
+# NAS is down.
+RequiresMountsFor={{ pdm_config_backup_dest_dir }}
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/default/pdm-config-backup
+ExecStart=/usr/local/sbin/pdm-config-backup
+# The tar of a small config dir is quick, but allow headroom so a slow
+# NFS round-trip doesn't trip a start timeout.
+TimeoutStartSec=600

@@ -1,0 +1,16 @@
+# Managed by Ansible (pdm-host role, tasks/ups.yml).
+# Polls the UPS every {{ pdm_host_ups_poll_interval }}; the first poll is
+# delayed {{ pdm_host_ups_poll_boot_delay }} after boot so PDM settles.
+# Each poll is cheap (two upsc reads) and a no-op unless the UPS is on
+# battery and low.
+[Unit]
+Description=Poll the UPS; stop PDM and shut down on low battery
+
+[Timer]
+OnBootSec={{ pdm_host_ups_poll_boot_delay }}
+OnUnitActiveSec={{ pdm_host_ups_poll_interval }}
+AccuracySec=5s
+Unit=nas-ups-guardian.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,35 @@
+---
+# Time sync for PDM. PDM aggregates state and metrics across remotes and
+# correlates their timestamps, so wall-clock agreement with the PVE
+# cluster + PBS matters; the rest of the lab uses chrony. We disable
+# systemd-timesyncd so the two daemons don't fight, then install the
+# chrony.conf template and bounce the service on change.
+#
+# Note: `chrony` is in pdm_host_packages so we don't apt-install it
+# again here — the order in tasks/main.yml guarantees the package is
+# present by the time this runs.
+
+- name: Disable and mask systemd-timesyncd
+  ansible.builtin.systemd:
+    name: systemd-timesyncd
+    enabled: false
+    state: stopped
+    masked: true
+  # systemd-timesyncd may not exist on minimal installs; ignore the
+  # "could not find" case so re-runs stay green.
+  failed_when: false
+
+- name: Template /etc/chrony/chrony.conf
+  ansible.builtin.template:
+    src: etc/chrony/chrony.conf.j2
+    dest: /etc/chrony/chrony.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart chrony
+
+- name: Enable and start chrony
+  ansible.builtin.systemd:
+    name: chrony
+    enabled: true
+    state: started

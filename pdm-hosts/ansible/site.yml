@@ -1,0 +1,28 @@
+---
+# pdm-hosts/ansible/site.yml
+#
+# Top-level play for the pdm-host role. Runs the role against all hosts
+# in the `pdm_hosts` inventory group. The role is layer 0: it brings a
+# freshly-installed Proxmox Datacenter Manager host (Debian 13 / trixie,
+# installed from the PDM ISO) to a known-good baseline — repos, packages,
+# time sync, /etc/hosts, ufw, the operator SSH key, and two opt-in extras
+# (UPS shutdown guardian, config self-backup).
+#
+# It deliberately does NOT add remotes (PVE clusters / PBS) to PDM — that
+# is a manual one-time step via the PDM web UI that consumes per-remote
+# API tokens from the operator's credential store. See pdm-hosts/CLAUDE.md
+# for the full rationale.
+#
+# Usage from repo root:
+#   just pdm-hosts                         # full apply across the group
+#   just pdm-hosts-check                   # --check --diff (dry run)
+# Or directly:
+#   cd pdm-hosts/ansible
+#   ansible-playbook -i inventory.yml site.yml
+
+- name: Bootstrap Proxmox Datacenter Manager hosts (layer 0)
+  hosts: pdm_hosts
+  become: true
+  gather_facts: true
+  roles:
+    - role: pdm-host

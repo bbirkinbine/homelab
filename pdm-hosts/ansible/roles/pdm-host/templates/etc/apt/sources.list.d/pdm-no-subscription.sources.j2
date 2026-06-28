@@ -1,0 +1,26 @@
+# /etc/apt/sources.list.d/pdm-no-subscription.sources — managed by Ansible
+# (pdm-host role). Replaces the stock enterprise sources file
+# (pdm-enterprise.sources) which 401s without a Proxmox subscription.
+# Format: deb822 (multi-stanza), which PDM defaults to.
+# Reference: https://pdm.proxmox.com/docs/installation.html
+#
+# Note the repo URL: /pdm (NOT /pve or /pbs — those are the PVE/PBS
+# repos). Component is `pdm-no-subscription`.
+
+Types: deb
+URIs: http://deb.debian.org/debian
+Suites: {{ pdm_repo_distribution }} {{ pdm_repo_distribution }}-updates
+Components: main contrib
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: http://security.debian.org/debian-security
+Suites: {{ pdm_repo_distribution }}-security
+Components: main contrib
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: http://download.proxmox.com/debian/pdm
+Suites: {{ pdm_repo_distribution }}
+Components: pdm-no-subscription
+Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg

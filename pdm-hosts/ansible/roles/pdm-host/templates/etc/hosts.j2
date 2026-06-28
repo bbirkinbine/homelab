@@ -1,0 +1,34 @@
+# /etc/hosts — managed by Ansible (pdm-host role).
+# Resolves the PDM host(s), the remotes PDM manages (all PVE cluster
+# members + the PBS host(s), so the UI and logs don't need DNS), and the
+# NAS (named only so the optional UPS guardian's poll target reads
+# cleanly). The PVE/PBS entries come from the mirror `pve_hosts` /
+# `pbs_hosts` inventory groups — see the comment in inventory.yml.example
+# for why we mirror instead of importing.
+
+127.0.0.1   localhost
+::1         localhost ip6-localhost ip6-loopback
+
+# PDM host(s)
+{% for h in groups['pdm_hosts'] | sort %}
+{{ hostvars[h].pdm_lan_ip }}   {{ h }}.local {{ h }}
+{% endfor %}
+
+# PVE cluster members (resolution only — this play does NOT target them)
+{% if groups['pve_hosts'] is defined %}
+{% for h in groups['pve_hosts'] | sort %}
+{{ hostvars[h].pve_lan_ip }}   {{ h }}.local {{ h }}
+{% endfor %}
+{% endif %}
+
+# PBS host(s) (resolution only — this play does NOT target them)
+{% if groups['pbs_hosts'] is defined %}
+{% for h in groups['pbs_hosts'] | sort %}
+{{ hostvars[h].pbs_lan_ip }}   {{ h }}.local {{ h }}
+{% endfor %}
+{% endif %}
+
+{% if nas_ip is defined and nas_hostname is defined %}
+# NAS (Asustor AS6706T — named here only for the UPS guardian poll target)
+{{ nas_ip }}   {{ nas_hostname }}
+{% endif %}

@@ -1,0 +1,31 @@
+# /etc/chrony/chrony.conf — managed by Ansible (pdm-host role).
+# PDM correlates timestamps and metrics across the remotes it manages,
+# so agreement with the PVE cluster + PBS wall-clock matters. Same NTP
+# targets as the rest of the lab (see pve-hosts/.../chrony.conf.j2). We
+# deliberately disable systemd-timesyncd so the two NTP daemons don't
+# fight (see tasks/time.yml).
+
+# Use the NTP servers defined in inventory (chrony_servers). Falls
+# back to a sensible Cloudflare + pool.ntp.org pair via defaults if
+# inventory leaves it empty.
+{% for server in chrony_servers | default(['time.cloudflare.com', '0.pool.ntp.org']) %}
+server {{ server }} iburst
+{% endfor %}
+
+# Drift file location (Debian default — keep as-is so apt upgrades
+# don't fight the path).
+driftfile /var/lib/chrony/chrony.drift
+
+# Allow chronyd to step the clock if it's >1s out at start. The
+# default of "only slew" can take hours to converge on a freshly-
+# installed host whose RTC drifted.
+makestep 1.0 3
+
+# Sync the kernel RTC every hour so the BIOS clock is sane if the
+# kernel reboots ungracefully.
+rtcsync
+
+# Log directory follows the Debian package default. PDM is a client
+# only — it does not serve time to anything, so there is no `allow`
+# stanza (unlike the PBS template, which keeps the option open).
+logdir /var/log/chrony

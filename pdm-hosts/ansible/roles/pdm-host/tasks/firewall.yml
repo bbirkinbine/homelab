@@ -1,0 +1,55 @@
+---
+# Host-level firewall via ufw. PDM is a Debian host (it does not ship
+# pve-firewall, which is PVE-specific and tied to pmxcfs); ufw is the
+# standard Debian way and keeps the rule set close to the host.
+#
+# Default policies: deny inbound, allow outbound. Allow from the LAN
+# subnet: SSH (22), PDM web UI + API (8443/HTTPS). PDM reaches its
+# remotes (PVE/PBS APIs) and the NAS upsd as a *client*, so no inbound
+# rule is needed for those (the kernel associates return traffic with the
+# outbound connection state).
+#
+# Idempotency: community.general.ufw reports `changed` only when a rule
+# is added, removed, or its insertion order changes.
+
+- name: Set ufw default inbound policy to deny
+  community.general.ufw:
+    default: deny
+    direction: incoming
+
+- name: Set ufw default outbound policy to allow
+  community.general.ufw:
+    default: allow
+    direction: outgoing
+
+# loop_var is `tcp_port`, NOT `port`. The community.general.ufw module
+# has its own `port:` parameter; using `port` as a loop_var shadows it
+# and the Jinja resolution order between Ansible's loop_var binding and
+# the module's keyword argument is brittle. `tcp_port` keeps them
+# distinct.
+- name: Allow LAN-subnet TCP to baseline ports
+  community.general.ufw:
+    rule: allow
+    src: "{{ pdm_lan_subnet }}"
+    proto: tcp
+    port: "{{ tcp_port }}"
+  loop: "{{ pdm_host_firewall_allowed_tcp_ports }}"
+  loop_control:
+    loop_var: tcp_port
+
+# ICMP echo intentionally NOT managed via a community.general.ufw rule.
+# The module's `proto:` enum doesn't accept `icmp` — only AH/ANY/ESP/
+# IPv6/TCP/UDP/GRE/IGMP/VRRP. Debian's stock `/etc/ufw/before.rules`
+# already accepts echo-request (and the other standard ICMP types) on
+# INPUT before the user-rule chain, so PDM is pingable from the LAN
+# without any extra rule here. If we ever need to restrict echo-request
+# to `pdm_lan_subnet` specifically (vs the globally-pingable default),
+# the path is a `before.rules` template — not a `ufw:` task.
+
+# Enabling ufw at the end (rather than the start) means the rule set is
+# in place before the firewall switches on — avoiding the brief window
+# where SSH could be dropped against an empty rule table.
+- name: Enable ufw
+  community.general.ufw:
+    state: enabled
+  when: pdm_host_firewall_enabled | bool

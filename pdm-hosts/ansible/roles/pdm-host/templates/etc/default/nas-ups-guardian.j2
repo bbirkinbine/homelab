@@ -1,0 +1,24 @@
+# Managed by Ansible (pdm-host role, tasks/ups.yml). Re-rendered on each
+# `just pdm-hosts` run. Tunables for /usr/local/sbin/nas-ups-guardian.
+#
+# Mode: pdm = stop the PDM API daemons, settle briefly, then power off.
+GUARDIAN_MODE=pdm
+# NUT target "<upsname>@<host>" of the NAS upsd that owns the UPS.
+# Read-only `upsc` access is all the guardian needs. Verify with:
+#   upsc {{ pdm_host_ups_nut_target }}
+NAS_NUT_TARGET={{ pdm_host_ups_nut_target }}
+# Begin the shutdown when on battery AND charge <= this percent. PDM holds
+# no data and is not an NFS client, so it carries no data-path ordering
+# constraint — we send it FIRST (above pbs01 and the PVE nodes) because a
+# management plane is useless during an outage and shedding it recovers a
+# sliver of UPS runtime.
+CHARGE_THRESHOLD={{ pdm_host_ups_charge_threshold }}
+# Seconds to let the PDM API daemons settle after stopping them, before
+# the orderly poweroff. PDM holds no data, so this is a short courtesy
+# pause, not a real drain.
+PDM_DRAIN_GRACE={{ pdm_host_ups_drain_grace }}
+# upsd-unreachable behavior: "log" (conservative; a network blip must not
+# power off the host) or "shutdown".
+COMMS_LOSS_ACTION={{ pdm_host_ups_comms_loss_action }}
+# 1 = simulate (log the intended action, never power off). For testing.
+DRY_RUN={{ pdm_host_ups_dry_run | int }}

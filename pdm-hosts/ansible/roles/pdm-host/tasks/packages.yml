@@ -1,0 +1,16 @@
+---
+# Install the baseline operator package set defined in
+# defaults/main.yml:pdm_host_packages. state=present (not latest) — see
+# CLAUDE.md "What this role MUST NOT do" on apt upgrade. Override the
+# package list via inventory if a host has different needs (rare).
+#
+# nfs-common is intentionally NOT in the baseline: PDM mounts nothing by
+# default. The optional config-backup installs nfs-common itself, only
+# when enabled (tasks/config_backup.yml).
+
+- name: Install baseline packages
+  ansible.builtin.apt:
+    name: "{{ pdm_host_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
