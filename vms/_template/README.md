@@ -132,8 +132,8 @@ LAN" decision is per-role, not a blanket default.
   and `snippets_storage` to `local` — cross-reference
   [vms/rootca/](../rootca/) for the pinned pattern.
 - **Ubuntu 24.04 base** from `packer/ubuntu-24-04-base/`. Per-node
-  template VMIDs map (9100 on pve12t, 9101 on pve13m, 9102 on pve13t)
-  per [ADR-0006](../../docs/decisions/0006-packer-templates-per-node.md).
+  template VMIDs map (9100 on pve12t, 9101 on pve13m, 9102 on pve13t,
+  9103 on pve12t2) per [ADR-0006](../../docs/decisions/0006-packer-templates-per-node.md).
 - **bpg/proxmox provider** pinned `~> 0.66`. Matches the rest of the
   lab; bump deliberately when the module bumps.
 - **Identity-only cloud-init.** Hostname + admin user + SSH key.
