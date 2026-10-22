@@ -85,9 +85,9 @@ heading() {
 # Service VMIDs live in 8000-8099; workload VMIDs in 100-399 (ADR-0008).
 role_class() {
   case "$1" in
-    openbao|openclaw|nemoclaw|hermes|rootca|monitoring) echo service ;;
-    amp-game|llm|win-client)                            echo workload ;;
-    *)                                           echo unknown ;;
+    openbao|openclaw|nemoclaw|hermes|rootca|monitoring|telemetry) echo service ;;
+    amp-game|llm|win-client)                                      echo workload ;;
+    *)                                                            echo unknown ;;
   esac
 }
 

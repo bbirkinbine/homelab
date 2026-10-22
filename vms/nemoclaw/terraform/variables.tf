@@ -18,7 +18,7 @@ variable "proxmox_api_token" {
 variable "proxmox_node" {
   type        = string
   default     = "pve12t"
-  description = "Proxmox cluster node to create the VM on. nemoclaw is cluster-mobile, so any of pve12t / pve13m / pve13t is fine — co-locate based on the host's spare 16 GiB rather than any architectural pin."
+  description = "Proxmox cluster node to create the VM on. nemoclaw is cluster-mobile, so any of pve12t / pve13m / pve13t / pve12t2 is fine — co-locate based on the host's spare 16 GiB rather than any architectural pin."
 }
 
 variable "admin_username" {

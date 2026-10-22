@@ -1,0 +1,12 @@
+---
+# Handlers for the telemetry role. Triggered via `notify:` in tasks/main.yml.
+
+# Picks up /etc/docker/daemon.json changes. On a fresh VM this fires
+# before the stack exists, so nothing is interrupted; on a live VM it
+# restarts every container (compose services come back via their
+# restart policy).
+- name: Restart docker
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted
+  when: not ansible_check_mode

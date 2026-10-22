@@ -1,0 +1,11 @@
+---
+# Galaxy collections this role pulls. Install with:
+#   just ansible-deps telemetry
+# Or directly:
+#   ansible-galaxy collection install -r requirements.yml
+#
+# community.general matches the other roles' baseline (ufw module and
+# common helpers); the telemetry tasks use ansible.builtin only today.
+collections:
+  - name: community.general
+    version: ">=8.0.0"

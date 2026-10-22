@@ -18,7 +18,7 @@ variable "proxmox_api_token" {
 variable "proxmox_node" {
   type        = string
   default     = "pve12t"
-  description = "Proxmox cluster node to create the VM on. Default pve12t. Cluster-mobile roles can target any of pve12t / pve13m / pve13t and live-migrate after deploy."
+  description = "Proxmox cluster node to create the VM on. Default pve12t. Cluster-mobile roles can target any of pve12t / pve13m / pve13t / pve12t2 and live-migrate after deploy."
 }
 
 variable "admin_username" {
