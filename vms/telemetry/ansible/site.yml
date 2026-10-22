@@ -1,0 +1,17 @@
+---
+# vms/telemetry/ansible/site.yml
+#
+# Top-level play for the telemetry role. Runs the `telemetry` role
+# against the inventory's `telemetry_servers` host group.
+#
+# Usage from repo root:
+#   just ansible telemetry
+# Or directly:
+#   cd vms/telemetry/ansible && ansible-playbook -i inventory.yml site.yml
+
+- name: Bootstrap telemetry
+  hosts: telemetry_servers
+  become: true
+  gather_facts: true
+  roles:
+    - role: telemetry

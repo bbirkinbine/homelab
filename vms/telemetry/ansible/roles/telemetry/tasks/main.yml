@@ -1,0 +1,241 @@
+---
+# Prep an Ubuntu 24.04 VM to run the telemetry stack (OTel Collector,
+# VictoriaMetrics, Loki, Tempo) under Docker Compose. The role stops
+# short of deploying the stack itself — its compose and config files
+# live in a separate project and are copied onto the VM by the operator
+# along with an untracked .env, so pinning them here would fork the
+# source of truth. Instead the role gets the host to a state where
+# `docker compose up -d` in the stack directory Just Works:
+#
+#   * Docker (Docker Inc.'s apt repo + docker-ce / compose plugin),
+#     enabled at boot, with container log rotation in daemon.json.
+#   * The data root (/srv/telemetry) with the per-folder ownership the
+#     stack's containers expect (UID 10001 for Collector/Loki/Tempo).
+#   * An admin-owned directory to scp the stack's files into.
+#   * apt-daily timers active so security patches flow.
+#
+# Deliberately NOT here:
+#   * ufw rules for the stack's ports. Docker publishes container ports
+#     through its own iptables chains, which bypass ufw entirely — an
+#     `allow 4318/tcp` rule would be decorative. Exposure is controlled
+#     by the stack binding every published port to the VM's LAN IP only
+#     (TELEMETRY_BIND_ADDR in its .env), and verified from outside the
+#     LAN rather than read off the firewall rules.
+#   * node_exporter. Installed by the monitoring role's guest playbook
+#     (vms/monitoring/ansible/install-node-exporter-guests.yml) like
+#     every other guest VM, so this role doesn't double-own it. Its
+#     port (9100) doesn't collide with the stack's.
+#
+# Idempotency: every task is an apt / file / copy / systemd module call.
+# Re-running against a live VM is a no-op; it never deletes or recurses
+# into the data root.
+#
+# Check-mode behavior: the four repo-bootstrap tasks (apt prereqs,
+# keyrings dir, Docker key + repo) carry `check_mode: false` so they
+# run live even under --check — without the keyring + repo on disk the
+# downstream `apt: name=docker-ce` fails with "No package matching".
+# Same convention as nemoclaw / openclaw / pbs-hosts. Tasks that need a
+# live docker.service or docker group carry `when: not ansible_check_mode`.
+
+- name: Wait for cloud-init to finish
+  ansible.builtin.command: cloud-init status --wait
+  changed_when: false
+  # cloud-init might still be finishing apt-daily / unattended-upgrades
+  # background work the moment Ansible first connects. Waiting here
+  # avoids dpkg-lock races on the first apt task below.
+
+- name: Ensure dependencies for the Docker apt repo are installed
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+    # No cache_valid_time — the Packer base wipes /var/lib/apt/lists/*
+    # but leaves /var/cache/apt/pkgcache.bin mtime recent, so
+    # cache_valid_time would mask the empty lists and `apt install`
+    # would fail on a fresh clone. Same pattern as the other roles.
+  check_mode: false
+
+- name: Ensure /etc/apt/keyrings exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  check_mode: false
+
+# --- Docker apt repo + install -----------------------------------------------
+
+# Docker Inc.'s archive key is ASCII-armored; signed-by= scopes it to
+# this one repo instead of trusting it for every apt source (the modern
+# replacement for apt-key). Same layout as the nemoclaw role.
+- name: Install Docker apt archive key
+  ansible.builtin.get_url:
+    url: "{{ telemetry_docker_key_url }}"
+    dest: "{{ telemetry_docker_keyring }}"
+    owner: root
+    group: root
+    mode: "0644"
+  check_mode: false
+
+- name: Add Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: "{{ telemetry_docker_repo }}"
+    filename: docker
+    state: present
+    update_cache: true
+  check_mode: false
+
+- name: Install Docker engine + plugins
+  ansible.builtin.apt:
+    name: "{{ telemetry_docker_packages }}"
+    state: present
+
+- name: Install stack tooling (rsync, zstd, jq)
+  ansible.builtin.apt:
+    name: "{{ telemetry_tool_packages }}"
+    state: present
+
+# Rotation defaults apply to containers created after the daemon
+# restart; the stack isn't deployed yet on a fresh VM, so every
+# container picks them up. On a live VM, recreate the stack
+# (`docker compose up -d --force-recreate`) after changing these.
+# Only log-opts are set — the containerd image store stays at the
+# docker-ce default, which the stack's digest check depends on.
+- name: Configure Docker daemon (container log rotation)
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: "{{ telemetry_docker_daemon_config | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    telemetry_docker_daemon_config:
+      log-driver: json-file
+      log-opts:
+        max-size: "{{ telemetry_docker_log_max_size }}"
+        max-file: "{{ telemetry_docker_log_max_file }}"
+  notify: Restart docker
+
+# docker-ce's unit already orders itself After= and Wants=
+# network-online.target, which the stack needs: its ports bind to the
+# VM's LAN IP, and that bind fails (without retry) if Docker starts
+# before the address exists. Nothing to override here — the reboot
+# check in the stack's bring-up proves it.
+#
+# Skip in --check: the docker-ce install above only dry-runs, so the
+# unit files aren't on disk and the systemd module would fail with
+# "Could not find the requested service docker: host".
+- name: Enable and start docker.service
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+- name: Enable and start containerd.service
+  ansible.builtin.systemd:
+    name: containerd
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+# Takes effect on the admin user's next SSH login (group membership is
+# read at session start). Skipped in --check because the docker group
+# only exists once docker-ce is really installed.
+- name: Add admin user to docker group
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: true
+  when:
+    - telemetry_admin_docker_group
+    - not ansible_check_mode
+
+# --- Data root + stack directory --------------------------------------------
+
+- name: Ensure telemetry data root exists
+  ansible.builtin.file:
+    path: "{{ telemetry_data_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# No `recurse:` — only the top-level folder's owner is managed. The
+# containers own everything they write below it, and re-running the
+# role must never re-chown the archive.
+- name: Ensure telemetry data folders exist with container ownership
+  ansible.builtin.file:
+    path: "{{ telemetry_data_root }}/{{ item.name }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "0755"
+  loop: "{{ telemetry_data_dirs }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Ensure stack directory exists (scp target for compose + configs)
+  ansible.builtin.file:
+    path: "{{ telemetry_stack_dir }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+# --- Patching ---------------------------------------------------------------
+#
+# Same pattern as hermes / openbao / openclaw / nemoclaw — the Packer
+# base masks apt-daily timers so locked-down roles can stay frozen. This
+# is a long-running service VM and we want security patches flowing.
+# unattended-upgrades' default allowed-origins are the Ubuntu security
+# pockets only, so Docker's repo (docker-ce, containerd.io) is NOT
+# auto-upgraded — no surprise daemon restarts under the stack; bump
+# Docker deliberately with `apt upgrade`.
+
+- name: Unmask apt-daily timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    masked: false
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+- name: Enable unattended-upgrades config
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::Download-Upgradeable-Packages "1";
+      APT::Periodic::AutocleanInterval "7";
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Start apt-daily timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
+
+- name: Show next-steps reminder
+  ansible.builtin.debug:
+    msg: >-
+      Host is ready for the telemetry stack: Docker + compose plugin from
+      Docker's apt repo, data root {{ telemetry_data_root }} with container
+      ownership, stack directory {{ telemetry_stack_dir }} owned by
+      {{ ansible_user }}. Next (operator): scp the stack's tracked compose
+      + config files into {{ telemetry_stack_dir }}, create .env from
+      env.example with TELEMETRY_ROOT={{ telemetry_data_root }} and
+      TELEMETRY_BIND_ADDR=<the VM's reserved LAN IP>, then
+      `docker compose up -d`. Log in again first so the docker group
+      membership applies. See vms/telemetry/README.md.
+  when: not ansible_check_mode

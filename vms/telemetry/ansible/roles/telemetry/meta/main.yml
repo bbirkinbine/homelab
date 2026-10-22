@@ -1,0 +1,23 @@
+---
+galaxy_info:
+  role_name: telemetry
+  author: brian.birkinbine
+  description: >-
+    Prepare Ubuntu 24.04 (Packer base) for the telemetry stack: Docker
+    Engine + compose plugin from Docker's apt repo, the /srv/telemetry data
+    root with container ownership, and an admin-owned stack directory.
+    Leaves deploying the stack's compose files as an operator step.
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+
+dependencies: []
+
+collections:
+  # The role itself only uses ansible.builtin modules today; community.general
+  # stays listed (min 8.0.0, matching the other roles) so a later ufw rule
+  # or helper doesn't need a second ansible-deps round-trip.
+  - community.general

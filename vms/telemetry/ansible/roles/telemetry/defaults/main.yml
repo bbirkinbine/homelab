@@ -1,0 +1,87 @@
+---
+# Defaults for the telemetry role. Override in inventory, group_vars, or
+# host_vars if a deployment diverges; the defaults match a single-host
+# Ubuntu 24.04 deployment running the telemetry stack (OTel Collector,
+# VictoriaMetrics, Loki, Tempo) under Docker Compose.
+
+# --- Docker ---
+# Docker Inc.'s own apt repo (docker-ce + docker-compose-plugin), not
+# Ubuntu's `docker.io`. The stack's runbook names this install source,
+# and its image-digest check relies on the containerd image store that
+# fresh docker-ce installs enable by default. Same repo + key layout as
+# the nemoclaw role (vms/nemoclaw/ansible/roles/nemoclaw/defaults/main.yml);
+# variables are telemetry_-prefixed so the two roles stay independent.
+telemetry_docker_keyring: /etc/apt/keyrings/docker.asc
+telemetry_docker_key_url: "https://download.docker.com/linux/ubuntu/gpg"
+# ansible_facts["…"] form rather than the top-level `ansible_*` vars
+# because ansible-core 2.24 deprecates INJECT_FACTS_AS_VARS.
+telemetry_docker_arch: "{{ ansible_facts['architecture'] | regex_replace('^x86_64$', 'amd64') | regex_replace('^aarch64$', 'arm64') }}"
+telemetry_docker_repo: >-
+  deb [arch={{ telemetry_docker_arch }} signed-by={{ telemetry_docker_keyring }}]
+  https://download.docker.com/linux/ubuntu {{ ansible_facts['distribution_release'] }} stable
+telemetry_docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+
+# Container log rotation, written to /etc/docker/daemon.json. Docker's
+# default json-file driver never rotates, the stack's compose file sets
+# no per-service logging limits, and the data root shares the root
+# filesystem with the OS — so an unbounded container log is the one
+# thing on this VM that can fill the disk without anyone writing data.
+# 3 x 50 MiB per container keeps several days of `docker compose logs`
+# history for the bring-up checks.
+telemetry_docker_log_max_size: "50m"
+telemetry_docker_log_max_file: "3"
+
+# Add the cloud-init admin user to the `docker` group so the operator
+# can run `docker compose` without sudo. The admin user already has
+# NOPASSWD sudo from cloud-init, so docker-group membership (root-
+# equivalent) doesn't widen access. Same call as the llm role.
+telemetry_admin_docker_group: true
+
+# --- Data root ---
+# TELEMETRY_ROOT in the stack's .env. Lives on the root filesystem (the
+# VM has one 250 GiB disk; see terraform/main.tf for the sizing note).
+telemetry_data_root: /srv/telemetry
+
+# UID/GID the OTel Collector, Loki and Tempo images run as. Their bind-
+# mounted folders must be owned by it or the containers fail on first
+# write. The UID has no passwd entry on the VM — that's expected.
+telemetry_container_uid: 10001
+telemetry_container_gid: 10001
+
+# One entry per folder under telemetry_data_root, with the ownership
+# the stack's runbook prescribes:
+#   * archive, collector-state, loki, tempo — written by UID 10001.
+#   * victoria — VictoriaMetrics runs as root; root-owned.
+#   * landing — the ship job rsyncs into it over SSH as the admin user,
+#     and UID 10001 (the Collector) reads it, so admin-owned + 0755.
+# The archive under the data root is the stack's irreplaceable record:
+# this role only ever creates folders and sets their top-level owner —
+# no recurse, no deletes.
+telemetry_data_dirs:
+  - { name: archive, owner: "{{ telemetry_container_uid }}", group: "{{ telemetry_container_gid }}" }
+  - { name: collector-state, owner: "{{ telemetry_container_uid }}", group: "{{ telemetry_container_gid }}" }
+  - { name: loki, owner: "{{ telemetry_container_uid }}", group: "{{ telemetry_container_gid }}" }
+  - { name: tempo, owner: "{{ telemetry_container_uid }}", group: "{{ telemetry_container_gid }}" }
+  - { name: victoria, owner: root, group: root }
+  - { name: landing, owner: "{{ ansible_user }}", group: "{{ ansible_user }}" }
+
+# Where the operator copies the stack's tracked compose + config files
+# (compose.yaml, env.example, otel-collector.yaml, loki-config.yaml,
+# tempo.yaml) with scp. Owned by the admin user so the copy needs no
+# sudo. Kept apart from the data root so a config re-copy can never
+# touch data.
+telemetry_stack_dir: /opt/telemetry/collector
+
+# Packages the stack's bring-up and backup steps use on the VM: rsync is
+# the ship job's receiving end (GNU rsync), zstd reads the archive, jq
+# checks restored archive lines. The Ubuntu base already ships them;
+# listing them pins the dependency so a slimmer base can't drop them.
+telemetry_tool_packages:
+  - rsync
+  - zstd
+  - jq
